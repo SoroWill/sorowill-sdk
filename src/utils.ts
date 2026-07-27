@@ -1,4 +1,5 @@
 import type { Beneficiary, Will } from './types';
+import { WillStatus } from './types';
 
 /** USDC (and most Soroban SEP-41 tokens) use 7 decimal places, matching classic Stellar asset precision. */
 const USDC_DECIMALS = 7;
@@ -106,4 +107,58 @@ export function validateBeneficiaries(beneficiaries: Beneficiary[]): boolean {
   }
   const sum = beneficiaries.reduce((acc, b) => acc + b.percentage, 0);
   return sum === 100;
+}
+
+/** Returns whether `address` is one of `will`'s guardians. */
+export function isGuardian(will: Will, address: string): boolean {
+  return will.guardians.includes(address);
+}
+
+/** Returns whether `address` is one of `will`'s beneficiaries. */
+export function isBeneficiary(will: Will, address: string): boolean {
+  return will.beneficiaries.some((b) => b.address === address);
+}
+
+/**
+ * Describes what the wallet at `connectedAddress` can currently do for
+ * `will`, combining its status, owner, guardians, and beneficiaries with
+ * the check-in deadline. Intended to drive which action buttons a UI shows.
+ */
+export interface NextActionableState {
+  canCheckIn: boolean;
+  canTrigger: boolean;
+  canEmergencyCheckIn: boolean;
+  canRelease: boolean;
+  canCancel: boolean;
+  canGuardianVote: boolean;
+}
+
+/**
+ * Computes {@link NextActionableState} for `will` from the perspective of
+ * `connectedAddress`. Only the owner may check in, cancel, or emergency
+ * check in; triggering and releasing are permissionless once their
+ * on-chain preconditions are met; and guardians may vote for an early
+ * release at any point before the will is released or cancelled.
+ */
+export function getNextActionableState(
+  will: Will,
+  connectedAddress: string,
+): NextActionableState {
+  const isOwner = will.owner === connectedAddress;
+  const isWillGuardian = isGuardian(will, connectedAddress);
+
+  const graceDeadlineMs =
+    (will.triggerTime?.getTime() ?? 0) + will.gracePeriodDays * 86_400 * 1000;
+  const isGracePeriodExpired = will.triggerTime !== null && Date.now() >= graceDeadlineMs;
+
+  return {
+    canCheckIn: isOwner && will.status === WillStatus.Active,
+    canTrigger: will.status === WillStatus.Active && isCheckinDue(will),
+    canEmergencyCheckIn: isOwner && will.status === WillStatus.Triggered && !isGracePeriodExpired,
+    canRelease: will.status === WillStatus.Triggered && isGracePeriodExpired,
+    canCancel: isOwner && will.status === WillStatus.Active,
+    canGuardianVote:
+      isWillGuardian &&
+      (will.status === WillStatus.Active || will.status === WillStatus.Triggered),
+  };
 }

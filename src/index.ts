@@ -101,6 +101,7 @@ export type {
   WillEventSource,
   WillEventSubscription,
 } from './events';
+export {
   AlreadyVotedError,
   CheckinNotDueError,
   GracePeriodExpiredError,
@@ -155,8 +156,12 @@ export {
   calculateShares,
   formatDeadline,
   formatUSDC,
+  getNextActionableState,
   getTimeUntilCheckin,
+  isBeneficiary,
   isCheckinDue,
+  isGuardian,
   toStroops,
   validateBeneficiaries,
 } from './utils';
+export type { NextActionableState } from './utils';
