@@ -1,4 +1,40 @@
 /**
+ * Numeric error codes returned by the SoroWill contract, mirroring the
+ * `WillError` enum in the contract's `errors.rs`.
+ *
+ * **IMPORTANT**: These values must be kept in sync manually with the
+ * contract repo until the spec-drift tooling proposed there exists.
+ *
+ * @see {@link https://github.com/SoroWill/contracts/blob/main/src/errors.rs}
+ */
+export enum WillErrorCode {
+  /** The will was not found. */
+  WillNotFound = 1,
+  /** The caller is not the will owner. */
+  NotOwner = 2,
+  /** The will is not in the Active state. */
+  WillNotActive = 3,
+  /** The will has not been triggered. */
+  WillNotTriggered = 4,
+  /** The grace period has not expired yet. */
+  GracePeriodNotExpired = 5,
+  /** The grace period has already expired. */
+  GracePeriodExpired = 6,
+  /** Beneficiary percentages do not sum to 100. */
+  InvalidPercentages = 7,
+  /** The guardian has already voted in this cycle. */
+  AlreadyVoted = 8,
+  /** The caller is not a guardian of the will. */
+  NotGuardian = 9,
+  /** The check-in deadline has not yet passed. */
+  CheckinNotDue = 10,
+  /** The supplied amount is zero. */
+  ZeroAmount = 11,
+  /** Too many beneficiaries (exceeds {@link MAX_BENEFICIARIES}). */
+  TooManyBeneficiaries = 12,
+}
+
+/**
  * A single beneficiary entry: an address and the percentage of the will's
  * balance it is entitled to receive when the inheritance is released.
  */
