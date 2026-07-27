@@ -20,9 +20,10 @@ fix/N-short-description
 ## Pull requests
 
 - Your PR description must reference the issue it resolves (e.g. `Closes #12`).
-- Make sure `npm run typecheck`, `npm test`, and `npm run build` all pass cleanly before requesting review.
+- Make sure `npm run typecheck`, `npm run lint`, `npm test`, and `npm run build` all pass cleanly before requesting review.
 - Add or update unit tests in `test/` for any behavior change to `src/utils.ts` or type validation logic.
 - Keep the public API in `src/index.ts` in sync with any new exports.
+- **If your PR changes public behavior** (new features, breaking changes, deprecations, or behavioral fixes), add a bullet entry under the `[Unreleased]` section of [`CHANGELOG.md`](./CHANGELOG.md). The release workflow (`publish.yml`) triggers from published GitHub Releases, and the changelog is the authoritative record of what shipped in each version.
 
 ## Local setup
 
