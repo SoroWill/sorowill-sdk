@@ -119,6 +119,8 @@ export interface EventSubscription {
   readonly transport: EventSubscriptionTransport;
   readonly closed: boolean;
   close(): void;
+}
+
 /** Options accepted by individual SDK calls. */
 export interface RequestOptions {
   /** Overrides the client's default RPC timeout for this call. */
