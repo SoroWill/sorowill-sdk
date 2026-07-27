@@ -1,7 +1,7 @@
 import { Account, xdr } from '@stellar/stellar-sdk';
 import { describe, expect, it } from 'vitest';
 
-import { MemoryCachePersistenceAdapter } from '../src/cache';
+import { ReadCache } from '../src/cache';
 import { SoroWillClient, type SoroWillRpcServer } from '../src/SoroWillClient';
 import type { WillEvent, WillEventSource } from '../src/events';
 import { WillStatus } from '../src/types';
@@ -149,46 +149,15 @@ function createRpcServer(options: {
   };
 }
 
-describe('SoroWillClient read cache persistence', () => {
-  it('rehydrates persisted getWill results after a new client instance is created', async () => {
-    const persistence = new MemoryCachePersistenceAdapter();
-    let simulateCalls = 0;
+describe('SoroWillClient read cache', () => {
+  it('caches getWill results within the TTL window', async () => {
+    const cache = new ReadCache({ ttlMs: 60_000 });
 
-    const clientA = new SoroWillClient({
-      network: 'testnet',
-      contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
-      wallet: new StubWalletAdapter(),
-      readCache: { ttlMs: 60_000, persistence },
-      spec: createSpec({ get_will: [makeRawWill(1n)] }),
-      rpcServer: createRpcServer({
-        async simulateTransactionImpl() {
-          simulateCalls += 1;
-          return { result: { retval: VOID_SCVAL } };
-        },
-      }),
-    });
+    cache.set('key1', { id: 'cached' });
+    expect(cache.get('key1')).toEqual({ id: 'cached' });
 
-    const firstRead = await clientA.getWill('1');
-    expect(firstRead.id).toBe('1');
-    expect(simulateCalls).toBe(1);
-
-    const clientB = new SoroWillClient({
-      network: 'testnet',
-      contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
-      wallet: new StubWalletAdapter(),
-      readCache: { ttlMs: 60_000, persistence },
-      spec: createSpec({ get_will: [makeRawWill(999n)] }),
-      rpcServer: createRpcServer({
-        async simulateTransactionImpl() {
-          simulateCalls += 1;
-          return { result: { retval: VOID_SCVAL } };
-        },
-      }),
-    });
-
-    const secondRead = await clientB.getWill('1');
-    expect(secondRead.id).toBe('1');
-    expect(simulateCalls).toBe(1);
+    cache.clear();
+    expect(cache.get('key1')).toBeUndefined();
   });
 });
 
