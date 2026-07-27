@@ -104,12 +104,20 @@ vi.mock('@stellar/stellar-sdk', () => {
     Transaction: class MockTransaction {},
     TransactionBuilder: MockTransactionBuilder,
     contract: {
-      Spec: {
-        fromWasm: () => ({
-          funcArgsToScVals: (_method: string, args: Record<string, unknown>) => [args],
-          funcResToNative: (_method: string, value: unknown) => value,
-        }),
-      },
+      Spec: Object.assign(
+        function Spec(_entries?: unknown) {
+          return {
+            funcArgsToScVals: (_method: string, args: Record<string, unknown>) => [args],
+            funcResToNative: (_method: string, value: unknown) => value,
+          };
+        },
+        {
+          fromWasm: () => ({
+            funcArgsToScVals: (_method: string, args: Record<string, unknown>) => [args],
+            funcResToNative: (_method: string, value: unknown) => value,
+          }),
+        },
+      ),
     },
     rpc: {
       Api: {
@@ -125,7 +133,7 @@ vi.mock('@stellar/stellar-sdk', () => {
 });
 
 import { SoroWillClient } from '../src/SoroWillClient';
-import { WillStatus, type EventSubscription, type SoroWillEvent } from '../src/types';
+import { WillStatus, WillErrorCode, type EventSubscription, type SoroWillEvent } from '../src/types';
 
 function rawWill(id: number): {
   balance: bigint;
@@ -248,6 +256,21 @@ describe('SoroWillClient', () => {
     expect(mockState.sendTransaction).not.toHaveBeenCalled();
   });
 
+  it('WillErrorCode matches contract error codes', () => {
+    expect(WillErrorCode.WillNotFound).toBe(1);
+    expect(WillErrorCode.NotOwner).toBe(2);
+    expect(WillErrorCode.WillNotActive).toBe(3);
+    expect(WillErrorCode.WillNotTriggered).toBe(4);
+    expect(WillErrorCode.GracePeriodNotExpired).toBe(5);
+    expect(WillErrorCode.GracePeriodExpired).toBe(6);
+    expect(WillErrorCode.InvalidPercentages).toBe(7);
+    expect(WillErrorCode.AlreadyVoted).toBe(8);
+    expect(WillErrorCode.NotGuardian).toBe(9);
+    expect(WillErrorCode.CheckinNotDue).toBe(10);
+    expect(WillErrorCode.ZeroAmount).toBe(11);
+    expect(WillErrorCode.TooManyBeneficiaries).toBe(12);
+  });
+
   it('subscribes to events over polling transport', async () => {
     const seen: SoroWillEvent[] = [];
     let subscription: EventSubscription | undefined;
@@ -293,6 +316,38 @@ describe('SoroWillClient', () => {
     expect(subscription.transport).toBe('polling');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(seen.map((event) => event.id)).toEqual(['evt-1']);
+  });
+
+  it('skips WASM fetch when specJson is provided', async () => {
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CCONTRACT',
+      specJson: new Uint8Array(),
+    });
+
+    mockState.simulateTransaction.mockResolvedValue({
+      result: { retval: rawWill(1) },
+    });
+
+    await client.getWill('1');
+
+    // The cached spec path skips getContractWasmByContractId entirely
+    expect(mockState.getContractWasmByContractId).not.toHaveBeenCalled();
+  });
+
+  it('falls back to lazy WASM fetch when specJson is not provided', async () => {
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CCONTRACT',
+    });
+
+    mockState.simulateTransaction.mockResolvedValue({
+      result: { retval: rawWill(1) },
+    });
+
+    await client.getWill('1');
+
+    expect(mockState.getContractWasmByContractId).toHaveBeenCalled();
   });
 
   it('subscribes to events over WebSocket transport and falls back to polling when streaming is unavailable', async () => {

@@ -166,6 +166,22 @@ export interface SoroWillClientOptions {
   rpcServer?: SoroWillRpcServer;
   /** Advanced override for testing or preloaded contract specs. */
   spec?: ContractSpecLike | Promise<ContractSpecLike>;
+  /**
+   * Optional pre-serialized contract spec. Accepts any format the Stellar
+   * SDK {@link Spec} constructor supports: a `Buffer`, base64 XDR string,
+   * array of `xdr.ScSpecEntry`, or array of base64-encoded entry strings.
+   *
+   * When provided, the client skips the `getContractWasmByContractId`
+   * round-trip on first call and constructs the `Spec` directly from this
+   * data. Falls back to the existing lazy-fetch behavior when not
+   * provided, so this is fully backwards compatible.
+   *
+   * **Tradeoff**: Faster first call, but the caller is responsible for
+   * keeping the bundled spec in sync with the deployed contract. Use
+   * this only when you control the spec artifact (e.g. from the contracts
+   * repo's spec-publishing pipeline, issue #97).
+   */
+  specJson?: Buffer | string | unknown[];
   /** Optional override for the Soroban RPC endpoint. */
   rpcUrl?: string;
   /** Optional override for the Stellar network passphrase. */
@@ -346,6 +362,7 @@ export class SoroWillClient {
   private readonly retryOptions: RpcRetryOptions;
   private readonly readCache: ReadCache | undefined;
   private readonly specOverride: ContractSpecLike | Promise<ContractSpecLike> | undefined;
+  private readonly specJsonOverride: Buffer | string | unknown[] | undefined;
   private specPromise: Promise<ContractSpecLike> | undefined;
   private readonly eventSubscription?: WillEventSubscription;
 
@@ -362,6 +379,7 @@ export class SoroWillClient {
     this.retryOptions = { ...DEFAULT_RETRY_OPTIONS, ...options.retry };
     this.readCache = options.readCache === false ? undefined : new ReadCache(options.readCache);
     this.specOverride = options.spec;
+    this.specJsonOverride = options.specJson;
 
     if (this.readCache && options.eventSource) {
       this.eventSubscription = options.eventSource.subscribe((event) => {
@@ -645,7 +663,12 @@ export class SoroWillClient {
   /** Lazily fetches and caches the contract's spec from its deployed wasm. */
   private async getSpec(): Promise<ContractSpecLike> {
     if (!this.specPromise) {
-      if (this.specOverride) {
+      if (this.specJsonOverride !== undefined) {
+        // Spec constructor natively accepts Buffer, string (base64 XDR),
+        // xdr.ScSpecEntry[], or string[] — all match specJson's union type.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        this.specPromise = Promise.resolve(new Spec(this.specJsonOverride as Buffer));
+      } else if (this.specOverride) {
         this.specPromise = Promise.resolve(this.specOverride);
       } else {
         this.specPromise = this.server
