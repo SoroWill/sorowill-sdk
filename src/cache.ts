@@ -15,6 +15,7 @@ export interface CachePersistenceAdapter {
 export interface ReadCacheOptions {
   namespace?: string;
   ttlMs?: number;
+  now?: () => number;
   persistence?: CachePersistenceAdapter;
 }
 
@@ -26,9 +27,8 @@ interface CacheEntry {
 }
 
 const DEFAULT_CACHE_NAMESPACE = 'sorowill:read-cache';
-const DEFAULT_TTL_MS = 60_000;
 
-export function serializeCacheValue(value: unknown): string {
+function serializeCacheValue(value: unknown): string {
   return JSON.stringify(value, (_key, currentValue) => {
     if (typeof currentValue === 'bigint') {
       return { __type: 'bigint', value: currentValue.toString() };
@@ -37,7 +37,7 @@ export function serializeCacheValue(value: unknown): string {
   });
 }
 
-export function deserializeCacheValue<T>(value: string): T {
+function deserializeCacheValue<T>(value: string): T {
   return JSON.parse(value, (_key, currentValue) => {
     if (
       currentValue &&
@@ -81,11 +81,13 @@ export function createReadCacheKey(method: string, args: Record<string, unknown>
 export class ReadCache {
   private readonly entries = new Map<string, CacheEntry>();
   private readonly ttlMs: number;
+  private readonly now: () => number;
   private readonly persistence: CachePersistenceAdapter | undefined;
   private readonly readyPromise: Promise<void>;
 
   constructor(options: ReadCacheOptions = {}) {
-    this.ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
+    this.ttlMs = options.ttlMs ?? 60_000;
+    this.now = options.now ?? Date.now;
     this.persistence = options.persistence;
     this.readyPromise = this.hydrate();
   }
@@ -94,42 +96,13 @@ export class ReadCache {
     await this.readyPromise;
   }
 
-  async get<T>(key: string): Promise<T | undefined> {
-    await this.ready();
-
-export interface ReadCacheOptions {
-  ttlMs: number;
-  now?: () => number;
-}
-
-interface CacheEntry<T> {
-  expiresAt: number;
-  value: T;
-}
-
-export class ReadCache {
-  private readonly ttlMs: number;
-  private readonly now: () => number;
-  private readonly entries = new Map<string, CacheEntry<unknown>>();
-
-  constructor(options: ReadCacheOptions) {
-    if (!Number.isFinite(options.ttlMs) || options.ttlMs <= 0) {
-      throw new Error('Read cache ttlMs must be a positive number');
-    }
-
-    this.ttlMs = options.ttlMs;
-    this.now = options.now ?? Date.now;
-  }
-
   get<T>(key: string): T | undefined {
     const entry = this.entries.get(key);
     if (!entry) {
       return undefined;
     }
 
-    if (entry.expiresAt !== null && entry.expiresAt <= Date.now()) {
-      await this.delete(key);
-    if (entry.expiresAt <= this.now()) {
+    if (entry.expiresAt !== null && entry.expiresAt <= this.now()) {
       this.entries.delete(key);
       return undefined;
     }
@@ -137,22 +110,20 @@ export class ReadCache {
     return entry.value as T;
   }
 
-  async set(key: string, value: unknown, willIds: Iterable<string> = []): Promise<void> {
-    await this.ready();
-
+  set(key: string, value: unknown, willIds: Iterable<string> = []): void {
     const entry: CacheEntry = {
       key,
       value,
-      expiresAt: this.ttlMs > 0 ? Date.now() + this.ttlMs : null,
+      expiresAt: this.ttlMs > 0 ? this.now() + this.ttlMs : null,
       willIds: new Set(willIds),
     };
 
     this.entries.set(key, entry);
-    await this.persistence?.write(this.toPersistedEntry(entry));
+    void this.persistence?.write(this.toPersistedEntry(entry));
   }
 
   async invalidateByWillId(willId: string): Promise<void> {
-    await this.ready();
+    await this.readyPromise;
 
     const keysToDelete: string[] = [];
     for (const [key, entry] of this.entries) {
@@ -164,10 +135,9 @@ export class ReadCache {
     await Promise.all(keysToDelete.map((key) => this.delete(key)));
   }
 
-  async clear(): Promise<void> {
-    await this.ready();
+  clear(): void {
     this.entries.clear();
-    await this.persistence?.clear();
+    void this.persistence?.clear();
   }
 
   private async delete(key: string): Promise<void> {
@@ -181,7 +151,7 @@ export class ReadCache {
     }
 
     const persistedEntries = await this.persistence.readAll();
-    const now = Date.now();
+    const now = this.now();
 
     for (const persistedEntry of persistedEntries) {
       if (persistedEntry.expiresAt !== null && persistedEntry.expiresAt <= now) {
@@ -323,14 +293,5 @@ export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter
       request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'));
       request.onsuccess = () => resolve(request.result);
     });
-  set<T>(key: string, value: T): void {
-    this.entries.set(key, {
-      value,
-      expiresAt: this.now() + this.ttlMs,
-    });
-  }
-
-  clear(): void {
-    this.entries.clear();
   }
 }

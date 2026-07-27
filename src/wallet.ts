@@ -17,33 +17,6 @@ export interface WalletConnection {
  * it (see {@link freighterAdapter}).
  */
 export interface WalletAdapter {
-  /**
-   * Returns the connected account's public key (`G...`). May prompt the user
-   * to select or connect an account, depending on the wallet.
-   */
-  getPublicKey(): Promise<string>;
-  /**
-   * Signs a base64-encoded transaction XDR envelope for the given network and
-   * resolves with the signed XDR.
-   */
-  signTransaction(
-    transactionXdr: string,
-    opts: { networkPassphrase: string },
-  ): Promise<string>;
-}
-
-/**
- * Checks whether the Freighter browser extension is installed. This does not
- * require the current site to be connected/allowed — it only checks for the
- * extension's presence.
- */
-export async function isFreighterInstalled(): Promise<boolean> {
-  const { isConnected, error } = await freighterApi.isConnected();
-  if (error) {
-    return false;
-  }
-  return isConnected;
-export interface WalletAdapter {
   isConnected(): Promise<boolean>;
   connect(): Promise<WalletConnection>;
   reconnect(): Promise<WalletConnection>;
@@ -124,6 +97,11 @@ export class FreighterWalletAdapter implements WalletAdapter {
 
 const defaultFreighterWalletAdapter = new FreighterWalletAdapter();
 
+/**
+ * Checks whether the Freighter browser extension is installed. This does not
+ * require the current site to be connected/allowed — it only checks for the
+ * extension's presence.
+ */
 export async function isFreighterInstalled(): Promise<boolean> {
   return await defaultFreighterWalletAdapter.isConnected();
 }
@@ -153,6 +131,10 @@ export function getDefaultWalletAdapter(): WalletAdapter {
  * is supplied, so existing Freighter-based usage keeps working unchanged.
  */
 export const freighterAdapter: WalletAdapter = {
+  isConnected: () => defaultFreighterWalletAdapter.isConnected(),
+  connect: () => defaultFreighterWalletAdapter.connect(),
+  reconnect: () => defaultFreighterWalletAdapter.reconnect(),
+  disconnect: () => defaultFreighterWalletAdapter.disconnect(),
   getPublicKey,
   signTransaction,
 };

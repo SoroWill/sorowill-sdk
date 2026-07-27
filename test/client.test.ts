@@ -241,6 +241,9 @@ describe('HookManager', () => {
     const ctx: AfterInvokeContext = { method: 'test', args: { a: 1 }, timestamp: '', txHash: 'abc', error: null, durationMs: 42 };
     await hm.runAfterInvoke(ctx);
     expect(captured).toBe(ctx);
+  });
+});
+
 describe('ReadCache', () => {
   it('returns cached values before expiry', () => {
     let now = 1_000;
