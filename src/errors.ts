@@ -16,6 +16,42 @@ export class RequestTimeoutError extends SoroWillError {
   }
 }
 
+/**
+ * Raised when Freighter's `isConnected()` API reports an error other than
+ * the extension simply being absent — e.g. it was called outside a browser,
+ * or Freighter itself hit an internal error. Distinguishing this from "not
+ * installed" avoids prompting an install when Freighter is actually present
+ * but in an unexpected state.
+ */
+export class FreighterInstallCheckError extends SoroWillError {
+  readonly code: number;
+
+  constructor(code: number, message: string, options?: ErrorOptions) {
+    super(`Unable to determine whether Freighter is installed: ${message}`, options);
+    this.code = code;
+  }
+}
+
+/**
+ * Raised when the connected wallet's active network does not match the
+ * network {@link SoroWillClient} was configured with — e.g. Freighter is set
+ * to mainnet while the app instantiated a testnet client. Thrown before a
+ * transaction is built and sent for signing.
+ */
+export class WalletNetworkMismatchError extends SoroWillError {
+  readonly expectedNetworkPassphrase: string;
+  readonly actualNetworkPassphrase: string;
+
+  constructor(expectedNetworkPassphrase: string, actualNetworkPassphrase: string, options?: ErrorOptions) {
+    super(
+      `The connected wallet is on network "${actualNetworkPassphrase}", but this client is configured for "${expectedNetworkPassphrase}". Switch the wallet's network or reconfigure the client before signing.`,
+      options,
+    );
+    this.expectedNetworkPassphrase = expectedNetworkPassphrase;
+    this.actualNetworkPassphrase = actualNetworkPassphrase;
+  }
+}
+
 /** Base class for typed errors returned by the SoroWill contract. */
 export class WillContractError extends SoroWillError {
   constructor(

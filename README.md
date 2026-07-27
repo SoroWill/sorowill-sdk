@@ -14,6 +14,14 @@
 npm install @sorowill/sdk
 ```
 
+`@stellar/freighter-api` is an optional peer dependency — it backs the default `freighterAdapter` and the `isFreighterInstalled`/`connectWallet`/`getPublicKey`/`signTransaction` wallet helpers. Install it if you use the default Freighter adapter:
+
+```bash
+npm install @stellar/freighter-api
+```
+
+If you only use another adapter (e.g. `createAlbedoAdapter()`, `WalletConnectAdapter`), you can skip it.
+
 ## Quick Start
 
 ```ts
@@ -87,6 +95,7 @@ console.log(will.status, will.balance, will.beneficiaries);
 | `updateBeneficiaries` | Replaces the beneficiary list before the will is triggered | `UpdateBeneficiariesParams` | `Promise<{ txHash }>` |
 | `topUp` | Adds more of the token to an existing will | `willId`, `amount` | `Promise<{ txHash }>` |
 | `previewFee` | Simulates a state-changing method and returns its estimated Soroban resource fee | `method`, `params` | `Promise<{ resourceFee }>` |
+| `getNetworkFeeStats` | Passes through network-wide classic-fee/surge-pricing stats (no wallet required) | — | `Promise<rpc.Api.GetFeeStatsResponse>` |
 | `getWill` | Reads the full state of a will (no wallet required) | `willId` | `Promise<Will>` |
 | `getWillsByOwner` | Lists every will owned by an address, with optional client-side pagination | `owner`, `PaginationOptions?` | `Promise<Will[] \| { wills, nextCursor }>` |
 | `getWillsByBeneficiary` | Lists every will an address is named in, with optional client-side pagination | `beneficiary`, `PaginationOptions?` | `Promise<Will[] \| { wills, nextCursor }>` |
@@ -134,6 +143,17 @@ Contract failures are exposed as subclasses of `WillContractError`, including
 `AlreadyVotedError`, `NotGuardianError`, `CheckinNotDueError`, `ZeroAmountError`, and
 `TooManyBeneficiariesError`.
 
+If the connected wallet's active network doesn't match the network `SoroWillClient` was
+configured with (e.g. Freighter set to mainnet while the app instantiated a testnet client),
+state-changing calls throw `WalletNetworkMismatchError` before ever building or signing a
+transaction — for wallet adapters that implement the optional `getNetwork()` method. You can
+also check explicitly right after connecting:
+
+```ts
+const connection = await connectWallet();
+client.assertWalletNetwork(connection); // throws WalletNetworkMismatchError on mismatch
+```
+
 ## Utilities
 
 | Function | Description |
@@ -150,6 +170,8 @@ Contract failures are exposed as subclasses of `WillContractError`, including
 
 `isFreighterInstalled()`, `connectWallet()`, `getPublicKey()`, and `signTransaction()` wrap the [Freighter](https://www.freighter.app/) browser extension API used by the default adapter for all state-changing calls.
 
+`isFreighterInstalled()` resolves `false` only when the extension is genuinely absent. Any other failure (e.g. called outside a browser, or an internal Freighter error) throws a `FreighterInstallCheckError` instead of being reported as "not installed", so the app can distinguish "show an install prompt" from "something else went wrong."
+
 ## Pluggable wallets
 
 `SoroWillClient` reads the connected account and signs transactions through a small `WalletAdapter` interface, so any Stellar wallet can be used — not just Freighter:
@@ -158,6 +180,8 @@ Contract failures are exposed as subclasses of `WillContractError`, including
 interface WalletAdapter {
   getPublicKey(): Promise<string>;
   signTransaction(transactionXdr: string, opts: { networkPassphrase: string }): Promise<string>;
+  // Optional: lets the client cross-check the wallet's active network (see below).
+  getNetwork?(): Promise<{ network: string; networkPassphrase: string }>;
 }
 ```
 

@@ -4,9 +4,6 @@ export type {
   SoroWillClientOptions,
   SoroWillNetwork,
   SoroWillRpcServer,
-  SoroWillClientOptions,
-  SoroWillNetwork,
-  SoroWillReadCacheOptions,
 } from './SoroWillClient';
 
 export { HookManager } from './hooks';
@@ -39,8 +36,9 @@ export type {
   SubmitFeeBumpOptions,
 } from './feeBump';
 
-export type { Beneficiary, CreateWillParams, UpdateBeneficiariesParams, Will } from './types';
 export type {
+  BatchOperation,
+  BatchResult,
   Beneficiary,
   CreateWillParams,
   EventSubscription,
@@ -48,12 +46,8 @@ export type {
   EventSubscriptionTransport,
   PaginatedWillsResult,
   PaginationOptions,
-  SoroWillEvent,
-  BatchOperation,
-  BatchResult,
-  Beneficiary,
-  CreateWillParams,
   RequestOptions,
+  SoroWillEvent,
   UpdateBeneficiariesParams,
   Will,
 } from './types';
@@ -101,8 +95,11 @@ export type {
   WillEventSource,
   WillEventSubscription,
 } from './events';
+
+export {
   AlreadyVotedError,
   CheckinNotDueError,
+  FreighterInstallCheckError,
   GracePeriodExpiredError,
   GracePeriodNotExpiredError,
   InvalidPercentagesError,
@@ -111,6 +108,7 @@ export type {
   RequestTimeoutError,
   SoroWillError,
   TooManyBeneficiariesError,
+  WalletNetworkMismatchError,
   WillContractError,
   WillNotActiveError,
   WillNotFoundError,
@@ -119,9 +117,6 @@ export type {
 } from './errors';
 export { RequestQueue } from './requestQueue';
 export type { RequestQueueOptions } from './requestQueue';
-
-export { connectWallet, getPublicKey, isFreighterInstalled, signTransaction } from './wallet';
-export type { WalletConnection } from './wallet';
 
 export { buildSep7TxUri, parseSep7Callback } from './sep7';
 export type { BuildSep7TxUriOptions, Sep7CallbackResult } from './sep7';
@@ -148,7 +143,6 @@ export type {
   LobstrSessionClient,
   LobstrWalletAdapterOptions,
   SignTransactionOptions,
-  WalletAdapter,
 } from './adapters';
 
 export {

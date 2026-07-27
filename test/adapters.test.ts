@@ -1,4 +1,4 @@
-import { Networks } from '@stellar/stellar-sdk';
+import { Account, Keypair, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const publicKeyMock = vi.fn();
@@ -130,14 +130,6 @@ describe('SoroWillClient wallet injection', () => {
     expect(client).toBeInstanceOf(SoroWillClient);
   });
 });
-import {
-  Account,
-  Keypair,
-  Networks,
-  Operation,
-  TransactionBuilder,
-} from '@stellar/stellar-sdk';
-import { describe, expect, it, vi } from 'vitest';
 
 import {
   HanaWalletAdapter,

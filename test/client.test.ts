@@ -1,7 +1,6 @@
 import { Account, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk';
 import { describe, expect, it } from 'vitest';
 
-import { ReadCache } from '../src/cache';
 import { RpcEndpointPool } from '../src/rpc';
 import { buildSep7TxUri, parseSep7Callback } from '../src/sep7';
 import { assertPreparedTransactionMatchesIntendedOperation } from '../src/txValidation';
@@ -241,28 +240,6 @@ describe('HookManager', () => {
     const ctx: AfterInvokeContext = { method: 'test', args: { a: 1 }, timestamp: '', txHash: 'abc', error: null, durationMs: 42 };
     await hm.runAfterInvoke(ctx);
     expect(captured).toBe(ctx);
-describe('ReadCache', () => {
-  it('returns cached values before expiry', () => {
-    let now = 1_000;
-    const cache = new ReadCache({ ttlMs: 500, now: () => now });
-
-    expect(cache.get('will:1')).toBeUndefined();
-
-    cache.set('will:1', { id: '1' });
-    expect(cache.get<{ id: string }>('will:1')).toEqual({ id: '1' });
-
-    now = 1_400;
-    expect(cache.get<{ id: string }>('will:1')).toEqual({ id: '1' });
-  });
-
-  it('expires cached values after the ttl', () => {
-    let now = 1_000;
-    const cache = new ReadCache({ ttlMs: 500, now: () => now });
-
-    cache.set('owner:GABC', ['1']);
-    now = 1_501;
-
-    expect(cache.get<string[]>('owner:GABC')).toBeUndefined();
   });
 });
 

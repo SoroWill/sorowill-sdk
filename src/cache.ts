@@ -97,31 +97,6 @@ export class ReadCache {
   async get<T>(key: string): Promise<T | undefined> {
     await this.ready();
 
-export interface ReadCacheOptions {
-  ttlMs: number;
-  now?: () => number;
-}
-
-interface CacheEntry<T> {
-  expiresAt: number;
-  value: T;
-}
-
-export class ReadCache {
-  private readonly ttlMs: number;
-  private readonly now: () => number;
-  private readonly entries = new Map<string, CacheEntry<unknown>>();
-
-  constructor(options: ReadCacheOptions) {
-    if (!Number.isFinite(options.ttlMs) || options.ttlMs <= 0) {
-      throw new Error('Read cache ttlMs must be a positive number');
-    }
-
-    this.ttlMs = options.ttlMs;
-    this.now = options.now ?? Date.now;
-  }
-
-  get<T>(key: string): T | undefined {
     const entry = this.entries.get(key);
     if (!entry) {
       return undefined;
@@ -129,8 +104,6 @@ export class ReadCache {
 
     if (entry.expiresAt !== null && entry.expiresAt <= Date.now()) {
       await this.delete(key);
-    if (entry.expiresAt <= this.now()) {
-      this.entries.delete(key);
       return undefined;
     }
 
@@ -323,14 +296,5 @@ export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter
       request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'));
       request.onsuccess = () => resolve(request.result);
     });
-  set<T>(key: string, value: T): void {
-    this.entries.set(key, {
-      value,
-      expiresAt: this.now() + this.ttlMs,
-    });
-  }
-
-  clear(): void {
-    this.entries.clear();
   }
 }
