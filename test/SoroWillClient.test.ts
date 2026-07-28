@@ -255,6 +255,28 @@ describe('SoroWillClient', () => {
     expect(secondPage.nextCursor).toBe('2');
   });
 
+  it('returns an empty array from getWillsByOwner when the owner has zero wills', async () => {
+    mockState.simulateTransaction.mockResolvedValue({
+      result: { retval: [] },
+    });
+
+    const client = new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
+    const wills = await client.getWillsByOwner('GNEWWALLET');
+
+    expect(wills).toEqual([]);
+  });
+
+  it('returns an empty array from getWillsByBeneficiary when the address is named in zero wills', async () => {
+    mockState.simulateTransaction.mockResolvedValue({
+      result: { retval: [] },
+    });
+
+    const client = new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
+    const wills = await client.getWillsByBeneficiary('GNEWWALLET');
+
+    expect(wills).toEqual([]);
+  });
+
   it('previews Soroban resource fees for create_will and top_up without submitting', async () => {
     mockState.simulateTransaction.mockImplementation(async (tx: { operation: { method: string } }) => ({
       minResourceFee: tx.operation.method === 'create_will' ? '1500' : '2750',

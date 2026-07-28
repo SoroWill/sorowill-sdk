@@ -143,9 +143,13 @@ export {
   calculateShares,
   formatDeadline,
   formatUSDC,
+  getNextActionableState,
   getTimeUntilCheckin,
+  isBeneficiary,
   isCheckinDue,
+  isGuardian,
   toStroops,
   validateBeneficiaries,
   validateGuardians,
 } from './utils';
+export type { NextActionableState } from './utils';
