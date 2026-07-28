@@ -79,10 +79,9 @@ export function parseSep7Callback(input: string | URL | URLSearchParams): Sep7Ca
   const status = params.get('status') ?? undefined;
   const message = params.get('message') ?? params.get('msg') ?? undefined;
 
-  return {
-    transactionXdr,
-    signerAddress,
-    status,
-    message,
-  };
+  const result: Sep7CallbackResult = { transactionXdr };
+  if (signerAddress !== undefined) result.signerAddress = signerAddress;
+  if (status !== undefined) result.status = status;
+  if (message !== undefined) result.message = message;
+  return result;
 }

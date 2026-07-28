@@ -1,12 +1,13 @@
 export { SoroWillClient } from './SoroWillClient';
 export type {
+  EventSubscription,
+  EventSubscriptionOptions,
+  EventSubscriptionTransport,
   RpcRetryOptions,
   SoroWillClientOptions,
   SoroWillNetwork,
-  SoroWillRpcServer,
-  SoroWillClientOptions,
-  SoroWillNetwork,
   SoroWillReadCacheOptions,
+  SoroWillRpcServer,
 } from './SoroWillClient';
 
 export { HookManager } from './hooks';
@@ -39,30 +40,27 @@ export type {
   SubmitFeeBumpOptions,
 } from './feeBump';
 
-export type { Beneficiary, CreateWillParams, UpdateBeneficiariesParams, Will } from './types';
 export type {
-  Beneficiary,
-  CreateWillParams,
-  EventSubscription,
-  EventSubscriptionOptions,
-  EventSubscriptionTransport,
-  PaginatedWillsResult,
-  PaginationOptions,
-  SoroWillEvent,
   BatchOperation,
   BatchResult,
   Beneficiary,
   CreateWillParams,
+  EventSubscription as TypesEventSubscription,
+  EventSubscriptionOptions as TypesEventSubscriptionOptions,
+  EventSubscriptionTransport as TypesEventSubscriptionTransport,
+  PaginatedWillsResult,
+  PaginationOptions,
   RequestOptions,
+  SoroWillEvent,
   UpdateBeneficiariesParams,
   Will,
 } from './types';
 export { WillStatus, WillErrorCode } from './types';
 
 export {
+  FreighterWalletAdapter,
   connectWallet,
   freighterAdapter,
-  FreighterWalletAdapter,
   getDefaultWalletAdapter,
   getPublicKey,
   isFreighterInstalled,
@@ -85,14 +83,8 @@ export type {
   WalletConnectSessionStore,
 } from './walletConnect';
 
-export {
-  IndexedDbCachePersistenceAdapter,
-  LocalStorageCachePersistenceAdapter,
-  MemoryCachePersistenceAdapter,
-  ReadCache,
-  createReadCacheKey,
-} from './cache';
-export type { CachePersistenceAdapter, PersistedCacheEntry, ReadCacheOptions } from './cache';
+export { ReadCache } from './cache';
+export type { ReadCacheOptions } from './cache';
 
 export { unsubscribeFromWillEvents } from './events';
 export type {
@@ -101,6 +93,8 @@ export type {
   WillEventSource,
   WillEventSubscription,
 } from './events';
+
+export {
   AlreadyVotedError,
   CheckinNotDueError,
   GracePeriodExpiredError,
@@ -116,23 +110,14 @@ export type {
   WillNotFoundError,
   WillNotTriggeredError,
   ZeroAmountError,
+  mapContractError,
 } from './errors';
+
 export { RequestQueue } from './requestQueue';
 export type { RequestQueueOptions } from './requestQueue';
 
-export { connectWallet, getPublicKey, isFreighterInstalled, signTransaction } from './wallet';
-export type { WalletConnection } from './wallet';
-
 export { buildSep7TxUri, parseSep7Callback } from './sep7';
 export type { BuildSep7TxUriOptions, Sep7CallbackResult } from './sep7';
-
-export {
-  connectAlbedo,
-  connectAlbedoWithNetwork,
-  getAlbedoPublicKey,
-  signAlbedoTransaction,
-} from './albedo';
-export type { AlbedoWalletConnection } from './albedo';
 
 export {
   HanaWalletAdapter,
@@ -148,7 +133,6 @@ export type {
   LobstrSessionClient,
   LobstrWalletAdapterOptions,
   SignTransactionOptions,
-  WalletAdapter,
 } from './adapters';
 
 export {

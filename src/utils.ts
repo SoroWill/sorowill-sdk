@@ -64,6 +64,13 @@ export function isCheckinDue(will: Will): boolean {
  * logic exactly: integer division per beneficiary, with any rounding
  * remainder paid to the final beneficiary so the shares always sum to the
  * full balance.
+ *
+ * This function mirrors the Rust contract's `distribute()` function in the
+ * SoroWill contracts repository:
+ * https://github.com/SoroWill/sorowill-contracts/blob/main/contracts/sorowill/src/contract.rs
+ * (see `fn distribute` — integer division with remainder assigned to the
+ * last beneficiary). Keep this implementation in sync with any changes to
+ * that contract function.
  */
 export function calculateShares(
   balance: string,

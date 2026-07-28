@@ -2,6 +2,18 @@ import { Account, Transaction, xdr } from '@stellar/stellar-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../src/wallet', () => ({
+  freighterAdapter: {
+    getPublicKey: vi.fn(async () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'),
+    signTransaction: vi.fn(async (transactionXdr: string) => transactionXdr),
+  },
+  getDefaultWalletAdapter: vi.fn(() => ({
+    getPublicKey: async () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+    signTransaction: async (transactionXdr: string) => transactionXdr,
+    isConnected: async () => true,
+    connect: async () => ({ publicKey: 'GAAA', network: 'TESTNET', networkPassphrase: 'pass' }),
+    reconnect: async () => ({ publicKey: 'GAAA', network: 'TESTNET', networkPassphrase: 'pass' }),
+    disconnect: async () => undefined,
+  })),
   getPublicKey: vi.fn(async () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'),
   signTransaction: vi.fn(async (transactionXdr: string) => transactionXdr),
 }));
@@ -84,5 +96,239 @@ describe('batch transactions', () => {
       ]),
     ).resolves.toEqual({ txHash: 'batch-hash', createdAt: 1_700_000_000 });
     expect(preparedOperationCount).toBe(2);
+  });
+});
+
+describe('mapWill trigger_time decoding', () => {
+  // mapWill is exercised through getWill/getWillsByOwner which call it internally.
+  // We use the same fakeSpec + fakeServer pattern to control the raw return value.
+
+  it('maps trigger_time: undefined to triggerTime: null', async () => {
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+    });
+    const fakeSpec = {
+      funcArgsToScVals: () => [] as xdr.ScVal[],
+      funcResToNative: (_method: string, value: unknown) => value,
+    };
+    // Override specPromise to skip wasm fetch (which requires a real binary).
+    Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
+
+    const fakeServer = {
+      simulateTransaction: async () => ({
+        result: {
+          retval: {
+            id: 1n,
+            owner: 'GOWNER',
+            token: 'CTOKEN',
+            balance: 1000n,
+            beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+            checkin_period_days: 90n,
+            grace_period_days: 7n,
+            last_checkin: 1_700_000_000n,
+            trigger_time: undefined,
+            status: 'Active',
+            guardians: [] as string[],
+            guardian_votes: 0,
+          },
+        },
+      }),
+    };
+    Object.defineProperty(client, 'server', { value: fakeServer });
+
+    const will = await client.getWill('1');
+    expect(will.triggerTime).toBeNull();
+  });
+
+  it('maps trigger_time set to a correct Date', async () => {
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+    });
+    const fakeSpec = {
+      funcArgsToScVals: () => [] as xdr.ScVal[],
+      funcResToNative: (_method: string, value: unknown) => value,
+    };
+    Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
+
+    const fakeServer = {
+      simulateTransaction: async () => ({
+        result: {
+          retval: {
+            id: 1n,
+            owner: 'GOWNER',
+            token: 'CTOKEN',
+            balance: 1000n,
+            beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+            checkin_period_days: 90n,
+            grace_period_days: 7n,
+            last_checkin: 1_700_000_000n,
+            trigger_time: 1_800_000_000n,
+            status: 'Active',
+            guardians: [] as string[],
+            guardian_votes: 0,
+          },
+        },
+      }),
+    };
+    Object.defineProperty(client, 'server', { value: fakeServer });
+
+    const will = await client.getWill('1');
+    expect(will.triggerTime).toBeInstanceOf(Date);
+    expect(will.triggerTime!.getTime()).toBe(1_800_000_000 * 1000);
+  });
+});
+
+describe('sendTransaction status handling', () => {
+  it('throws a distinct error for TRY_AGAIN_LATER status', async () => {
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+    });
+    const fakeSpec = {
+      funcArgsToScVals: () => [] as xdr.ScVal[],
+    };
+    const fakeServer = {
+      getAccount: async (publicKey: string) => new Account(publicKey, '0'),
+      prepareTransaction: async (transaction: Transaction) => transaction,
+      sendTransaction: async () => ({ status: 'TRY_AGAIN_LATER' as const, hash: 'retry-hash' }),
+      pollTransaction: async () => {
+        throw new Error('should not reach poll');
+      },
+    };
+    Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
+    Object.defineProperty(client, 'server', { value: fakeServer });
+
+    await expect(
+      client.batch([{ method: 'dummy', args: {} }]),
+    ).rejects.toThrow(/backpressure/);
+  });
+
+  it('proceeds to poll on DUPLICATE status', async () => {
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+    });
+    const fakeSpec = {
+      funcArgsToScVals: () => [] as xdr.ScVal[],
+    };
+    let pollCalled = false;
+    const fakeServer = {
+      getAccount: async (publicKey: string) => new Account(publicKey, '0'),
+      prepareTransaction: async (transaction: Transaction) => transaction,
+      sendTransaction: async () => ({ status: 'DUPLICATE' as const, hash: 'dup-hash' }),
+      pollTransaction: async () => {
+        pollCalled = true;
+        return {
+          status: 'SUCCESS' as const,
+          createdAt: 1_700_000_000,
+          returnValue: xdr.ScVal.scvVoid(),
+        };
+      },
+    };
+    Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
+    Object.defineProperty(client, 'server', { value: fakeServer });
+
+    await expect(
+      client.batch([{ method: 'dummy', args: {} }]),
+    ).resolves.toEqual({ txHash: 'dup-hash', createdAt: 1_700_000_000 });
+    expect(pollCalled).toBe(true);
+  });
+
+  it('throws on ERROR status without polling', async () => {
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+    });
+    const fakeSpec = {
+      funcArgsToScVals: () => [] as xdr.ScVal[],
+    };
+    let pollCalled = false;
+    const fakeServer = {
+      getAccount: async (publicKey: string) => new Account(publicKey, '0'),
+      prepareTransaction: async (transaction: Transaction) => transaction,
+      sendTransaction: async () => ({ status: 'ERROR' as const, hash: '' }),
+      pollTransaction: async () => {
+        pollCalled = true;
+        return { status: 'SUCCESS' as const, createdAt: 0, returnValue: xdr.ScVal.scvVoid() };
+      },
+    };
+    Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
+    Object.defineProperty(client, 'server', { value: fakeServer });
+
+    await expect(
+      client.batch([{ method: 'dummy', args: {} }]),
+    ).rejects.toThrow(/submission failed/);
+    expect(pollCalled).toBe(false);
+  });
+});
+
+describe('pollAttempts option', () => {
+  it('uses the configured pollAttempts value', async () => {
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+      pollAttempts: 7,
+    });
+    expect((client as unknown as { pollAttempts: number }).pollAttempts).toBe(7);
+  });
+
+  it('defaults pollAttempts to 30 when not configured', async () => {
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+    });
+    expect((client as unknown as { pollAttempts: number }).pollAttempts).toBe(30);
+  });
+
+  it('passes custom pollAttempts to pollTransaction', async () => {
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+      pollAttempts: 99,
+    });
+    const fakeSpec = {
+      funcArgsToScVals: () => [] as xdr.ScVal[],
+    };
+    let receivedAttempts = 0;
+    const fakeServer = {
+      getAccount: async (publicKey: string) => new Account(publicKey, '0'),
+      prepareTransaction: async (transaction: Transaction) => transaction,
+      sendTransaction: async () => ({ status: 'PENDING' as const, hash: 'h' }),
+      pollTransaction: async (_hash: string, options: { attempts: number }) => {
+        receivedAttempts = options.attempts;
+        return {
+          status: 'SUCCESS' as const,
+          createdAt: 1_700_000_000,
+          returnValue: xdr.ScVal.scvVoid(),
+        };
+      },
+    };
+    Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
+    Object.defineProperty(client, 'server', { value: fakeServer });
+
+    await client.batch([{ method: 'dummy', args: {} }]);
+    expect(receivedAttempts).toBe(99);
+  });
+
+  it('throws when pollAttempts is zero', async () => {
+    expect(() => {
+      new SoroWillClient({
+        network: 'testnet',
+        contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+        pollAttempts: 0,
+      });
+    }).toThrow(/pollAttempts/);
+  });
+
+  it('throws when pollAttempts is negative', async () => {
+    expect(() => {
+      new SoroWillClient({
+        network: 'testnet',
+        contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+        pollAttempts: -1,
+      });
+    }).toThrow(/pollAttempts/);
   });
 });
