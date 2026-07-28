@@ -1,6 +1,6 @@
 /**
  * Context object passed to beforeInvoke hooks.
- * Contains all information about the即将 being made contract call.
+ * Contains all information about the contract call about to be made.
  */
 export interface BeforeInvokeContext {
   /** The contract method name being invoked (e.g. 'create_will'). */

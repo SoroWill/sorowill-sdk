@@ -261,6 +261,11 @@ export class WalletConnectAdapter implements WalletAdapter {
     return connection.publicKey;
   }
 
+  async getNetwork(): Promise<{ network: string; networkPassphrase: string }> {
+    const connection = this.connection ?? (await this.reconnect());
+    return { network: connection.network, networkPassphrase: connection.networkPassphrase };
+  }
+
   async signTransaction(
     transactionXdr: string,
     opts: { networkPassphrase: string },

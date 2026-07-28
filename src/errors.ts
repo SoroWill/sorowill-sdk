@@ -16,6 +16,42 @@ export class RequestTimeoutError extends SoroWillError {
   }
 }
 
+/**
+ * Raised when Freighter's `isConnected()` API reports an error other than
+ * the extension simply being absent — e.g. it was called outside a browser,
+ * or Freighter itself hit an internal error. Distinguishing this from "not
+ * installed" avoids prompting an install when Freighter is actually present
+ * but in an unexpected state.
+ */
+export class FreighterInstallCheckError extends SoroWillError {
+  readonly code: number;
+
+  constructor(code: number, message: string, options?: ErrorOptions) {
+    super(`Unable to determine whether Freighter is installed: ${message}`, options);
+    this.code = code;
+  }
+}
+
+/**
+ * Raised when the connected wallet's active network does not match the
+ * network {@link SoroWillClient} was configured with — e.g. Freighter is set
+ * to mainnet while the app instantiated a testnet client. Thrown before a
+ * transaction is built and sent for signing.
+ */
+export class WalletNetworkMismatchError extends SoroWillError {
+  readonly expectedNetworkPassphrase: string;
+  readonly actualNetworkPassphrase: string;
+
+  constructor(expectedNetworkPassphrase: string, actualNetworkPassphrase: string, options?: ErrorOptions) {
+    super(
+      `The connected wallet is on network "${actualNetworkPassphrase}", but this client is configured for "${expectedNetworkPassphrase}". Switch the wallet's network or reconfigure the client before signing.`,
+      options,
+    );
+    this.expectedNetworkPassphrase = expectedNetworkPassphrase;
+    this.actualNetworkPassphrase = actualNetworkPassphrase;
+  }
+}
+
 /** Base class for typed errors returned by the SoroWill contract. */
 export class WillContractError extends SoroWillError {
   constructor(
@@ -122,6 +158,27 @@ function errorText(error: unknown): string {
     return JSON.stringify(error);
   } catch {
     return String(error);
+  }
+}
+
+/**
+ * Raised when a Soroban simulation returns a "restore required" result,
+ * indicating that archived/expired ledger entries must be restored via a
+ * separate {@link https://developers.stellar.org/docs/smart-contracts/guides/archival | footprint-restoration transaction}
+ * before the call can proceed.
+ *
+ * The caller should build and submit a `restoreFootprint` operation using
+ * the {@link restorePreamble} from this error, wait for confirmation, and
+ * then retry the original contract call.
+ */
+export class SoroWillRestoreRequiredError extends SoroWillError {
+  /** The simulation response containing the restore preamble needed to build
+   * the footprint-restoration transaction. */
+  readonly simulation: unknown;
+
+  constructor(message: string, simulation: unknown, options?: ErrorOptions) {
+    super(message, options);
+    this.simulation = simulation;
   }
 }
 

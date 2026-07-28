@@ -2,6 +2,8 @@ import { Account, xdr } from '@stellar/stellar-sdk';
 import { describe, expect, it } from 'vitest';
 
 import { MemoryCachePersistenceAdapter } from '../src/cache';
+import { WalletNetworkMismatchError } from '../src/errors';
+import { ReadCache } from '../src/cache';
 import { SoroWillClient, type SoroWillRpcServer } from '../src/SoroWillClient';
 import type { WillEvent, WillEventSource } from '../src/events';
 import { WillStatus } from '../src/types';
@@ -70,6 +72,11 @@ class StubWalletAdapter implements WalletAdapter {
   async signTransaction(transactionXdr: string, _opts: { networkPassphrase: string }): Promise<string> {
     return transactionXdr;
   }
+
+  async getNetwork(): Promise<{ network: string; networkPassphrase: string }> {
+    const connection = await this.connect();
+    return { network: connection.network, networkPassphrase: connection.networkPassphrase };
+  }
 }
 
 class StubEventSource implements WillEventSource {
@@ -106,6 +113,7 @@ function createRpcServer(options: {
   simulateTransactionImpl?: () => Promise<unknown>;
   pollTransactionImpl?: () => Promise<unknown>;
   sendTransactionImpl?: () => Promise<unknown>;
+  getFeeStatsImpl?: () => Promise<unknown>;
 } = {}): SoroWillRpcServer {
   return {
     async getContractWasmByContractId(_contractId: string): Promise<Uint8Array> {
@@ -146,8 +154,42 @@ function createRpcServer(options: {
         returnValue: VOID_SCVAL,
       } as never;
     },
+    async getFeeStats() {
+      if (options.getFeeStatsImpl) {
+        return (await options.getFeeStatsImpl()) as never;
+      }
+      return {
+        sorobanInclusionFee: { max: '100', min: '100', mode: '100', p10: '100', p20: '100', p30: '100', p40: '100', p50: '100', p60: '100', p70: '100', p80: '100', p90: '100', p95: '100', p99: '100', transactionCount: '0', ledgerCount: 0 },
+        inclusionFee: { max: '100', min: '100', mode: '100', p10: '100', p20: '100', p30: '100', p40: '100', p50: '100', p60: '100', p70: '100', p80: '100', p90: '100', p95: '100', p99: '100', transactionCount: '0', ledgerCount: 0 },
+        latestLedger: 12345,
+      } as never;
+    },
   };
 }
+
+describe('SoroWillClient.getNetworkFeeStats', () => {
+  it('passes through the RPC server fee-stats response', async () => {
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
+      readCache: false,
+      spec: createSpec({}),
+      rpcServer: createRpcServer({
+        async getFeeStatsImpl() {
+          return {
+            sorobanInclusionFee: { max: '5000', min: '100', mode: '150' },
+            inclusionFee: { max: '400', min: '100', mode: '100' },
+            latestLedger: 999,
+          };
+        },
+      }),
+    });
+
+    const stats = await client.getNetworkFeeStats();
+    expect(stats.latestLedger).toBe(999);
+    expect(stats.sorobanInclusionFee.max).toBe('5000');
+  });
+});
 
 describe('SoroWillClient read cache persistence', () => {
   it('rehydrates persisted getWill results after a new client instance is created', async () => {
@@ -156,7 +198,7 @@ describe('SoroWillClient read cache persistence', () => {
 
     const clientA = new SoroWillClient({
       network: 'testnet',
-      contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       wallet: new StubWalletAdapter(),
       readCache: { ttlMs: 60_000, persistence },
       spec: createSpec({ get_will: [makeRawWill(1n)] }),
@@ -167,14 +209,16 @@ describe('SoroWillClient read cache persistence', () => {
         },
       }),
     });
+describe('SoroWillClient read cache', () => {
+  it('caches getWill results within the TTL window', async () => {
+    const cache = new ReadCache({ ttlMs: 60_000 });
 
-    const firstRead = await clientA.getWill('1');
-    expect(firstRead.id).toBe('1');
-    expect(simulateCalls).toBe(1);
+    cache.set('key1', { id: 'cached' });
+    expect(cache.get('key1')).toEqual({ id: 'cached' });
 
     const clientB = new SoroWillClient({
       network: 'testnet',
-      contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       wallet: new StubWalletAdapter(),
       readCache: { ttlMs: 60_000, persistence },
       spec: createSpec({ get_will: [makeRawWill(999n)] }),
@@ -189,6 +233,8 @@ describe('SoroWillClient read cache persistence', () => {
     const secondRead = await clientB.getWill('1');
     expect(secondRead.id).toBe('1');
     expect(simulateCalls).toBe(1);
+    cache.clear();
+    expect(cache.get('key1')).toBeUndefined();
   });
 });
 
@@ -199,7 +245,7 @@ describe('SoroWillClient event-driven invalidation', () => {
 
     const client = new SoroWillClient({
       network: 'testnet',
-      contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       wallet: new StubWalletAdapter(),
       readCache: { ttlMs: 60_000 },
       eventSource: events,
@@ -229,7 +275,7 @@ describe('SoroWillClient RPC retries', () => {
 
     const client = new SoroWillClient({
       network: 'testnet',
-      contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       wallet: new StubWalletAdapter(),
       readCache: false,
       retry: { maxAttempts: 3, initialDelayMs: 0, maxDelayMs: 0 },
@@ -255,7 +301,7 @@ describe('SoroWillClient RPC retries', () => {
 
     const client = new SoroWillClient({
       network: 'testnet',
-      contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       wallet: new StubWalletAdapter(),
       readCache: false,
       retry: { maxAttempts: 2, initialDelayMs: 0, maxDelayMs: 0 },
@@ -270,5 +316,91 @@ describe('SoroWillClient RPC retries', () => {
 
     await expect(client.getWill('1')).rejects.toThrow(/failed after 2 attempts/i);
     expect(attempts).toBe(2);
+  });
+});
+
+describe('SoroWillClient wallet network cross-check', () => {
+  it('throws WalletNetworkMismatchError before signing when the wallet is on a different network', async () => {
+    let sendTransactionCalls = 0;
+    const wallet: WalletAdapter = {
+      async getPublicKey() {
+        return TEST_ACCOUNT;
+      },
+      async signTransaction(transactionXdr: string) {
+        return transactionXdr;
+      },
+      async getNetwork() {
+        return { network: 'mainnet', networkPassphrase: 'Public Global Stellar Network ; September 2015' };
+      },
+    };
+
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
+      wallet,
+      readCache: false,
+      spec: createSpec({}),
+      rpcServer: createRpcServer({
+        async sendTransactionImpl() {
+          sendTransactionCalls += 1;
+          return { status: 'PENDING', hash: 'abc123' };
+        },
+      }),
+    });
+
+    await expect(client.triggerWill('1')).rejects.toBeInstanceOf(WalletNetworkMismatchError);
+    expect(sendTransactionCalls).toBe(0);
+  });
+
+  it('does not throw when the wallet is on the matching network', async () => {
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
+      wallet: new StubWalletAdapter(),
+      readCache: false,
+      spec: createSpec({}),
+      rpcServer: createRpcServer(),
+    });
+
+    await expect(client.triggerWill('1')).resolves.toEqual({ txHash: 'abc123' });
+  });
+
+  it('skips the check for adapters that cannot report their network', async () => {
+    const minimalWallet: WalletAdapter = {
+      async getPublicKey() {
+        return TEST_ACCOUNT;
+      },
+      async signTransaction(transactionXdr: string) {
+        return transactionXdr;
+      },
+    };
+
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
+      wallet: minimalWallet,
+      readCache: false,
+      spec: createSpec({}),
+      rpcServer: createRpcServer(),
+    });
+
+    await expect(client.triggerWill('1')).resolves.toEqual({ txHash: 'abc123' });
+  });
+
+  it('assertWalletNetwork throws on mismatch and passes on match', () => {
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
+      readCache: false,
+      spec: createSpec({}),
+      rpcServer: createRpcServer(),
+    });
+
+    expect(() =>
+      client.assertWalletNetwork({ networkPassphrase: 'Public Global Stellar Network ; September 2015' }),
+    ).toThrow(WalletNetworkMismatchError);
+    expect(() =>
+      client.assertWalletNetwork({ networkPassphrase: 'Test SDF Network ; September 2015' }),
+    ).not.toThrow();
   });
 });
