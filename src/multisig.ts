@@ -2,6 +2,7 @@ import {
   Account,
   BASE_FEE,
   Contract,
+  Keypair,
   Transaction,
   TransactionBuilder,
   rpc,
@@ -229,7 +230,6 @@ export function signWithSecretKey(
   secretKey: string,
   networkPassphrase: string,
 ): string {
-  const { Keypair } = require('@stellar/stellar-sdk');
   const keypair = Keypair.fromSecret(secretKey);
   const tx = TransactionBuilder.fromXDR(transactionXdr, networkPassphrase) as Transaction;
 

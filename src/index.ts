@@ -1,8 +1,13 @@
 export { SoroWillClient } from './SoroWillClient';
 export type {
+  EventSubscription,
+  EventSubscriptionOptions,
+  EventSubscriptionTransport,
   RpcRetryOptions,
   SoroWillClientOptions,
   SoroWillNetwork,
+  SoroWillRpcServer,
+  SoroWillReadCacheOptions,
   SoroWillRpcServer,
 } from './SoroWillClient';
 
@@ -44,6 +49,9 @@ export type {
   EventSubscription,
   EventSubscriptionOptions,
   EventSubscriptionTransport,
+  EventSubscription as TypesEventSubscription,
+  EventSubscriptionOptions as TypesEventSubscriptionOptions,
+  EventSubscriptionTransport as TypesEventSubscriptionTransport,
   PaginatedWillsResult,
   PaginationOptions,
   RequestOptions,
@@ -51,12 +59,12 @@ export type {
   UpdateBeneficiariesParams,
   Will,
 } from './types';
-export { WillStatus } from './types';
+export { WillStatus, WillErrorCode } from './types';
 
 export {
+  FreighterWalletAdapter,
   connectWallet,
   freighterAdapter,
-  FreighterWalletAdapter,
   getDefaultWalletAdapter,
   getPublicKey,
   isFreighterInstalled,
@@ -79,14 +87,8 @@ export type {
   WalletConnectSessionStore,
 } from './walletConnect';
 
-export {
-  IndexedDbCachePersistenceAdapter,
-  LocalStorageCachePersistenceAdapter,
-  MemoryCachePersistenceAdapter,
-  ReadCache,
-  createReadCacheKey,
-} from './cache';
-export type { CachePersistenceAdapter, PersistedCacheEntry, ReadCacheOptions } from './cache';
+export { ReadCache } from './cache';
+export type { ReadCacheOptions } from './cache';
 
 export { unsubscribeFromWillEvents } from './events';
 export type {
@@ -107,6 +109,7 @@ export {
   NotOwnerError,
   RequestTimeoutError,
   SoroWillError,
+  SoroWillRestoreRequiredError,
   TooManyBeneficiariesError,
   WalletNetworkMismatchError,
   WillContractError,
@@ -114,20 +117,14 @@ export {
   WillNotFoundError,
   WillNotTriggeredError,
   ZeroAmountError,
+  mapContractError,
 } from './errors';
+
 export { RequestQueue } from './requestQueue';
 export type { RequestQueueOptions } from './requestQueue';
 
 export { buildSep7TxUri, parseSep7Callback } from './sep7';
 export type { BuildSep7TxUriOptions, Sep7CallbackResult } from './sep7';
-
-export {
-  connectAlbedo,
-  connectAlbedoWithNetwork,
-  getAlbedoPublicKey,
-  signAlbedoTransaction,
-} from './albedo';
-export type { AlbedoWalletConnection } from './albedo';
 
 export {
   HanaWalletAdapter,
@@ -146,11 +143,18 @@ export type {
 } from './adapters';
 
 export {
+  MAX_BENEFICIARIES,
+  MAX_GUARDIANS,
   calculateShares,
   formatDeadline,
   formatUSDC,
+  getNextActionableState,
   getTimeUntilCheckin,
+  isBeneficiary,
   isCheckinDue,
+  isGuardian,
   toStroops,
   validateBeneficiaries,
+  validateGuardians,
 } from './utils';
+export type { NextActionableState } from './utils';

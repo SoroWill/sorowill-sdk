@@ -1,4 +1,5 @@
 import type { Beneficiary, Will } from './types';
+import { WillStatus } from './types';
 
 /** USDC (and most Soroban SEP-41 tokens) use 7 decimal places, matching classic Stellar asset precision. */
 const USDC_DECIMALS = 7;
@@ -64,6 +65,13 @@ export function isCheckinDue(will: Will): boolean {
  * logic exactly: integer division per beneficiary, with any rounding
  * remainder paid to the final beneficiary so the shares always sum to the
  * full balance.
+ *
+ * This function mirrors the Rust contract's `distribute()` function in the
+ * SoroWill contracts repository:
+ * https://github.com/SoroWill/sorowill-contracts/blob/main/contracts/sorowill/src/contract.rs
+ * (see `fn distribute` — integer division with remainder assigned to the
+ * last beneficiary). Keep this implementation in sync with any changes to
+ * that contract function.
  */
 export function calculateShares(
   balance: string,
@@ -94,11 +102,30 @@ export function formatDeadline(date: Date): string {
 }
 
 /**
- * Validates that a beneficiary list is well-formed: non-empty, every
- * percentage is positive, and percentages sum to exactly 100.
+ * Maximum number of beneficiaries the SoroWill contract allows per will.
+ *
+ * **IMPORTANT**: This value mirrors the `MAX_BENEFICIARIES` constant in the
+ * contract's `errors.rs` and must be kept in sync manually until the
+ * contracts repo ships automated spec-drift tooling (issue #122).
+ */
+export const MAX_BENEFICIARIES = 10;
+
+/**
+ * Maximum number of guardians the SoroWill contract allows per will.
+ *
+ * **IMPORTANT**: This value mirrors the `MAX_GUARDIANS` constant in the
+ * contract's `errors.rs` and must be kept in sync manually until the
+ * contracts repo ships automated spec-drift tooling (issue #122).
+ */
+export const MAX_GUARDIANS = 3;
+
+/**
+ * Validates that a beneficiary list is well-formed: non-empty, at most
+ * {@link MAX_BENEFICIARIES} entries, every percentage is a positive
+ * integer, and percentages sum to exactly 100.
  */
 export function validateBeneficiaries(beneficiaries: Beneficiary[]): boolean {
-  if (beneficiaries.length === 0) {
+  if (beneficiaries.length === 0 || beneficiaries.length > MAX_BENEFICIARIES) {
     return false;
   }
   if (!beneficiaries.every((b) => Number.isInteger(b.percentage) && b.percentage > 0)) {
@@ -106,4 +133,79 @@ export function validateBeneficiaries(beneficiaries: Beneficiary[]): boolean {
   }
   const sum = beneficiaries.reduce((acc, b) => acc + b.percentage, 0);
   return sum === 100;
+}
+
+/** Returns whether `address` is one of `will`'s guardians. */
+export function isGuardian(will: Will, address: string): boolean {
+  return will.guardians.includes(address);
+}
+
+/** Returns whether `address` is one of `will`'s beneficiaries. */
+export function isBeneficiary(will: Will, address: string): boolean {
+  return will.beneficiaries.some((b) => b.address === address);
+}
+
+/**
+ * Describes what the wallet at `connectedAddress` can currently do for
+ * `will`, combining its status, owner, guardians, and beneficiaries with
+ * the check-in deadline. Intended to drive which action buttons a UI shows.
+ */
+export interface NextActionableState {
+  canCheckIn: boolean;
+  canTrigger: boolean;
+  canEmergencyCheckIn: boolean;
+  canRelease: boolean;
+  canCancel: boolean;
+  canGuardianVote: boolean;
+}
+
+/**
+ * Computes {@link NextActionableState} for `will` from the perspective of
+ * `connectedAddress`. Only the owner may check in, cancel, or emergency
+ * check in; triggering and releasing are permissionless once their
+ * on-chain preconditions are met; and guardians may vote for an early
+ * release at any point before the will is released or cancelled.
+ */
+export function getNextActionableState(
+  will: Will,
+  connectedAddress: string,
+): NextActionableState {
+  const isOwner = will.owner === connectedAddress;
+  const isWillGuardian = isGuardian(will, connectedAddress);
+
+  const graceDeadlineMs =
+    (will.triggerTime?.getTime() ?? 0) + will.gracePeriodDays * 86_400 * 1000;
+  const isGracePeriodExpired = will.triggerTime !== null && Date.now() >= graceDeadlineMs;
+
+  return {
+    canCheckIn: isOwner && will.status === WillStatus.Active,
+    canTrigger: will.status === WillStatus.Active && isCheckinDue(will),
+    canEmergencyCheckIn: isOwner && will.status === WillStatus.Triggered && !isGracePeriodExpired,
+    canRelease: will.status === WillStatus.Triggered && isGracePeriodExpired,
+    canCancel: isOwner && will.status === WillStatus.Active,
+    canGuardianVote:
+      isWillGuardian &&
+      (will.status === WillStatus.Active || will.status === WillStatus.Triggered),
+  };
+/**
+ * Validates a guardian list: empty list is valid (guardians are optional),
+ * at most {@link MAX_GUARDIANS} entries, no duplicate addresses, and no
+ * owner address in the list.
+ *
+ * @param guardians - The list of guardian addresses to validate.
+ * @param ownerAddress - Optional owner address; when supplied, the function
+ *                       rejects any guardian that matches it.
+ */
+export function validateGuardians(guardians: string[], ownerAddress?: string): boolean {
+  if (guardians.length > MAX_GUARDIANS) {
+    return false;
+  }
+  const unique = new Set(guardians);
+  if (unique.size !== guardians.length) {
+    return false;
+  }
+  if (ownerAddress !== undefined && unique.has(ownerAddress)) {
+    return false;
+  }
+  return true;
 }
