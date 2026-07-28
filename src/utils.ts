@@ -1,8 +1,17 @@
 import type { Beneficiary, Will } from './types';
+import { WillStatus } from './types';
 
 /** USDC (and most Soroban SEP-41 tokens) use 7 decimal places, matching classic Stellar asset precision. */
 const USDC_DECIMALS = 7;
 const USDC_BASE: bigint = 10n ** BigInt(USDC_DECIMALS);
+
+/**
+ * Approximate Soroban ledger close time, in milliseconds. Matches the
+ * default `defaultPollIntervalMs` used internally by `SoroWillClient` for
+ * event subscriptions, so consumers polling `getWill` or transaction status
+ * themselves don't each have to hardcode this magic number independently.
+ */
+export const SOROBAN_LEDGER_CLOSE_TIME_MS = 5_000;
 
 /**
  * Formats a base-unit token amount (e.g. contract-side `i128` stroops) as a
@@ -106,4 +115,27 @@ export function validateBeneficiaries(beneficiaries: Beneficiary[]): boolean {
   }
   const sum = beneficiaries.reduce((acc, b) => acc + b.percentage, 0);
   return sum === 100;
+}
+
+/**
+ * Produces a compact, single-line summary of `will`, e.g.
+ * `"Will #1 · Active · 1,234.50 · 2 beneficiaries · check-in due Jan 5, 2027, 3:45 PM"`.
+ * Useful for debug logging, CLI output, or a list-view row.
+ */
+export function summarizeWill(will: Will): string {
+  const parts = [
+    `Will #${will.id}`,
+    will.status,
+    formatUSDC(BigInt(will.balance)),
+    `${will.beneficiaries.length} beneficiar${will.beneficiaries.length === 1 ? 'y' : 'ies'}`,
+  ];
+
+  if (will.status === WillStatus.Active) {
+    const deadlineMs = will.lastCheckin.getTime() + will.checkinPeriodDays * 86_400 * 1000;
+    parts.push(`check-in due ${formatDeadline(new Date(deadlineMs))}`);
+  } else if (will.triggerTime) {
+    parts.push(`triggered ${formatDeadline(will.triggerTime)}`);
+  }
+
+  return parts.join(' · ');
 }

@@ -46,6 +46,7 @@ import { buildSep7TxUri, type BuildSep7TxUriOptions } from './sep7';
 import { HookManager } from './hooks';
 import type { BeforeInvokeContext, AfterInvokeContext } from './hooks';
 import { assertPreparedTransactionMatchesIntendedOperation } from './txValidation';
+import { SOROBAN_LEDGER_CLOSE_TIME_MS } from './utils';
 
 type ScVal = xdr.ScVal;
 
@@ -272,7 +273,39 @@ interface SimulatedCallResult {
   minResourceFee?: string;
 }
 
-function mapWill(raw: RawWill): Will {
+/**
+ * Guards against a contract spec / SDK version drift silently producing a
+ * corrupted `Will`: verifies the value decoded by `funcResToNative` actually
+ * has the shape this SDK expects before any of its fields are trusted.
+ */
+function isRawWillShape(value: unknown): value is RawWill {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === 'bigint' &&
+    typeof v.owner === 'string' &&
+    typeof v.token === 'string' &&
+    typeof v.balance === 'bigint' &&
+    Array.isArray(v.beneficiaries) &&
+    typeof v.checkin_period_days === 'bigint' &&
+    typeof v.grace_period_days === 'bigint' &&
+    typeof v.last_checkin === 'bigint' &&
+    (v.trigger_time === undefined || typeof v.trigger_time === 'bigint') &&
+    typeof v.status === 'string' &&
+    Array.isArray(v.guardians) &&
+    typeof v.guardian_votes === 'number'
+  );
+}
+
+function mapWill(raw: unknown): Will {
+  if (!isRawWillShape(raw)) {
+    throw new SoroWillError(
+      'SoroWill received an unexpected shape while decoding a Will from the contract response. ' +
+        'This usually means the deployed contract spec and this SDK version have drifted apart.',
+    );
+  }
   return {
     id: raw.id.toString(),
     owner: raw.owner,
@@ -287,6 +320,16 @@ function mapWill(raw: RawWill): Will {
     guardians: raw.guardians,
     guardianVotes: raw.guardian_votes,
   };
+}
+
+function mapWillList(raw: unknown): Will[] {
+  if (!Array.isArray(raw)) {
+    throw new SoroWillError(
+      'SoroWill expected a list of wills from the contract response but received something else. ' +
+        'This usually means the deployed contract spec and this SDK version have drifted apart.',
+    );
+  }
+  return raw.map(mapWill);
 }
 
 function mapEventRecord(record: RpcEventRecord, fallbackContractId: string): SoroWillEvent {
@@ -383,7 +426,7 @@ export class SoroWillClient {
     this.defaultPollIntervalMs = normalizePositiveInteger(
       options.defaultPollIntervalMs,
       'defaultPollIntervalMs',
-    ) ?? 5_000;
+    ) ?? SOROBAN_LEDGER_CLOSE_TIME_MS;
     this.fetchImplementation = options.fetch;
     this.webSocketFactory = options.webSocketFactory;
     this.timeoutMs = options.timeoutMs ?? 30_000;
@@ -464,7 +507,14 @@ export class SoroWillClient {
       throw new Error('create_will transaction succeeded but returned no will id');
     }
     const spec = await this.getSpec(options);
-    const willId = (spec.funcResToNative('create_will', returnValue) as bigint).toString();
+    const decoded = spec.funcResToNative('create_will', returnValue);
+    if (typeof decoded !== 'bigint') {
+      throw new SoroWillError(
+        `SoroWill expected create_will to return a numeric will id but received a ${typeof decoded}. ` +
+          'This usually means the deployed contract spec and this SDK version have drifted apart.',
+      );
+    }
+    const willId = decoded.toString();
     return { willId, txHash };
   }
 
@@ -560,14 +610,14 @@ export class SoroWillClient {
 
   /** Reads the full state of a will. Does not require a connected wallet. */
   async getWill(willId: string, options?: RequestOptions): Promise<Will> {
-    const raw = await this.read<RawWill>('get_will', { will_id: BigInt(willId) }, options);
+    const raw = await this.read<unknown>('get_will', { will_id: BigInt(willId) }, options);
     return mapWill(raw);
   }
 
   /** Lists every will owned by `owner`. Does not require a connected wallet. */
   async getWillsByOwner(owner: string, options?: RequestOptions): Promise<Will[]> {
-    const raw = await this.read<RawWill[]>('get_wills_by_owner', { owner }, options);
-    return raw.map(mapWill);
+    const raw = await this.read<unknown>('get_wills_by_owner', { owner }, options);
+    return mapWillList(raw);
   }
 
   /** Lists every will `beneficiary` is named in. Does not require a connected wallet. */
@@ -575,12 +625,12 @@ export class SoroWillClient {
     beneficiary: string,
     options?: RequestOptions,
   ): Promise<Will[]> {
-    const raw = await this.read<RawWill[]>(
+    const raw = await this.read<unknown>(
       'get_wills_by_beneficiary',
       { beneficiary },
       options,
     );
-    return raw.map(mapWill);
+    return mapWillList(raw);
   }
 
   /**
