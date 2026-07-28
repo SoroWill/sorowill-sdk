@@ -146,6 +146,84 @@ Contract failures are exposed as subclasses of `WillContractError`, including
 | `formatDeadline(date)` | Formats a `Date` as a human-readable string |
 | `validateBeneficiaries(beneficiaries)` | Checks that percentages are well-formed and sum to 100 |
 
+## Custom fetch / environments without a global fetch
+
+The SDK's event-polling transport uses the standard `fetch` API. In environments where `fetch` is not available globally — older Node.js versions (< 18), certain React Native runtimes, or test environments — you have two options:
+
+### Option A — inject a fetch implementation per client
+
+Pass any `fetch`-compatible function via the `fetch` option. This only affects the SDK's own HTTP calls (event polling):
+
+```ts
+import fetch from 'node-fetch';
+
+const client = new SoroWillClient({
+  network: 'testnet',
+  contractId: 'C...',
+  fetch: fetch as unknown as typeof globalThis.fetch,
+});
+```
+
+### Option B — install a global polyfill
+
+The underlying `@stellar/stellar-sdk` `rpc.Server` reads `globalThis.fetch` directly and does not expose a per-instance override. If you need polyfilled fetch for all Soroban RPC traffic (not just event polling), install a global polyfill once at the top of your entry point, before constructing any client:
+
+```ts
+// entry.ts — must run before any SoroWillClient is constructed
+import fetch from 'cross-fetch';
+globalThis.fetch = fetch;
+```
+
+Popular polyfill packages: [`node-fetch`](https://github.com/node-fetch/node-fetch) (v3+, ESM), [`cross-fetch`](https://github.com/lquixada/cross-fetch) (CJS and ESM).
+
+> **Note:** Node.js 18+ ships with a built-in global `fetch` (unflagged in 21+). If your `engines` field targets `>=18`, no polyfill is needed.
+
+## Scripts, automation, and testing (KeypairSigner)
+
+Every state-changing `SoroWillClient` method signs transactions through the configured `WalletAdapter`. The default adapter uses the Freighter browser extension, which requires a running browser and user approval — neither of which is available in a Node.js script, a keeper bot, or a unit test.
+
+For those environments you can implement `WalletAdapter` directly on top of `@stellar/stellar-sdk`'s `Keypair`. No Freighter dependency is involved:
+
+```ts
+import { Keypair, Transaction, TransactionBuilder } from '@stellar/stellar-sdk';
+import { SoroWillClient } from '@sorowill/sdk';
+import type { WalletAdapter } from '@sorowill/sdk';
+
+class KeypairSigner implements WalletAdapter {
+  constructor(private readonly keypair: Keypair) {}
+
+  async getPublicKey(): Promise<string> {
+    return this.keypair.publicKey();
+  }
+
+  async signTransaction(
+    transactionXdr: string,
+    opts: { networkPassphrase: string },
+  ): Promise<string> {
+    const tx = TransactionBuilder.fromXDR(
+      transactionXdr,
+      opts.networkPassphrase,
+    ) as Transaction;
+    tx.sign(this.keypair);
+    return tx.toXDR();
+  }
+}
+
+// Load the secret from an environment variable — never hard-code it.
+const signer = new KeypairSigner(Keypair.fromSecret(process.env.STELLAR_SECRET!));
+
+const client = new SoroWillClient({
+  network: 'testnet',
+  contractId: 'C...',
+  wallet: signer,
+});
+
+const { willId } = await client.createWill({ /* ... */ });
+console.log('Created will', willId);
+```
+
+> **Security warning:** `KeypairSigner` holds a raw secret key in memory. It is intended for scripts, automation, and testing only — **never use it to handle real end-user funds in a browser** or any environment where the secret could be exposed to untrusted code. For production browser applications always use a browser-extension or hardware-wallet adapter (Freighter, Albedo, Ledger, etc.) so the secret never leaves the wallet.
+
 ## Wallet helpers
 
 `isFreighterInstalled()`, `connectWallet()`, `getPublicKey()`, and `signTransaction()` wrap the [Freighter](https://www.freighter.app/) browser extension API used by the default adapter for all state-changing calls.

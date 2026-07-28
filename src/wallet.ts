@@ -8,39 +8,74 @@ export interface WalletConnection {
 }
 
 /**
- * The minimal capability set a Stellar wallet must expose for
+ * The full capability set a Stellar wallet must expose for
  * {@link SoroWillClient} to read the connected account and sign transactions.
  *
  * Any wallet — Freighter, Albedo, xBull, Rabet, Lobstr, etc. — can be plugged
  * into the client by implementing this interface.
+ * into the client by implementing this interface. The module-level
+ * {@link getPublicKey} and {@link signTransaction} functions already satisfy
+ * it (see {@link freighterAdapter}).
+ *
+ * ### Browser wallets
+ *
+ * Browser-extension adapters (Freighter, Albedo, …) implement this interface
+ * and present a user-facing approval prompt when `signTransaction` is called.
+ * These are the right choice for any application that handles real end-user
+ * funds in a browser context.
+ *
+ * ### Scripts, automation, and testing — `KeypairSigner`
+ *
+ * For Node.js scripts, keeper bots, demo scripts, or unit tests where there is
+ * no browser extension available, build a lightweight adapter directly on top
+ * of `@stellar/stellar-sdk`'s `Keypair`:
+ *
+ * ```ts
+ * import { Keypair, Transaction, TransactionBuilder } from '@stellar/stellar-sdk';
+ * import type { WalletAdapter } from '@sorowill/sdk';
+ *
+ * export class KeypairSigner implements WalletAdapter {
+ *   constructor(private readonly keypair: Keypair) {}
+ *
+ *   async getPublicKey(): Promise<string> {
+ *     return this.keypair.publicKey();
+ *   }
+ *
+ *   async signTransaction(
+ *     transactionXdr: string,
+ *     opts: { networkPassphrase: string },
+ *   ): Promise<string> {
+ *     const tx = TransactionBuilder.fromXDR(
+ *       transactionXdr,
+ *       opts.networkPassphrase,
+ *     ) as Transaction;
+ *     tx.sign(this.keypair);
+ *     return tx.toXDR();
+ *   }
+ * }
+ * ```
+ *
+ * Pass it to the client via the `wallet` option:
+ *
+ * ```ts
+ * const signer = new KeypairSigner(Keypair.fromSecret('S...'));
+ * const client = new SoroWillClient({ network: 'testnet', contractId: 'C...', wallet: signer });
+ * ```
+ *
+ * > **Security warning:** `KeypairSigner` holds a raw secret key in memory.
+ * > It is intended for scripts, automation, and testing only — never use it
+ * > to handle real end-user funds in a browser or any environment where the
+ * > secret could be exposed to untrusted code.
  */
 export interface WalletAdapter {
-  /**
-   * Checks whether the wallet is currently connected/available.
-   */
   isConnected(): Promise<boolean>;
-  /** Connect to the wallet, prompting the user if necessary. */
   connect(): Promise<WalletConnection>;
-  /** Reconnect using a previously established session. */
   reconnect(): Promise<WalletConnection>;
-  /** Disconnect the current session. */
   disconnect(): Promise<void>;
-  /**
-   * Returns the connected account's public key (`G...`). May prompt the user
-   * to select or connect an account, depending on the wallet.
-   */
   getPublicKey(): Promise<string>;
-  /**
-   * Signs a base64-encoded transaction XDR envelope for the given network and
-   * resolves with the signed XDR.
-   */
-  signTransaction(
-    transactionXdr: string,
-    opts: { networkPassphrase: string },
-  ): Promise<string>;
+  signTransaction(transactionXdr: string, opts: { networkPassphrase: string }): Promise<string>;
 }
 
-/** Freighter browser extension adapter implementing {@link WalletAdapter}. */
 export class FreighterWalletAdapter implements WalletAdapter {
   async isConnected(): Promise<boolean> {
     const { isConnected, error } = await freighterApi.isConnected();

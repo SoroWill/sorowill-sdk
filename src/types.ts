@@ -125,6 +125,8 @@ export interface EventSubscription {
 export interface RequestOptions {
   /** Overrides the client's default RPC timeout for this call. */
   timeoutMs?: number;
+  /** An AbortSignal that can be used to cancel the in-flight request. */
+  signal?: AbortSignal;
 }
 
 /** A contract invocation to include in a single batch transaction. */
