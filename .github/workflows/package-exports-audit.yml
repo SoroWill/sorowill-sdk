@@ -1,0 +1,52 @@
+name: Package Exports Audit
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  audit-exports:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build package
+        run: npm run build
+
+      - name: Run export audit tests
+        run: npm test -- package-exports-audit.test.ts
+
+      - name: Install arethetypeswrong for type checking
+        run: npm install -D @arethetypeswrong/cli
+
+      - name: Check ESM and CJS type resolution
+        run: npx arethetypeswrong --check-all dist/index.js dist/index.cjs || true
+
+      - name: Validate package.json exports
+        run: |
+          node -e "
+          const pkg = require('./package.json');
+          const main = pkg.exports['.'];
+          const react = pkg.exports['./react'];
+
+          if (!main || !main.types || !main.import || !main.require) {
+            throw new Error('Main export missing required fields: types, import, require');
+          }
+
+          if (!react || !react.types || !react.import || !react.require) {
+            throw new Error('React export missing required fields: types, import, require');
+          }
+
+          console.log('✓ All export fields are properly configured');
+          "
