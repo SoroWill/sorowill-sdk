@@ -124,6 +124,34 @@ describe('calculateShares', () => {
     expect(total).toBe(100n);
     expect(shares[2]?.share).toBe('34');
   });
+
+  // Task 3: Fixture-based tests mirroring contract distribute() behavior.
+  // See: https://github.com/SoroWill/sorowill-contracts/blob/main/contracts/sorowill/src/contract.rs
+  it('contract fixture: 50/50 split of 1 stroop (indivisible balance)', () => {
+    const shares = calculateShares('1', [
+      { address: 'GA', percentage: 50 },
+      { address: 'GB', percentage: 50 },
+    ]);
+    expect(shares).toEqual([
+      { address: 'GA', share: '0' },
+      { address: 'GB', share: '1' },
+    ]);
+    const total = shares.reduce((sum, s) => sum + BigInt(s.share), 0n);
+    expect(total).toBe(1n);
+  });
+
+  it('contract fixture: 3-way split of prime balance 997', () => {
+    const shares = calculateShares('997', [
+      { address: 'GA', percentage: 34 },
+      { address: 'GB', percentage: 33 },
+      { address: 'GC', percentage: 33 },
+    ]);
+    const total = shares.reduce((sum, s) => sum + BigInt(s.share), 0n);
+    expect(total).toBe(997n);
+    expect(shares[0]?.share).toBe('338');
+    expect(shares[1]?.share).toBe('329');
+    expect(shares[2]?.share).toBe('330');
+  });
 });
 
 describe('formatDeadline', () => {
@@ -241,6 +269,9 @@ describe('HookManager', () => {
     const ctx: AfterInvokeContext = { method: 'test', args: { a: 1 }, timestamp: '', txHash: 'abc', error: null, durationMs: 42 };
     await hm.runAfterInvoke(ctx);
     expect(captured).toBe(ctx);
+  });
+});
+
 describe('ReadCache', () => {
   it('returns cached values before expiry', () => {
     let now = 1_000;

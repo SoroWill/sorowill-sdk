@@ -474,6 +474,9 @@ export class SoroWillClient {
     options?: RequestOptions,
   ): Promise<{ txHash: string; nextDeadline: Date }> {
     const owner = await getPublicKey();
+    // checkin_period_days is a stored will property not returned by the
+    // contract's check_in function, so a separate getWill() read is
+    // unavoidable in order to compute the nextDeadline return value.
     const will = await this.getWill(willId, options);
     const { txHash, createdAt } = await this.invoke('check_in', {
       will_id: BigInt(willId),
@@ -494,6 +497,9 @@ export class SoroWillClient {
     options?: RequestOptions,
   ): Promise<{ txHash: string; nextDeadline: Date }> {
     const owner = await getPublicKey();
+    // checkin_period_days is a stored will property not returned by the
+    // contract's emergency_checkin function, so a separate getWill() read is
+    // unavoidable in order to compute the nextDeadline return value.
     const will = await this.getWill(willId, options);
     const { txHash, createdAt } = await this.invoke('emergency_checkin', {
       will_id: BigInt(willId),
@@ -521,11 +527,19 @@ export class SoroWillClient {
     options?: RequestOptions,
   ): Promise<{ txHash: string; refundAmount: string }> {
     const owner = await getPublicKey();
-    const will = await this.getWill(willId, options);
-    const { txHash } = await this.invoke('cancel_will', {
+    const { txHash, returnValue } = await this.invoke('cancel_will', {
       will_id: BigInt(willId),
       owner,
     }, options);
+    // cancel_will returns the refunded balance on success. Decode it from the
+    // transaction return value to avoid an extra getWill() round-trip.
+    if (returnValue) {
+      const spec = await this.getSpec(options);
+      const refundAmount = spec.funcResToNative('cancel_will', returnValue) as bigint;
+      return { txHash, refundAmount: refundAmount.toString() };
+    }
+    // Fallback for older contract versions that don't return the balance.
+    const will = await this.getWill(willId, options);
     return { txHash, refundAmount: will.balance };
   }
 
@@ -587,13 +601,53 @@ export class SoroWillClient {
    * Casts a guardian vote to force an early release of `willId`. Once 2 of
    * the will's guardians have voted, the balance is released automatically.
    */
+  async guardianTrigger(willId: string): Promise<{ txHash: string }> {
+    const guardian = await this.wallet.getPublicKey();
+  async guardianTrigger(
+    willId: string,
+    options?: RequestOptions,
+  ): Promise<{ txHash: string; votesSoFar: number; released: boolean }> {
   async guardianTrigger(willId: string, options?: RequestOptions): Promise<{ txHash: string }> {
     const guardian = await getPublicKey();
-    const { txHash } = await this.invoke('guardian_trigger', {
+    const { txHash, returnValue, events } = await this.invoke('guardian_trigger', {
       will_id: BigInt(willId),
       guardian,
     }, options);
-    return { txHash };
+
+    let votesSoFar = 0;
+    let released = false;
+
+    // Decode contract events emitted during this transaction.
+    if (events && events.length > 0) {
+      for (const event of events) {
+        const topics = event.topics ?? [];
+        if (topics.includes('gvote')) {
+          votesSoFar = (event.data as { votes?: number })?.votes ?? 1;
+        }
+        if (topics.includes('released')) {
+          released = true;
+        }
+      }
+    }
+
+    // Fallback: try decoding the return value if events weren't available.
+    if (!released && !votesSoFar && returnValue) {
+      try {
+        const spec = await this.getSpec(options);
+        const result = spec.funcResToNative('guardian_trigger', returnValue) as {
+          votes?: number;
+          released?: boolean;
+        } | bigint;
+        if (typeof result === 'object' && result !== null) {
+          votesSoFar = result.votes ?? 0;
+          released = result.released ?? false;
+        }
+      } catch {
+        // Return value isn't decodable as a tuple; events are the primary source.
+      }
+    }
+
+    return { txHash, votesSoFar, released };
   }
 
   /**
@@ -746,9 +800,17 @@ export class SoroWillClient {
     operations: readonly xdr.Operation[],
     label: string,
     options?: RequestOptions,
-  ): Promise<{ txHash: string; createdAt: number; returnValue: ScVal | undefined }> {
+  ): Promise<{
+    txHash: string;
+    createdAt: number;
+    returnValue: ScVal | undefined;
+    events?: Array<{ topics: string[]; data: unknown }>;
+  }> {
+    options?.signal?.throwIfAborted();
+
     try {
       const publicKey = await getPublicKey();
+      options?.signal?.throwIfAborted();
       const account = await this.rpc(() => this.server.getAccount(publicKey), options);
       const builder = new TransactionBuilder(account, {
         fee: (BigInt(BASE_FEE) * BigInt(operations.length)).toString(),
@@ -758,6 +820,7 @@ export class SoroWillClient {
       const builtTx = builder.setTimeout(30).build();
 
       // prepareTransaction simulates and assembles Soroban data for the whole transaction.
+      options?.signal?.throwIfAborted();
       const prepared = await this.rpc(() => this.server.prepareTransaction(builtTx), options);
       const signedTxXdr = await signTransaction(prepared.toXDR(), {
         networkPassphrase: this.networkPassphrase,
@@ -767,6 +830,7 @@ export class SoroWillClient {
         this.networkPassphrase,
       ) as Transaction;
 
+      options?.signal?.throwIfAborted();
       const sendResponse = await this.rpc(() => this.server.sendTransaction(signedTx), options);
 
       // Handle distinct sendTransaction statuses per the Soroban RPC spec.
@@ -777,6 +841,7 @@ export class SoroWillClient {
         );
       }
 
+      options?.signal?.throwIfAborted();
       if (sendResponse.status === 'TRY_AGAIN_LATER') {
         throw new SoroWillError(
           `SoroWill RPC node is under backpressure — transaction for ${label} could not be submitted. Retry later.`,
@@ -800,18 +865,30 @@ export class SoroWillClient {
         );
       }
 
+      // Extract events from the transaction result meta, if available.
+      let events: Array<{ topics: string[]; data: unknown }> | undefined;
+      const txResponseAny = txResponse as unknown as Record<string, unknown>;
+      if (Array.isArray(txResponseAny.events)) {
+        events = txResponseAny.events as Array<{ topics: string[]; data: unknown }>;
+      }
+
       return {
         txHash: sendResponse.hash,
         createdAt: txResponse.createdAt,
         returnValue: txResponse.returnValue,
+        events,
       };
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       throw mapContractError(error);
     }
   }
 
   /** Sends every RPC through the shared FIFO queue with the selected timeout. */
   private rpc<T>(request: () => Promise<T>, options?: RequestOptions): Promise<T> {
+    options?.signal?.throwIfAborted();
     return this.queue.enqueue(request, options?.timeoutMs ?? this.timeoutMs);
   }
 
