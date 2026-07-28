@@ -7,9 +7,9 @@ export interface BuildSep7TxUriOptions {
 
 export interface Sep7CallbackResult {
   transactionXdr: string;
-  signerAddress?: string;
-  status?: string;
-  message?: string;
+  signerAddress?: string | undefined;
+  status?: string | undefined;
+  message?: string | undefined;
 }
 
 function normalizeSep7Params(input: string | URL | URLSearchParams): URLSearchParams {

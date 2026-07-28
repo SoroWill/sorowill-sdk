@@ -1,23 +1,24 @@
 // @ts-nocheck -- mock SDK types are fundamentally incompatible with real @stellar/stellar-sdk types
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const freighterApiMock = {
-  getAddress: vi.fn(async () => ({ address: 'GTESTACCOUNT', error: undefined })),
-  requestAccess: vi.fn(),
-  getNetworkDetails: vi.fn(),
-  isConnected: vi.fn(),
-  signTransaction: vi.fn(),
-};
-
-const mockState = {
-  createdServerUrls: [] as string[],
-  getAccount: vi.fn(async (publicKey: string) => ({ accountId: publicKey, sequence: '1' })),
-  getContractWasmByContractId: vi.fn(async () => new Uint8Array()),
-  pollTransaction: vi.fn(),
-  prepareTransaction: vi.fn(async (tx: { toXDR: () => string }) => ({ toXDR: tx.toXDR })),
-  sendTransaction: vi.fn(),
-  simulateTransaction: vi.fn(),
-};
+const { freighterApiMock, mockState } = vi.hoisted(() => ({
+  freighterApiMock: {
+    getAddress: vi.fn(async () => ({ address: 'GTESTACCOUNT', error: undefined })),
+    requestAccess: vi.fn(),
+    getNetworkDetails: vi.fn(),
+    isConnected: vi.fn(),
+    signTransaction: vi.fn(),
+  },
+  mockState: {
+    createdServerUrls: [] as string[],
+    getAccount: vi.fn(async (publicKey: string) => ({ accountId: publicKey, sequence: '1' })),
+    getContractWasmByContractId: vi.fn(async () => new Uint8Array()),
+    pollTransaction: vi.fn(),
+    prepareTransaction: vi.fn(async (tx: { toXDR: () => string }) => ({ toXDR: tx.toXDR })),
+    sendTransaction: vi.fn(),
+    simulateTransaction: vi.fn(),
+  },
+}));
 
 vi.mock('@stellar/freighter-api', () => ({
   default: freighterApiMock,
@@ -405,10 +406,10 @@ describe('SoroWillClient', () => {
     const webSocketFactory = vi.fn((url: string) => {
       const socket = {
         close: vi.fn(),
-        onclose: null,
-        onerror: null,
-        onmessage: null,
-        onopen: null,
+        onclose: null as ((event: { code?: number; reason?: string }) => void) | null,
+        onerror: null as ((event: Event | unknown) => void) | null,
+        onmessage: null as ((event: { data: string }) => void) | null,
+        onopen: null as ((event: Event | unknown) => void) | null,
         send: vi.fn(() => {
           queueMicrotask(() => {
             socket.onmessage?.({

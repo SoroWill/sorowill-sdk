@@ -110,7 +110,7 @@ export interface PaginationOptions {
   /** Maximum number of wills to return in this page. */
   pageSize?: number;
   /** Opaque cursor returned by the previous page, if any. */
-  cursor?: string;
+  cursor?: string | undefined;
 }
 
 /** A page of wills plus the cursor needed to fetch the next page, if any. */
