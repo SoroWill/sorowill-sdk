@@ -6,6 +6,14 @@ const USDC_DECIMALS = 7;
 const USDC_BASE: bigint = 10n ** BigInt(USDC_DECIMALS);
 
 /**
+ * Approximate Soroban ledger close time, in milliseconds. Matches the
+ * default `defaultPollIntervalMs` used internally by `SoroWillClient` for
+ * event subscriptions, so consumers polling `getWill` or transaction status
+ * themselves don't each have to hardcode this magic number independently.
+ */
+export const SOROBAN_LEDGER_CLOSE_TIME_MS = 5_000;
+
+/**
  * Formats a base-unit token amount (e.g. contract-side `i128` stroops) as a
  * human-readable decimal string with thousands separators, e.g.
  * `formatUSDC(12345000000n) === "1,234.50"`.
