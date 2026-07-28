@@ -101,11 +101,30 @@ export function formatDeadline(date: Date): string {
 }
 
 /**
- * Validates that a beneficiary list is well-formed: non-empty, every
- * percentage is positive, and percentages sum to exactly 100.
+ * Maximum number of beneficiaries the SoroWill contract allows per will.
+ *
+ * **IMPORTANT**: This value mirrors the `MAX_BENEFICIARIES` constant in the
+ * contract's `errors.rs` and must be kept in sync manually until the
+ * contracts repo ships automated spec-drift tooling (issue #122).
+ */
+export const MAX_BENEFICIARIES = 10;
+
+/**
+ * Maximum number of guardians the SoroWill contract allows per will.
+ *
+ * **IMPORTANT**: This value mirrors the `MAX_GUARDIANS` constant in the
+ * contract's `errors.rs` and must be kept in sync manually until the
+ * contracts repo ships automated spec-drift tooling (issue #122).
+ */
+export const MAX_GUARDIANS = 3;
+
+/**
+ * Validates that a beneficiary list is well-formed: non-empty, at most
+ * {@link MAX_BENEFICIARIES} entries, every percentage is a positive
+ * integer, and percentages sum to exactly 100.
  */
 export function validateBeneficiaries(beneficiaries: Beneficiary[]): boolean {
-  if (beneficiaries.length === 0) {
+  if (beneficiaries.length === 0 || beneficiaries.length > MAX_BENEFICIARIES) {
     return false;
   }
   if (!beneficiaries.every((b) => Number.isInteger(b.percentage) && b.percentage > 0)) {
@@ -113,4 +132,27 @@ export function validateBeneficiaries(beneficiaries: Beneficiary[]): boolean {
   }
   const sum = beneficiaries.reduce((acc, b) => acc + b.percentage, 0);
   return sum === 100;
+}
+
+/**
+ * Validates a guardian list: empty list is valid (guardians are optional),
+ * at most {@link MAX_GUARDIANS} entries, no duplicate addresses, and no
+ * owner address in the list.
+ *
+ * @param guardians - The list of guardian addresses to validate.
+ * @param ownerAddress - Optional owner address; when supplied, the function
+ *                       rejects any guardian that matches it.
+ */
+export function validateGuardians(guardians: string[], ownerAddress?: string): boolean {
+  if (guardians.length > MAX_GUARDIANS) {
+    return false;
+  }
+  const unique = new Set(guardians);
+  if (unique.size !== guardians.length) {
+    return false;
+  }
+  if (ownerAddress !== undefined && unique.has(ownerAddress)) {
+    return false;
+  }
+  return true;
 }

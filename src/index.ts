@@ -55,7 +55,7 @@ export type {
   UpdateBeneficiariesParams,
   Will,
 } from './types';
-export { WillStatus } from './types';
+export { WillStatus, WillErrorCode } from './types';
 
 export {
   FreighterWalletAdapter,
@@ -136,6 +136,8 @@ export type {
 } from './adapters';
 
 export {
+  MAX_BENEFICIARIES,
+  MAX_GUARDIANS,
   calculateShares,
   formatDeadline,
   formatUSDC,
@@ -143,4 +145,5 @@ export {
   isCheckinDue,
   toStroops,
   validateBeneficiaries,
+  validateGuardians,
 } from './utils';
