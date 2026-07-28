@@ -185,4 +185,12 @@ export function getDefaultWalletAdapter(): WalletAdapter {
  * extension. This is what {@link SoroWillClient} uses when no `wallet` option
  * is supplied, so existing Freighter-based usage keeps working unchanged.
  */
+export const freighterAdapter: WalletAdapter = {
+  isConnected: () => defaultFreighterWalletAdapter.isConnected(),
+  connect: () => defaultFreighterWalletAdapter.connect(),
+  reconnect: () => defaultFreighterWalletAdapter.reconnect(),
+  disconnect: () => defaultFreighterWalletAdapter.disconnect(),
+  getPublicKey,
+  signTransaction,
+};
 export const freighterAdapter: WalletAdapter = defaultFreighterWalletAdapter;

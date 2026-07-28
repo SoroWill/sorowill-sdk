@@ -6,6 +6,7 @@ export type {
   RpcRetryOptions,
   SoroWillClientOptions,
   SoroWillNetwork,
+  SoroWillRpcServer,
   SoroWillReadCacheOptions,
   SoroWillRpcServer,
 } from './SoroWillClient';
@@ -104,6 +105,7 @@ export {
   NotOwnerError,
   RequestTimeoutError,
   SoroWillError,
+  SoroWillRestoreRequiredError,
   TooManyBeneficiariesError,
   WillContractError,
   WillNotActiveError,

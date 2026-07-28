@@ -15,10 +15,21 @@ import {
   type ReadCacheOptions,
 } from './cache';
 import {
+  SoroWillError,
+  SoroWillRestoreRequiredError,
+  mapContractError,
+} from './errors';
+import {
   unsubscribeFromWillEvents,
   type WillEventSource,
   type WillEventSubscription,
 } from './events';
+import { HookManager } from './hooks';
+import type { BeforeInvokeContext, AfterInvokeContext } from './hooks';
+import { RequestQueue } from './requestQueue';
+import { RpcEndpointPool } from './rpc';
+import { buildSep7TxUri, type BuildSep7TxUriOptions } from './sep7';
+import { assertPreparedTransactionMatchesIntendedOperation } from './txValidation';
 import type {
   BatchOperation,
   BatchResult,
@@ -32,6 +43,7 @@ import type {
   Will,
 } from './types';
 import { WillStatus } from './types';
+import { getPublicKey, signTransaction, type WalletAdapter } from './wallet';
 import {
   freighterAdapter,
   getDefaultWalletAdapter,
@@ -50,6 +62,8 @@ import { assertPreparedTransactionMatchesIntendedOperation } from './txValidatio
 type ScVal = xdr.ScVal;
 
 const { Spec } = stellarContract;
+
+type ScVal = xdr.ScVal;
 
 /** An impossible account used to simulate read-only calls without a connected wallet. */
 const NULL_ACCOUNT = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
@@ -96,6 +110,7 @@ interface ContractSpecLike {
   funcArgsToScVals(method: string, args: Record<string, unknown>): ScVal[];
   funcResToNative(method: string, value: ScVal): unknown;
 }
+
 
 type EnvSource = Record<string, string | undefined>;
 type FetchImplementation = typeof fetch;
@@ -158,6 +173,8 @@ export interface SoroWillClientOptions {
   hooks?: HookManager;
   /**
    * The wallet used to read the connected account and sign transactions.
+   * Defaults to the Freighter browser extension. Supply any {@link WalletAdapter}
+   * — e.g. `createAlbedoAdapter()` — to use a different Stellar wallet.
    * Defaults to the Freighter browser extension for backwards compatibility.
    */
   wallet?: WalletAdapter;
@@ -216,6 +233,8 @@ export interface SoroWillClientOptions {
   specJson?: Buffer | string | unknown[];
   /** Optional override for the Soroban RPC endpoint. */
   rpcUrl?: string;
+  /** Optional list of RPC endpoints to use with automatic failover. */
+  rpcUrls?: string[];
   /** Optional override for the Stellar network passphrase. */
   networkPassphrase?: string;
   /** Optional override for the endpoint used for event polling. */
@@ -324,6 +343,12 @@ function mapWill(raw: RawWill): Will {
   };
 }
 
+function getMutationWillIds(_method: string, args: Record<string, unknown>): string[] {
+  if (typeof args.will_id === 'bigint') {
+    return [args.will_id.toString()];
+  }
+
+  return [];
 function mapEventRecord(record: RpcEventRecord, fallbackContractId: string): SoroWillEvent {
   const cursor = record.pagingToken ?? record.id ?? '';
   return {
@@ -372,12 +397,22 @@ function getDefaultEnv(): EnvSource {
  * TypeScript. Read methods (`getWill`, `getWillsByOwner`,
  * `getWillsByBeneficiary`) work without a connected wallet. All other
  * methods sign and submit a transaction via the configured wallet adapter.
+ *
+ * The contract spec (WASM) is lazily fetched and cached in memory on first
+ * use. If the contract is redeployed with a new WASM while a client instance
+ * is still alive, call {@link refreshSpec} to invalidate the cached spec so
+ * subsequent calls encode/decode against the updated interface.
  */
 export class SoroWillClient {
+  private readonly server: SoroWillRpcServer;
   private readonly rpcPool: RpcEndpointPool;
   private readonly contract: Contract;
   private readonly networkPassphrase: string;
   private readonly hooks: HookManager;
+  private readonly readCache: ReadCache | undefined;
+  private readonly specOverride: ContractSpecLike | Promise<ContractSpecLike> | undefined;
+  private readonly queue: RequestQueue;
+  private readonly timeoutMs: number;
   private readonly wallet: WalletAdapter;
   private readonly retryOptions: RpcRetryOptions;
   private readonly pollAttempts: number;
@@ -385,18 +420,18 @@ export class SoroWillClient {
   private readonly specJsonOverride: Buffer | string | unknown[] | undefined;
   private specPromise: Promise<ContractSpecLike> | undefined;
   private readonly eventSubscription?: WillEventSubscription;
+  private specPromise: Promise<ContractSpecLike> | undefined;
 
   constructor(options: SoroWillClientOptions) {
     const config = NETWORK_CONFIG[options.network];
+    const rpcUrl: string = options.rpcUrl ?? config.rpcUrls[0] ?? '';
     this.server =
       options.rpcServer ??
-      new rpc.Server(config.rpcUrl, { allowHttp: config.rpcUrl.startsWith('http://') });
+      new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') });
+    this.rpcPool = new RpcEndpointPool(options.rpcUrls ?? config.rpcUrls);
     this.contract = new Contract(options.contractId);
-    this.networkPassphrase = config.networkPassphrase;
+    this.networkPassphrase = options.networkPassphrase ?? config.networkPassphrase;
     this.hooks = options.hooks ?? new HookManager();
-    this.wallet = options.wallet ?? freighterAdapter;
-    this.wallet = options.wallet ?? getDefaultWalletAdapter();
-    this.retryOptions = { ...DEFAULT_RETRY_OPTIONS, ...options.retry };
     this.readCache = options.readCache === false ? undefined : new ReadCache(options.readCache);
     this.specOverride = options.spec;
     this.specJsonOverride = options.specJson;
@@ -454,6 +489,9 @@ export class SoroWillClient {
       throw new RangeError('timeoutMs must be greater than zero');
     }
     this.queue = new RequestQueue({
+      maxConcurrent: options.maxConcurrentRequests ?? 4,
+      requestsPerSecond: options.requestsPerSecond ?? 10,
+    });
       ...(options.maxConcurrentRequests === undefined
         ? {}
         : { maxConcurrent: options.maxConcurrentRequests }),
@@ -688,12 +726,20 @@ export class SoroWillClient {
 
   /** Reads the full state of a will. Does not require a connected wallet. */
   async getWill(willId: string, options?: RequestOptions): Promise<Will> {
+    const raw = await this.readCached(
+      `get_will:${willId}`,
+      () => this.read<RawWill>('get_will', { will_id: BigInt(willId) }, options),
+    );
     const raw = await this.read<RawWill>('get_will', { will_id: BigInt(willId) }, options);
     return mapWill(raw);
   }
 
   /** Lists every will owned by `owner`. Does not require a connected wallet. */
   async getWillsByOwner(owner: string, options?: RequestOptions): Promise<Will[]> {
+    const raw = await this.readCached(
+      `get_wills_by_owner:${owner}`,
+      () => this.read<RawWill[]>('get_wills_by_owner', { owner }, options),
+    );
     const raw = await this.read<RawWill[]>('get_wills_by_owner', { owner }, options);
     return raw.map(mapWill);
   }
@@ -703,6 +749,9 @@ export class SoroWillClient {
     beneficiary: string,
     options?: RequestOptions,
   ): Promise<Will[]> {
+    const raw = await this.readCached(
+      `get_wills_by_beneficiary:${beneficiary}`,
+      () => this.read<RawWill[]>('get_wills_by_beneficiary', { beneficiary }, options),
     const raw = await this.read<RawWill[]>(
       'get_wills_by_beneficiary',
       { beneficiary },
@@ -736,6 +785,23 @@ export class SoroWillClient {
       guardian,
     }, options);
 
+  /**
+   * Invalidates and re-fetches the cached contract spec. Call this after a
+   * contract redeploy to ensure subsequent calls encode/decode against the
+   * updated WASM interface.
+   *
+   * Returns the freshly-loaded spec so callers can await completion before
+   * making further calls.
+   */
+  async refreshSpec(options?: RequestOptions): Promise<ContractSpecLike> {
+    this.specPromise = undefined;
+    return this.getSpec(options);
+  }
+
+  /** Unsubscribes from any configured event source. */
+  destroy(): void {
+    if (this.eventSubscription) {
+      unsubscribeFromWillEvents(this.eventSubscription);
     let votesSoFar = 0;
     let released = false;
 
@@ -864,6 +930,32 @@ export class SoroWillClient {
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Lazily fetches and caches the contract's spec from its deployed WASM.
+   * On rejection the cached promise is cleared so the next call triggers a
+   * fresh attempt instead of replaying a stale error.
+   */
+  private async getSpec(_options?: RequestOptions): Promise<ContractSpecLike> {
+    if (!this.specPromise) {
+      if (this.specOverride) {
+        this.specPromise = Promise.resolve(this.specOverride);
+      } else {
+        const fetchPromise = this.server.getContractWasmByContractId(
+          this.contract.contractId(),
+        );
+
+        this.specPromise = fetchPromise.then((wasm) => Spec.fromWasm(Buffer.from(wasm)));
+
+        // Clear the cached promise on failure so subsequent calls retry
+        // instead of replaying the stale rejection forever.
+        this.specPromise.catch(() => {
+          this.specPromise = undefined;
+        });
+      }
   /** Unsubscribes from any configured event source. */
   destroy(): void {
     if (this.eventSubscription) {
@@ -915,6 +1007,12 @@ export class SoroWillClient {
       if (rpc.Api.isSimulationError(simulation)) {
         throw new SoroWillError(`SoroWill simulation failed for ${method}: ${simulation.error}`);
       }
+      if (rpc.Api.isSimulationRestore(simulation)) {
+        throw new SoroWillRestoreRequiredError(
+          `SoroWill simulation for ${method} requires ledger-entry restoration`,
+          simulation,
+        );
+      }
       if (!simulation.result) {
         throw new SoroWillError(`SoroWill simulation for ${method} returned no result`);
       }
@@ -947,11 +1045,51 @@ export class SoroWillClient {
     let error: string | null = null;
 
     try {
+      const builtTx = await this.buildInvocationTransaction(method, args);
+      const prepared = await this.prepareInvocation(method, args, builtTx);
+
+      assertPreparedTransactionMatchesIntendedOperation({
+        intendedTransactionXdr: builtTx.toXDR(),
+        preparedTransactionXdr: prepared.toXDR(),
+        networkPassphrase: this.networkPassphrase,
+        context: method,
+      });
+
+      const signedTxXdr = await signTransaction(prepared.toXDR(), {
+        networkPassphrase: this.networkPassphrase,
+      });
+      const signedTx = TransactionBuilder.fromXDR(signedTxXdr, this.networkPassphrase) as Transaction;
+
+      const sendResponse = await this.rpc(() => this.server.sendTransaction(signedTx), options);
+      if (sendResponse.status === 'ERROR') {
+        const errorXdr = sendResponse.errorResult?.toXDR('base64') ?? 'no error result';
+        throw new SoroWillError(
+          `SoroWill transaction submission failed for ${method}: ${errorXdr}`,
+        );
+      }
+
+      const txResponse = await this.rpc(
+        () => this.server.pollTransaction(sendResponse.hash, { attempts: 30 }),
+        options,
+      );
+      if (txResponse.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+        throw new SoroWillError(
+          `SoroWill transaction for ${method} did not succeed: ${txResponse.status}`,
+        );
+      }
       const spec = await this.getSpec(options);
       const operation = this.contract.call(method, ...spec.funcArgsToScVals(method, args));
       const result = await this.submit([operation], method, options);
 
       txHash = result.txHash;
+
+      // Invalidate affected read-cache entries
+      if (method === 'create_will') {
+        await this.readCache?.clear();
+      } else {
+        const affectedWillIds = getMutationWillIds(method, args);
+        await Promise.all(affectedWillIds.map((willId) => this.readCache?.invalidateByWillId(willId)));
+      }
 
       const afterCtx: AfterInvokeContext = {
         method,
@@ -966,19 +1104,18 @@ export class SoroWillClient {
       return result;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
-      throw err;
-    } finally {
-      if (error) {
-        const afterCtx: AfterInvokeContext = {
-          method,
-          args,
-          timestamp: new Date().toISOString(),
-          txHash,
-          error,
-          durationMs: Date.now() - startTime,
-        };
-        await this.hooks.runAfterInvoke(afterCtx);
-      }
+
+      const afterCtx: AfterInvokeContext = {
+        method,
+        args,
+        timestamp: new Date().toISOString(),
+        txHash,
+        error,
+        durationMs: Date.now() - startTime,
+      };
+      await this.hooks.runAfterInvoke(afterCtx);
+
+      throw mapContractError(err);
     }
   }
 
@@ -1103,7 +1240,7 @@ export class SoroWillClient {
     const operation = this.contract.call(method, ...scArgs);
 
     const publicKey = sourcePublicKey ?? (await getPublicKey());
-    const account = await this.rpcPool.withFailover((server) => server.getAccount(publicKey));
+    const account = await this.server.getAccount(publicKey);
     return new TransactionBuilder(account, {
       fee: BASE_FEE,
       networkPassphrase: this.networkPassphrase,
@@ -1121,6 +1258,12 @@ export class SoroWillClient {
   ): Promise<Transaction> {
     const transaction =
       builtTx ?? (await this.buildInvocationTransaction(method, args, sourcePublicKey));
+    return this.server.prepareTransaction(transaction);
+  }
+
+  /** Sends every RPC through the shared FIFO queue with the selected timeout. */
+  private rpc<T>(request: () => Promise<T>, options?: RequestOptions): Promise<T> {
+    return this.queue.enqueue(request, options?.timeoutMs ?? this.timeoutMs);
     return this.rpcPool.withFailover((server) => server.prepareTransaction(transaction));
   }
 
