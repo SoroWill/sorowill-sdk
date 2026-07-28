@@ -47,6 +47,7 @@ import { HookManager } from './hooks';
 import type { BeforeInvokeContext, AfterInvokeContext } from './hooks';
 import { assertPreparedTransactionMatchesIntendedOperation } from './txValidation';
 import { InFlightTracker } from './inFlightTracker';
+import { DebugLogger } from './debugLogger';
 
 type ScVal = xdr.ScVal;
 
@@ -392,6 +393,7 @@ export class SoroWillClient {
   private specPromise: Promise<InstanceType<typeof Spec>> | undefined;
   private readonly inFlightTracker = new InFlightTracker();
   private readonly debug: boolean;
+  private readonly debugLogger: DebugLogger;
   private readonly autoFeeBumpOnTimeout: boolean;
 
   constructor(options: SoroWillClientOptions) {
@@ -434,6 +436,7 @@ export class SoroWillClient {
     });
     this.readCache = options.readCache === false ? undefined : new ReadCache(options.readCache);
     this.debug = options.debug ?? false;
+    this.debugLogger = new DebugLogger(this.debug);
     this.autoFeeBumpOnTimeout = options.autoFeeBumpOnTimeout ?? false;
 
     if (this.readCache && options.eventSource) {
@@ -907,10 +910,19 @@ export class SoroWillClient {
 
     try {
       const spec = await this.getSpec(options);
+      this.debugLogger.logOperationBuild(method, String(args.will_id ?? args.owner ?? ''));
+
       const operation = this.contract.call(method, ...spec.funcArgsToScVals(method, args));
       const result = await this.submit([operation], method, options);
 
       txHash = result.txHash;
+
+      this.debugLogger.logSuccess(
+        method,
+        String(args.will_id ?? args.owner ?? ''),
+        txHash,
+        Date.now() - startTime,
+      );
 
       const afterCtx: AfterInvokeContext = {
         method,
@@ -925,6 +937,7 @@ export class SoroWillClient {
       return result;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
+      this.debugLogger.logError(method, String(args.will_id ?? args.owner ?? ''), err);
       throw err;
     } finally {
       if (error) {
@@ -968,6 +981,8 @@ export class SoroWillClient {
       // prepareTransaction simulates and assembles Soroban data for the whole transaction.
       options?.signal?.throwIfAborted();
       const prepared = await this.rpc(() => this.server.prepareTransaction(builtTx), options);
+      this.debugLogger.logSimulation(label);
+
       const signedTxXdr = await signTransaction(prepared.toXDR(), {
         networkPassphrase: this.networkPassphrase,
       });
@@ -978,6 +993,7 @@ export class SoroWillClient {
 
       options?.signal?.throwIfAborted();
       const sendResponse = await this.rpc(() => this.server.sendTransaction(signedTx), options);
+      this.debugLogger.logSubmission(label, '', sendResponse.hash);
 
       // Handle distinct sendTransaction statuses per the Soroban RPC spec.
       if (sendResponse.status === 'ERROR') {
