@@ -109,7 +109,7 @@ export function useWillsByOwner(
       .getWillsByOwner(owner)
       .then((wills) => {
         if (!cancelled) {
-          setData(wills);
+          setData(Array.isArray(wills) ? wills : wills.wills);
           setLoading(false);
         }
       })
@@ -162,7 +162,7 @@ export function useWillsByBeneficiary(
       .getWillsByBeneficiary(beneficiary)
       .then((wills) => {
         if (!cancelled) {
-          setData(wills);
+          setData(Array.isArray(wills) ? wills : wills.wills);
           setLoading(false);
         }
       })

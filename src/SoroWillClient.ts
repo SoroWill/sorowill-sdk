@@ -122,9 +122,28 @@ interface RpcEventRecord {
   value?: unknown;
 }
 
-interface RpcEventPage {
-  events?: RpcEventRecord[];
-  nextCursor?: string | null;
+/** Options for constructing a read cache scoped to SoroWill reads. */
+export interface SoroWillReadCacheOptions {
+  ttlMs?: number;
+}
+
+/** Event subscription types. */
+export type EventSubscriptionTransport = 'polling' | 'websocket';
+
+/** Controls how event subscriptions are established and paged. */
+export interface EventSubscriptionOptions {
+  cursor?: string;
+  pageSize?: number;
+  pollIntervalMs?: number;
+  transport?: 'auto' | EventSubscriptionTransport;
+  onError?: (error: Error) => void;
+}
+
+/** Handle for an active event subscription. */
+export interface EventSubscription {
+  readonly transport: EventSubscriptionTransport;
+  readonly closed: boolean;
+  close(): void;
 }
 
 export interface SoroWillReadCacheOptions extends Pick<ReadCacheOptions, 'ttlMs'> {}
@@ -327,7 +346,7 @@ function normalizePositiveInteger(value: number | undefined, label: string): num
 
 function getDefaultEnv(): EnvSource {
   if (typeof process !== 'undefined' && process.env) {
-    return process.env;
+    return process.env as EnvSource;
   }
   return {};
 }
@@ -339,7 +358,7 @@ function getDefaultEnv(): EnvSource {
  * methods sign and submit a transaction via the configured wallet adapter.
  */
 export class SoroWillClient {
-  private readonly server: SoroWillRpcServer;
+  private readonly rpcPool: RpcEndpointPool;
   private readonly contract: Contract;
   private readonly networkPassphrase: string;
   private readonly hooks: HookManager;
@@ -379,11 +398,10 @@ export class SoroWillClient {
 
     this.rpcPool = new RpcEndpointPool(options.rpcUrls ?? config.rpcUrls);
     this.eventRpcUrl = options.eventRpcUrl ?? rpcUrl;
-    this.eventStreamUrl = options.eventStreamUrl ?? this.deriveDefaultEventStreamUrl(this.eventRpcUrl);
-    this.defaultPollIntervalMs = normalizePositiveInteger(
-      options.defaultPollIntervalMs,
-      'defaultPollIntervalMs',
-    ) ?? 5_000;
+    this.eventStreamUrl =
+      options.eventStreamUrl ?? this.deriveDefaultEventStreamUrl(this.eventRpcUrl);
+    this.defaultPollIntervalMs =
+      normalizePositiveInteger(options.defaultPollIntervalMs, 'defaultPollIntervalMs') ?? 5_000;
     this.fetchImplementation = options.fetch;
     this.webSocketFactory = options.webSocketFactory;
     this.timeoutMs = options.timeoutMs ?? 30_000;
@@ -407,6 +425,10 @@ export class SoroWillClient {
     }
   }
 
+  // -----------------------------------------------------------------------
+  // Static factory
+  // -----------------------------------------------------------------------
+
   /**
    * Constructs a client from environment variables.
    *
@@ -418,6 +440,9 @@ export class SoroWillClient {
    * - `SOROWILL_EVENT_RPC_URL` (optional)
    * - `SOROWILL_EVENT_STREAM_URL` (optional)
    * - `SOROWILL_EVENTS_POLL_INTERVAL_MS` (optional)
+   *
+   * @throws {Error} If `SOROWILL_NETWORK` is not `"testnet"` or `"mainnet"`.
+   * @throws {Error} If `SOROWILL_CONTRACT_ID` is not set.
    */
   static fromEnv(env: EnvSource = getDefaultEnv()): SoroWillClient {
     const network = env.SOROWILL_NETWORK;
@@ -445,23 +470,40 @@ export class SoroWillClient {
     });
   }
 
-  /** Locks `params.amount` of `params.token` and creates a new will. */
+  // -----------------------------------------------------------------------
+  // Public: state-changing methods
+  // -----------------------------------------------------------------------
+
+  /**
+   * Locks `params.amount` of `params.token` and creates a new will.
+   *
+   * @returns The newly created will's ID and the transaction hash.
+   * @throws {SoroWillError} If the transaction simulation fails or returns no result.
+   * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout.
+   * @throws {WillContractError} Mapped contract-level errors (e.g. InvalidPercentagesError,
+   *   TooManyBeneficiariesError, ZeroAmountError).
+   * @throws {Error} If the wallet is not connected or fails to sign.
+   */
   async createWill(
     params: CreateWillParams,
     options?: RequestOptions,
   ): Promise<{ willId: string; txHash: string }> {
     const owner = await getPublicKey();
-    const { txHash, returnValue } = await this.invoke('create_will', {
-      owner,
-      token: params.token,
-      amount: BigInt(params.amount),
-      beneficiaries: params.beneficiaries,
-      checkin_period_days: BigInt(params.checkinPeriodDays),
-      grace_period_days: BigInt(params.gracePeriodDays),
-      guardians: params.guardians,
-    }, options);
+    const { txHash, returnValue } = await this.invoke(
+      'create_will',
+      {
+        owner,
+        token: params.token,
+        amount: BigInt(params.amount),
+        beneficiaries: params.beneficiaries,
+        checkin_period_days: BigInt(params.checkinPeriodDays),
+        grace_period_days: BigInt(params.gracePeriodDays),
+        guardians: params.guardians,
+      },
+      options,
+    );
     if (!returnValue) {
-      throw new Error('create_will transaction succeeded but returned no will id');
+      throw new SoroWillError('create_will transaction succeeded but returned no will id');
     }
     const spec = await this.getSpec(options);
     const willId = (spec.funcResToNative('create_will', returnValue) as bigint).toString();
@@ -478,14 +520,27 @@ export class SoroWillClient {
     // contract's check_in function, so a separate getWill() read is
     // unavoidable in order to compute the nextDeadline return value.
     const will = await this.getWill(willId, options);
-    const { txHash, createdAt } = await this.invoke('check_in', {
-      will_id: BigInt(willId),
-      owner,
-    }, options);
-    return { txHash, nextDeadline: new Date((createdAt + will.checkinPeriodDays * 86_400) * 1000) };
+    const { txHash, createdAt } = await this.invoke(
+      'check_in',
+      { will_id: BigInt(willId), owner },
+      options,
+    );
+    return {
+      txHash,
+      nextDeadline: new Date((createdAt + will.checkinPeriodDays * 86_400) * 1000),
+    };
   }
 
-  /** Starts the grace period for `willId` once the check-in deadline has passed. */
+  /**
+   * Starts the grace period for `willId` once the check-in deadline has passed.
+   *
+   * @returns The transaction hash.
+   * @throws {SoroWillError} If the transaction simulation/submission fails.
+   * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout.
+   * @throws {WillNotFoundError} If the will does not exist.
+   * @throws {CheckinNotDueError} If the check-in deadline has not passed.
+   * @throws {Error} If the wallet is not connected or fails to sign.
+   */
   async triggerWill(willId: string, options?: RequestOptions): Promise<{ txHash: string }> {
     const { txHash } = await this.invoke('trigger_will', { will_id: BigInt(willId) }, options);
     return { txHash };
@@ -501,14 +556,28 @@ export class SoroWillClient {
     // contract's emergency_checkin function, so a separate getWill() read is
     // unavoidable in order to compute the nextDeadline return value.
     const will = await this.getWill(willId, options);
-    const { txHash, createdAt } = await this.invoke('emergency_checkin', {
-      will_id: BigInt(willId),
-      owner,
-    }, options);
-    return { txHash, nextDeadline: new Date((createdAt + will.checkinPeriodDays * 86_400) * 1000) };
+    const { txHash, createdAt } = await this.invoke(
+      'emergency_checkin',
+      { will_id: BigInt(willId), owner },
+      options,
+    );
+    return {
+      txHash,
+      nextDeadline: new Date((createdAt + will.checkinPeriodDays * 86_400) * 1000),
+    };
   }
 
-  /** Distributes the will's balance to all beneficiaries once the grace period has elapsed. */
+  /**
+   * Distributes the will's balance to all beneficiaries once the grace period has elapsed.
+   *
+   * @returns The transaction hash.
+   * @throws {SoroWillError} If the transaction simulation/submission fails.
+   * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout.
+   * @throws {WillNotFoundError} If the will does not exist.
+   * @throws {WillNotTriggeredError} If the will has not been triggered.
+   * @throws {GracePeriodNotExpiredError} If the grace period has not yet expired.
+   * @throws {Error} If the wallet is not connected or fails to sign.
+   */
   async releaseInheritance(
     willId: string,
     options?: RequestOptions,
@@ -549,11 +618,11 @@ export class SoroWillClient {
     options?: RequestOptions,
   ): Promise<{ txHash: string }> {
     const owner = await getPublicKey();
-    const { txHash } = await this.invoke('update_beneficiaries', {
-      will_id: BigInt(params.willId),
-      owner,
-      beneficiaries: params.beneficiaries,
-    }, options);
+    const { txHash } = await this.invoke(
+      'update_beneficiaries',
+      { will_id: BigInt(params.willId), owner, beneficiaries: params.beneficiaries },
+      options,
+    );
     return { txHash };
   }
 
@@ -594,12 +663,20 @@ export class SoroWillClient {
       { beneficiary },
       options,
     );
-    return raw.map(mapWill);
+    return { txHash };
   }
 
   /**
    * Casts a guardian vote to force an early release of `willId`. Once 2 of
    * the will's guardians have voted, the balance is released automatically.
+   *
+   * @returns The transaction hash.
+   * @throws {SoroWillError} If the transaction simulation/submission fails.
+   * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout.
+   * @throws {WillNotFoundError} If the will does not exist.
+   * @throws {NotGuardianError} If the caller is not a guardian of this will.
+   * @throws {AlreadyVotedError} If this guardian has already voted.
+   * @throws {Error} If the wallet is not connected or fails to sign.
    */
   async guardianTrigger(willId: string): Promise<{ txHash: string }> {
     const guardian = await this.wallet.getPublicKey();
@@ -653,8 +730,18 @@ export class SoroWillClient {
   /**
    * Combines contract calls into one atomic transaction and one wallet signature prompt.
    * Arguments use the native names and values accepted by the deployed contract spec.
+   *
+   * @returns The transaction hash and creation timestamp.
+   * @throws {RangeError} If the batch contains zero operations.
+   * @throws {SoroWillError} If the transaction simulation/submission fails.
+   * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout.
+   * @throws {WillContractError} Mapped contract-level errors from any operation in the batch.
+   * @throws {Error} If the wallet is not connected or fails to sign.
    */
-  async batch(operations: readonly BatchOperation[], options?: RequestOptions): Promise<BatchResult> {
+  async batch(
+    operations: readonly BatchOperation[],
+    options?: RequestOptions,
+  ): Promise<BatchResult> {
     if (operations.length === 0) {
       throw new RangeError('A batch must contain at least one operation');
     }
@@ -662,13 +749,48 @@ export class SoroWillClient {
     const contractOperations = operations.map(({ method, args }) =>
       this.contract.call(method, ...spec.funcArgsToScVals(method, args)),
     );
-    const result = await this.submit(contractOperations, 'batch', options);
+
+    // Build a multi-operation transaction manually (batch has its own path
+    // since buildTransaction handles single operations)
+    const publicKey = await getPublicKey();
+    const account = await this.rpc(
+      () => this.rpcPool.withFailover((server) => server.getAccount(publicKey)),
+      options,
+    );
+    const builder = new TransactionBuilder(account, {
+      fee: (BigInt(BASE_FEE) * BigInt(contractOperations.length)).toString(),
+      networkPassphrase: this.networkPassphrase,
+    });
+    for (const op of contractOperations) {
+      builder.addOperation(op);
+    }
+    const builtTx = builder.setTimeout(30).build();
+
+    const prepared = await this.rpc(
+      () => this.rpcPool.withFailover((server) => server.prepareTransaction(builtTx)),
+      options,
+    );
+
+    assertPreparedTransactionMatchesIntendedOperation({
+      intendedTransactionXdr: builtTx.toXDR(),
+      preparedTransactionXdr: prepared.toXDR(),
+      networkPassphrase: this.networkPassphrase,
+      context: 'batch',
+    });
+
+    const signedTxXdr = await signTransaction(prepared.toXDR(), {
+      networkPassphrase: this.networkPassphrase,
+    });
+    const result = await this.submitSignedTransaction(signedTxXdr, options);
     return { txHash: result.txHash, createdAt: result.createdAt };
   }
 
   /**
    * Builds a SEP-7 deep-link URI for a state-changing contract call, so a
    * mobile wallet can sign it outside the browser extension flow.
+   *
+   * @returns The `web+stellar:tx?...` URI string.
+   * @throws {Error} If the RPC call to build the transaction fails.
    */
   async buildSep7SigningUri(
     method: string,
@@ -691,7 +813,9 @@ export class SoroWillClient {
   }
 
   /** Lazily fetches and caches the contract's spec from its deployed wasm. */
-  private async getSpec(options?: RequestOptions): Promise<InstanceType<typeof Spec>> {
+  private async getSpec(
+    options?: RequestOptions,
+  ): Promise<InstanceType<typeof Spec>> {
     if (!this.specPromise) {
       if (this.specOverride) {
         this.specPromise = Promise.resolve(this.specOverride) as Promise<InstanceType<typeof Spec>>;
@@ -725,7 +849,10 @@ export class SoroWillClient {
         .setTimeout(30)
         .build();
 
-      const simulation = await this.rpc(() => this.server.simulateTransaction(tx), options);
+      const simulation = await this.rpc(
+        () => this.rpcPool.withFailover((server) => server.simulateTransaction(tx)),
+        options,
+      );
       if (rpc.Api.isSimulationError(simulation)) {
         throw new SoroWillError(`SoroWill simulation failed for ${method}: ${simulation.error}`);
       }
@@ -745,6 +872,7 @@ export class SoroWillClient {
     args: Record<string, unknown>,
     options?: RequestOptions,
   ): Promise<{ txHash: string; createdAt: number; returnValue: ScVal | undefined }> {
+    // Run beforeInvoke hooks
     const beforeCtx: BeforeInvokeContext = {
       method,
       args,
@@ -752,7 +880,7 @@ export class SoroWillClient {
     };
     const proceed = await this.hooks.runBeforeInvoke(beforeCtx);
     if (!proceed) {
-      throw new Error(`SoroWill invocation aborted by beforeInvoke hook for ${method}`);
+      throw new SoroWillError(`SoroWill invocation aborted by beforeInvoke hook for ${method}`);
     }
 
     const startTime = Date.now();
@@ -886,37 +1014,19 @@ export class SoroWillClient {
     }
   }
 
+  // -----------------------------------------------------------------------
+  // Private: RPC wrapper through queue
+  // -----------------------------------------------------------------------
+
   /** Sends every RPC through the shared FIFO queue with the selected timeout. */
   private rpc<T>(request: () => Promise<T>, options?: RequestOptions): Promise<T> {
     options?.signal?.throwIfAborted();
     return this.queue.enqueue(request, options?.timeoutMs ?? this.timeoutMs);
   }
 
-  private async retryRpc<T>(label: string, operation: () => Promise<T>): Promise<T> {
-    let delayMs = this.retryOptions.initialDelayMs;
-    let lastError: unknown;
-
-    for (let attempt = 1; attempt <= this.retryOptions.maxAttempts; attempt += 1) {
-      try {
-        return await operation();
-      } catch (error) {
-        lastError = error;
-        if (attempt === this.retryOptions.maxAttempts) {
-          break;
-        }
-
-        await this.sleep(delayMs);
-        delayMs = Math.min(
-          this.retryOptions.maxDelayMs,
-          Math.max(delayMs, 1) * this.retryOptions.backoffFactor,
-        );
-      }
-    }
-
-    throw new Error(
-      `SoroWill RPC call ${label} failed after ${this.retryOptions.maxAttempts} attempts: ${String(lastError)}`,
-    );
-  }
+  // -----------------------------------------------------------------------
+  // Private: transaction building helpers
+  // -----------------------------------------------------------------------
 
   private async sleep(durationMs: number): Promise<void> {
     await new Promise<void>((resolve) => {
@@ -950,7 +1060,8 @@ export class SoroWillClient {
     builtTx?: Transaction,
     sourcePublicKey?: string,
   ): Promise<Transaction> {
-    const transaction = builtTx ?? (await this.buildInvocationTransaction(method, args, sourcePublicKey));
+    const transaction =
+      builtTx ?? (await this.buildInvocationTransaction(method, args, sourcePublicKey));
     return this.rpcPool.withFailover((server) => server.prepareTransaction(transaction));
   }
 

@@ -148,18 +148,26 @@ export class FreighterWalletAdapter implements WalletAdapter {
 
 const defaultFreighterWalletAdapter = new FreighterWalletAdapter();
 
+/**
+ * Checks whether the Freighter browser extension is installed. This does not
+ * require the current site to be connected/allowed — it only checks for the
+ * extension's presence.
+ */
 export async function isFreighterInstalled(): Promise<boolean> {
   return await defaultFreighterWalletAdapter.isConnected();
 }
 
+/** Connects to the Freighter wallet and returns the connection details. */
 export async function connectWallet(): Promise<WalletConnection> {
   return await defaultFreighterWalletAdapter.connect();
 }
 
+/** Returns the public key of the currently connected Freighter account. */
 export async function getPublicKey(): Promise<string> {
   return await defaultFreighterWalletAdapter.getPublicKey();
 }
 
+/** Signs a transaction XDR using the connected Freighter wallet. */
 export async function signTransaction(
   transactionXdr: string,
   opts: { networkPassphrase: string },
@@ -167,6 +175,7 @@ export async function signTransaction(
   return await defaultFreighterWalletAdapter.signTransaction(transactionXdr, opts);
 }
 
+/** Returns the default Freighter-based wallet adapter instance. */
 export function getDefaultWalletAdapter(): WalletAdapter {
   return defaultFreighterWalletAdapter;
 }
@@ -176,7 +185,4 @@ export function getDefaultWalletAdapter(): WalletAdapter {
  * extension. This is what {@link SoroWillClient} uses when no `wallet` option
  * is supplied, so existing Freighter-based usage keeps working unchanged.
  */
-export const freighterAdapter: WalletAdapter = {
-  getPublicKey,
-  signTransaction,
-};
+export const freighterAdapter: WalletAdapter = defaultFreighterWalletAdapter;
