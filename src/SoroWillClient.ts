@@ -1017,10 +1017,61 @@ export class SoroWillClient {
       }
 
       // PENDING and DUPLICATE both proceed to polling.
-      const txResponse = await this.rpc(
-        () => this.server.pollTransaction(sendResponse.hash, { attempts: this.pollAttempts }),
-        options,
-      );
+      let txResponse: rpc.Api.GetTransactionResponse;
+      try {
+        txResponse = await this.rpc(
+          () => this.server.pollTransaction(sendResponse.hash, { attempts: this.pollAttempts }),
+          options,
+        );
+      } catch (pollError) {
+        // If poll times out and auto fee-bump is enabled, retry with higher fee
+        if (this.autoFeeBumpOnTimeout) {
+          this.debugLogger.logPoll(label, '');
+
+          const feeBumpFee = (BigInt(BASE_FEE) * BigInt(operations.length) * BigInt(2)).toString();
+          const feeBumpBuilder = new TransactionBuilder(account, {
+            fee: feeBumpFee,
+            networkPassphrase: this.networkPassphrase,
+          });
+          for (const operation of operations) feeBumpBuilder.addOperation(operation);
+          const feeBumpTx = feeBumpBuilder.setTimeout(30).build();
+
+          const feeBumpPrepared = await this.rpc(
+            () => this.rpcPool.withFailover((server) => server.prepareTransaction(feeBumpTx)),
+            options,
+          );
+
+          const feeBumpSignedXdr = await signTransaction(feeBumpPrepared.toXDR(), {
+            networkPassphrase: this.networkPassphrase,
+          });
+          const feeBumpSignedTx = TransactionBuilder.fromXDR(
+            feeBumpSignedXdr,
+            this.networkPassphrase,
+          ) as Transaction;
+
+          const feeBumpResponse = await this.rpc(
+            () => this.server.sendTransaction(feeBumpSignedTx),
+            options,
+          );
+
+          if (feeBumpResponse.status === 'ERROR') {
+            const errorXdr = feeBumpResponse.errorResult?.toXDR?.('base64') ?? 'no error result';
+            throw new SoroWillError(
+              `SoroWill fee-bump transaction submission failed for ${label}: ${errorXdr}`,
+            );
+          }
+
+          this.debugLogger.logSubmission(label, '', feeBumpResponse.hash);
+
+          txResponse = await this.rpc(
+            () => this.server.pollTransaction(feeBumpResponse.hash, { attempts: this.pollAttempts }),
+            options,
+          );
+        } else {
+          throw pollError;
+        }
+      }
+
       if (txResponse.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
         throw new SoroWillError(
           `SoroWill transaction for ${label} did not succeed: ${txResponse.status}`,
