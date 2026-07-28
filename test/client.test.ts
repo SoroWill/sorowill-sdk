@@ -60,6 +60,13 @@ describe('toStroops', () => {
     expect(toStroops(formatUSDC(original))).toBe(original);
   });
 
+  it('round-trips with formatUSDC at cents precision for very large amounts', () => {
+    // ~12.3 billion whole USDC, well past realistic small-test amounts, to
+    // exercise BigInt arithmetic and toLocaleString formatting at scale.
+    const original = 123_456_789_012_300_000n;
+    expect(toStroops(formatUSDC(original))).toBe(original);
+  });
+
   it('throws on invalid input', () => {
     expect(() => toStroops('not-a-number')).toThrow();
     expect(() => toStroops('')).toThrow();
