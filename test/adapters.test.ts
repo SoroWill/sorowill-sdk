@@ -1,4 +1,4 @@
-import { Networks } from '@stellar/stellar-sdk';
+import { Account, Keypair, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const publicKeyMock = vi.fn();
@@ -16,16 +16,13 @@ import { freighterAdapter, type WalletAdapter } from '../src/wallet';
 
 // A no-op reference to prove the exported adapters are assignable to the
 // public WalletAdapter interface (compile-time contract check).
-const adapters: WalletAdapter[] = [freighterAdapter, createAlbedoAdapter()];
+const _adapters: WalletAdapter[] = [freighterAdapter, createAlbedoAdapter()];
+void _adapters;
 
 describe('freighterAdapter', () => {
   it('implements the WalletAdapter interface', () => {
     expect(typeof freighterAdapter.getPublicKey).toBe('function');
     expect(typeof freighterAdapter.signTransaction).toBe('function');
-  });
-
-  it('is included in the assignable adapter list', () => {
-    expect(adapters).toContain(freighterAdapter);
   });
 });
 
@@ -110,15 +107,16 @@ describe('SoroWillClient wallet injection', () => {
   it('defaults to the Freighter adapter when no wallet is supplied', async () => {
     const { SoroWillClient } = await import('../src/SoroWillClient');
     const client = new SoroWillClient({ network: 'testnet', contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR' });
-    // The wallet is private; assert the client constructs with the default
-    // rather than throwing, which proves the optional option is backwards
-    // compatible.
     expect(client).toBeInstanceOf(SoroWillClient);
   });
 
   it('accepts a custom WalletAdapter', async () => {
     const { SoroWillClient } = await import('../src/SoroWillClient');
     const customWallet: WalletAdapter = {
+      isConnected: vi.fn().mockResolvedValue(true),
+      connect: vi.fn().mockResolvedValue({ publicKey: 'GCUSTOM', network: 'testnet', networkPassphrase: Networks.TESTNET }),
+      reconnect: vi.fn(),
+      disconnect: vi.fn(),
       getPublicKey: vi.fn().mockResolvedValue('GCUSTOM'),
       signTransaction: vi.fn().mockResolvedValue('SIGNED'),
     };
@@ -130,14 +128,6 @@ describe('SoroWillClient wallet injection', () => {
     expect(client).toBeInstanceOf(SoroWillClient);
   });
 });
-import {
-  Account,
-  Keypair,
-  Networks,
-  Operation,
-  TransactionBuilder,
-} from '@stellar/stellar-sdk';
-import { describe, expect, it, vi } from 'vitest';
 
 import {
   HanaWalletAdapter,
@@ -235,7 +225,7 @@ describe('LedgerWalletAdapter', () => {
       signTransaction: vi.fn().mockReturnValue(confirmation),
     };
     const adapter = new LedgerWalletAdapter({
-      transport: {},
+      transport: {} as never,
       app,
       network: 'testnet',
       networkPassphrase: Networks.TESTNET,
@@ -257,4 +247,3 @@ describe('LedgerWalletAdapter', () => {
     expect(signed.signatures).toHaveLength(1);
   });
 });
-

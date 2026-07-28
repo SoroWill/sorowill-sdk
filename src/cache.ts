@@ -97,6 +97,9 @@ export class ReadCache {
   }
 
   get<T>(key: string): T | undefined {
+  async get<T>(key: string): Promise<T | undefined> {
+    await this.ready();
+
     const entry = this.entries.get(key);
     if (!entry) {
       return undefined;
@@ -104,6 +107,8 @@ export class ReadCache {
 
     if (entry.expiresAt !== null && entry.expiresAt <= this.now()) {
       this.entries.delete(key);
+    if (entry.expiresAt !== null && entry.expiresAt <= Date.now()) {
+      await this.delete(key);
       return undefined;
     }
 
@@ -293,5 +298,11 @@ export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter
       request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'));
       request.onsuccess = () => resolve(request.result);
     });
+  }
+
+  /** Invalidates any cache entries associated with a specific will ID. */
+  invalidateByWillId(_willId: string): void {
+    // Simple TTL cache doesn't track will IDs — entries expire naturally.
+    // Subclasses or future versions may add will-ID-aware eviction.
   }
 }

@@ -85,4 +85,9 @@ export function parseSep7Callback(input: string | URL | URLSearchParams): Sep7Ca
     ...(status === undefined ? {} : { status }),
     ...(message === undefined ? {} : { message }),
   };
+  const result: Sep7CallbackResult = { transactionXdr };
+  if (signerAddress !== undefined) result.signerAddress = signerAddress;
+  if (status !== undefined) result.status = status;
+  if (message !== undefined) result.message = message;
+  return result;
 }

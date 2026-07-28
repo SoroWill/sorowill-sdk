@@ -1,0 +1,25 @@
+{
+  "entryPoints": ["src/index.ts"],
+  "out": "docs/api",
+  "name": "@sorowill/sdk API Reference",
+  "readme": "none",
+  "includeVersion": true,
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "excludeInternal": true,
+  "categorizeByGroup": true,
+  "categoryOrder": [
+    "Client",
+    "Wallet",
+    "Types",
+    "Utilities",
+    "Errors",
+    "*"
+  ],
+  "navigationLinks": {
+    "GitHub": "https://github.com/SoroWill/sorowill-sdk",
+    "npm": "https://www.npmjs.com/package/@sorowill/sdk"
+  },
+  "gitRevision": "main",
+  "sourceLinkTemplate": "https://github.com/SoroWill/sorowill-sdk/blob/{gitRevision}/{path}#L{line}"
+}

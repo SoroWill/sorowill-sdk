@@ -6,6 +6,8 @@ import { RpcEndpointPool } from '../src/rpc';
 import { buildSep7TxUri, parseSep7Callback } from '../src/sep7';
 import { assertPreparedTransactionMatchesIntendedOperation } from '../src/txValidation';
 import {
+  MAX_BENEFICIARIES,
+  MAX_GUARDIANS,
   calculateShares,
   formatDeadline,
   formatUSDC,
@@ -13,6 +15,7 @@ import {
   isCheckinDue,
   toStroops,
   validateBeneficiaries,
+  validateGuardians,
 } from '../src/utils';
 import { WillStatus, type Will } from '../src/types';
 import { HookManager } from '../src/hooks';
@@ -124,6 +127,34 @@ describe('calculateShares', () => {
     expect(total).toBe(100n);
     expect(shares[2]?.share).toBe('34');
   });
+
+  // Task 3: Fixture-based tests mirroring contract distribute() behavior.
+  // See: https://github.com/SoroWill/sorowill-contracts/blob/main/contracts/sorowill/src/contract.rs
+  it('contract fixture: 50/50 split of 1 stroop (indivisible balance)', () => {
+    const shares = calculateShares('1', [
+      { address: 'GA', percentage: 50 },
+      { address: 'GB', percentage: 50 },
+    ]);
+    expect(shares).toEqual([
+      { address: 'GA', share: '0' },
+      { address: 'GB', share: '1' },
+    ]);
+    const total = shares.reduce((sum, s) => sum + BigInt(s.share), 0n);
+    expect(total).toBe(1n);
+  });
+
+  it('contract fixture: 3-way split of prime balance 997', () => {
+    const shares = calculateShares('997', [
+      { address: 'GA', percentage: 34 },
+      { address: 'GB', percentage: 33 },
+      { address: 'GC', percentage: 33 },
+    ]);
+    const total = shares.reduce((sum, s) => sum + BigInt(s.share), 0n);
+    expect(total).toBe(997n);
+    expect(shares[0]?.share).toBe('338');
+    expect(shares[1]?.share).toBe('329');
+    expect(shares[2]?.share).toBe('330');
+  });
 });
 
 describe('formatDeadline', () => {
@@ -164,6 +195,65 @@ describe('validateBeneficiaries', () => {
         { address: 'GBEN_B', percentage: 0 },
       ]),
     ).toBe(false);
+  });
+
+  it('rejects too many beneficiaries exceeding MAX_BENEFICIARIES', () => {
+    const tooMany = Array.from({ length: MAX_BENEFICIARIES + 1 }, (_, i) => ({
+      address: `GBEN_${i}`,
+      percentage: Math.floor(100 / (MAX_BENEFICIARIES + 1)),
+    }));
+    expect(validateBeneficiaries(tooMany)).toBe(false);
+  });
+
+  it('accepts exactly MAX_BENEFICIARIES', () => {
+    const exactlyMax = Array.from({ length: MAX_BENEFICIARIES }, (_, i) => ({
+      address: `GBEN_${i}`,
+      percentage: i < MAX_BENEFICIARIES - 1 ? 10 : 100 - (MAX_BENEFICIARIES - 1) * 10,
+    }));
+    expect(validateBeneficiaries(exactlyMax)).toBe(true);
+  });
+});
+
+describe('validateGuardians', () => {
+  it('accepts an empty guardian list', () => {
+    expect(validateGuardians([])).toBe(true);
+  });
+
+  it('accepts a valid guardian list', () => {
+    expect(validateGuardians(['GA', 'GB'])).toBe(true);
+  });
+
+  it('rejects too many guardians exceeding MAX_GUARDIANS', () => {
+    const tooMany = Array.from({ length: MAX_GUARDIANS + 1 }, (_, i) => `G${i}`);
+    expect(validateGuardians(tooMany)).toBe(false);
+  });
+
+  it('rejects duplicate guardian addresses', () => {
+    expect(validateGuardians(['GA', 'GA'])).toBe(false);
+  });
+
+  it('rejects owner address in guardian list when ownerAddress is supplied', () => {
+    expect(validateGuardians(['GA', 'GOWNER'], 'GOWNER')).toBe(false);
+  });
+
+  it('accepts guardian list when owner is not in the list', () => {
+    expect(validateGuardians(['GA', 'GB'], 'GOWNER')).toBe(true);
+  });
+
+  it('accepts guardian list when ownerAddress is not supplied', () => {
+    expect(validateGuardians(['GA', 'GB'])).toBe(true);
+  });
+});
+
+describe('MAX_BENEFICIARIES and MAX_GUARDIANS', () => {
+  it('exports MAX_BENEFICIARIES as a positive integer', () => {
+    expect(Number.isInteger(MAX_BENEFICIARIES)).toBe(true);
+    expect(MAX_BENEFICIARIES).toBeGreaterThan(0);
+  });
+
+  it('exports MAX_GUARDIANS as a positive integer', () => {
+    expect(Number.isInteger(MAX_GUARDIANS)).toBe(true);
+    expect(MAX_GUARDIANS).toBeGreaterThan(0);
   });
 });
 
