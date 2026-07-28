@@ -125,6 +125,27 @@ function errorText(error: unknown): string {
   }
 }
 
+/**
+ * Raised when a Soroban simulation returns a "restore required" result,
+ * indicating that archived/expired ledger entries must be restored via a
+ * separate {@link https://developers.stellar.org/docs/smart-contracts/guides/archival | footprint-restoration transaction}
+ * before the call can proceed.
+ *
+ * The caller should build and submit a `restoreFootprint` operation using
+ * the {@link restorePreamble} from this error, wait for confirmation, and
+ * then retry the original contract call.
+ */
+export class SoroWillRestoreRequiredError extends SoroWillError {
+  /** The simulation response containing the restore preamble needed to build
+   * the footprint-restoration transaction. */
+  readonly simulation: unknown;
+
+  constructor(message: string, simulation: unknown, options?: ErrorOptions) {
+    super(message, options);
+    this.simulation = simulation;
+  }
+}
+
 /** Converts a Soroban contract error code embedded in an RPC error into its typed SDK error. */
 export function mapContractError(error: unknown): Error {
   if (error instanceof WillContractError || error instanceof RequestTimeoutError) {

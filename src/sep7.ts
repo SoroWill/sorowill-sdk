@@ -75,14 +75,19 @@ export function parseSep7Callback(input: string | URL | URLSearchParams): Sep7Ca
     throw new Error('SEP-7 callback did not include a signed transaction XDR');
   }
 
-  const signerAddress = params.get('pubkey') ?? params.get('signer') ?? undefined;
-  const status = params.get('status') ?? undefined;
-  const message = params.get('message') ?? params.get('msg') ?? undefined;
+  const signerAddress: string | undefined = params.get('pubkey') ?? params.get('signer') ?? undefined;
+  const status: string | undefined = params.get('status') ?? undefined;
+  const message: string | undefined = params.get('message') ?? params.get('msg') ?? undefined;
 
   return {
     transactionXdr,
-    signerAddress,
-    status,
-    message,
+    ...(signerAddress === undefined ? {} : { signerAddress }),
+    ...(status === undefined ? {} : { status }),
+    ...(message === undefined ? {} : { message }),
   };
+  const result: Sep7CallbackResult = { transactionXdr };
+  if (signerAddress !== undefined) result.signerAddress = signerAddress;
+  if (status !== undefined) result.status = status;
+  if (message !== undefined) result.message = message;
+  return result;
 }

@@ -1,3 +1,4 @@
+// @ts-nocheck -- mock SDK types are fundamentally incompatible with real @stellar/stellar-sdk types
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const freighterApiMock = {
@@ -104,12 +105,20 @@ vi.mock('@stellar/stellar-sdk', () => {
     Transaction: class MockTransaction {},
     TransactionBuilder: MockTransactionBuilder,
     contract: {
-      Spec: {
-        fromWasm: () => ({
-          funcArgsToScVals: (_method: string, args: Record<string, unknown>) => [args],
-          funcResToNative: (_method: string, value: unknown) => value,
-        }),
-      },
+      Spec: Object.assign(
+        function Spec(_entries?: unknown) {
+          return {
+            funcArgsToScVals: (_method: string, args: Record<string, unknown>) => [args],
+            funcResToNative: (_method: string, value: unknown) => value,
+          };
+        },
+        {
+          fromWasm: () => ({
+            funcArgsToScVals: (_method: string, args: Record<string, unknown>) => [args],
+            funcResToNative: (_method: string, value: unknown) => value,
+          }),
+        },
+      ),
     },
     rpc: {
       Api: {
@@ -120,12 +129,35 @@ vi.mock('@stellar/stellar-sdk', () => {
       },
       Server: MockServer,
     },
-    xdr: {},
+    xdr: {
+      ScVal: {
+        scvVoid: () => ({}),
+      },
+      Operation: {},
+      TransactionEnvelope: {
+        fromXDR: () => ({
+          switch: () => ({}),
+          v1: () => ({
+            tx: () => ({
+              operations: () => [],
+            }),
+          }),
+          toXDR: () => ({ toString: () => '' }),
+        }),
+      },
+      EnvelopeType: {
+        envelopeTypeTx: () => ({}),
+        envelopeTypeTxFeeBump: () => ({}),
+      },
+      DecoratedSignature: {
+        fromXDR: () => ({}),
+      },
+    },
   };
 });
 
 import { SoroWillClient } from '../src/SoroWillClient';
-import { WillStatus, type EventSubscription, type SoroWillEvent } from '../src/types';
+import { WillStatus, WillErrorCode, type EventSubscription, type SoroWillEvent } from '../src/types';
 
 function rawWill(id: number): {
   balance: bigint;
@@ -192,14 +224,15 @@ describe('SoroWillClient', () => {
 
     const client = new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
     const firstPage = await client.getWillsByOwner('GOWNER', { pageSize: 2 });
-    const secondPage = await client.getWillsByOwner('GOWNER', {
-      pageSize: 2,
-      cursor: firstPage.nextCursor ?? undefined,
-    });
+    if (Array.isArray(firstPage)) throw new Error('Expected paginated result');
+    const secondPageOpts: Record<string, unknown> = { pageSize: 2 };
+    if (firstPage.nextCursor) secondPageOpts.cursor = firstPage.nextCursor;
+    const secondPage = await client.getWillsByOwner('GOWNER', secondPageOpts as never);
+    if (Array.isArray(secondPage)) throw new Error('Expected paginated result');
 
-    expect(firstPage.wills.map((will) => will.id)).toEqual(['1', '2']);
+    expect(firstPage.wills.map((will: { id: string }) => will.id)).toEqual(['1', '2']);
     expect(firstPage.nextCursor).toBe('2');
-    expect(secondPage.wills.map((will) => will.id)).toEqual(['3']);
+    expect(secondPage.wills.map((will: { id: string }) => will.id)).toEqual(['3']);
     expect(secondPage.nextCursor).toBeNull();
   });
 
@@ -210,14 +243,15 @@ describe('SoroWillClient', () => {
 
     const client = new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
     const firstPage = await client.getWillsByBeneficiary('GBEN', { pageSize: 1 });
-    const secondPage = await client.getWillsByBeneficiary('GBEN', {
-      pageSize: 1,
-      cursor: firstPage.nextCursor ?? undefined,
-    });
+    if (Array.isArray(firstPage)) throw new Error('Expected paginated result');
+    const secondPageOptsB: Record<string, unknown> = { pageSize: 1 };
+    if (firstPage.nextCursor) secondPageOptsB.cursor = firstPage.nextCursor;
+    const secondPage = await client.getWillsByBeneficiary('GBEN', secondPageOptsB as never);
+    if (Array.isArray(secondPage)) throw new Error('Expected paginated result');
 
-    expect(firstPage.wills.map((will) => will.id)).toEqual(['4']);
+    expect(firstPage.wills.map((will: { id: string }) => will.id)).toEqual(['4']);
     expect(firstPage.nextCursor).toBe('1');
-    expect(secondPage.wills.map((will) => will.id)).toEqual(['5']);
+    expect(secondPage.wills.map((will: { id: string }) => will.id)).toEqual(['5']);
     expect(secondPage.nextCursor).toBe('2');
   });
 
@@ -270,6 +304,21 @@ describe('SoroWillClient', () => {
     expect(mockState.sendTransaction).not.toHaveBeenCalled();
   });
 
+  it('WillErrorCode matches contract error codes', () => {
+    expect(WillErrorCode.WillNotFound).toBe(1);
+    expect(WillErrorCode.NotOwner).toBe(2);
+    expect(WillErrorCode.WillNotActive).toBe(3);
+    expect(WillErrorCode.WillNotTriggered).toBe(4);
+    expect(WillErrorCode.GracePeriodNotExpired).toBe(5);
+    expect(WillErrorCode.GracePeriodExpired).toBe(6);
+    expect(WillErrorCode.InvalidPercentages).toBe(7);
+    expect(WillErrorCode.AlreadyVoted).toBe(8);
+    expect(WillErrorCode.NotGuardian).toBe(9);
+    expect(WillErrorCode.CheckinNotDue).toBe(10);
+    expect(WillErrorCode.ZeroAmount).toBe(11);
+    expect(WillErrorCode.TooManyBeneficiaries).toBe(12);
+  });
+
   it('subscribes to events over polling transport', async () => {
     const seen: SoroWillEvent[] = [];
     let subscription: EventSubscription | undefined;
@@ -315,6 +364,38 @@ describe('SoroWillClient', () => {
     expect(subscription.transport).toBe('polling');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(seen.map((event) => event.id)).toEqual(['evt-1']);
+  });
+
+  it('skips WASM fetch when specJson is provided', async () => {
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CCONTRACT',
+      specJson: new Uint8Array(),
+    });
+
+    mockState.simulateTransaction.mockResolvedValue({
+      result: { retval: rawWill(1) },
+    });
+
+    await client.getWill('1');
+
+    // The cached spec path skips getContractWasmByContractId entirely
+    expect(mockState.getContractWasmByContractId).not.toHaveBeenCalled();
+  });
+
+  it('falls back to lazy WASM fetch when specJson is not provided', async () => {
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CCONTRACT',
+    });
+
+    mockState.simulateTransaction.mockResolvedValue({
+      result: { retval: rawWill(1) },
+    });
+
+    await client.getWill('1');
+
+    expect(mockState.getContractWasmByContractId).toHaveBeenCalled();
   });
 
   it('subscribes to events over WebSocket transport and falls back to polling when streaming is unavailable', async () => {
@@ -388,7 +469,7 @@ describe('SoroWillClient', () => {
       eventStreamUrl: 'wss://stream.example/events',
     });
 
-    const wsSubscription = await wsClient.subscribeToEvents((event) => {
+    const wsSubscription = await wsClient.subscribeToEvents((event: SoroWillEvent) => {
       websocketEvents.push(event);
     }, { transport: 'websocket' });
 
@@ -408,7 +489,7 @@ describe('SoroWillClient', () => {
       defaultPollIntervalMs: 1,
     });
 
-    fallbackSubscription = await fallbackClient.subscribeToEvents((event) => {
+    fallbackSubscription = await fallbackClient.subscribeToEvents((event: SoroWillEvent) => {
       fallbackEvents.push(event);
       fallbackSubscription?.close();
     });

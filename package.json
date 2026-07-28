@@ -26,14 +26,15 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
+    "lint": "eslint src/",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "docs:api": "typedoc"
   },
   "dependencies": {
-    "@albedo-link/intent": "^0.13.0",
-    "@ledgerhq/hw-app-str": "^7.7.6",
     "@albedo-link/intent": "0.13.0",
+    "@ledgerhq/hw-app-str": "^7.7.6",
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^16.0.1",
     "@testing-library/dom": "^10.4.1",
@@ -43,11 +44,15 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@eslint/js": "^9.0.0",
     "@types/node": "^26.1.0",
     "@types/react": "^19.0.0",
+    "eslint": "^9.0.0",
     "react": "^19.0.0",
     "tsup": "^8.5.1",
+    "typedoc": "^0.28.20",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.0.0",
     "vitest": "^4.1.9"
   },
   "peerDependencies": {

@@ -1,7 +1,7 @@
 import albedo from '@albedo-link/intent';
 import { Networks } from '@stellar/stellar-sdk';
 
-import type { WalletAdapter } from '../wallet';
+import type { WalletAdapter, WalletConnection } from '../wallet';
 
 /**
  * Maps a Stellar network passphrase to the network identifier Albedo expects
@@ -34,15 +34,51 @@ function toAlbedoNetwork(networkPassphrase: string): string {
  * ```
  */
 export function createAlbedoAdapter(): WalletAdapter {
-  // Albedo has no persistent "connected" state, so remember the key the user
-  // selects on the first getPublicKey() call and pin subsequent signatures to
-  // it.
   let cachedPublicKey: string | undefined;
+  let connected = false;
+
+  async function connect(): Promise<{ publicKey: string; network: string; networkPassphrase: string }> {
+    const resp = await albedo.publicKey({});
+    cachedPublicKey = resp.pubkey;
+    return { publicKey: resp.pubkey, network: 'public', networkPassphrase: '' };
+  }
 
   return {
+    async isConnected(): Promise<boolean> {
+      return connected;
+    },
+
+    async connect(): Promise<WalletConnection> {
+      const { pubkey } = await albedo.publicKey({});
+      cachedPublicKey = pubkey;
+      connected = true;
+      return { publicKey: pubkey, network: 'public', networkPassphrase: Networks.PUBLIC };
+    },
+
+    async reconnect(): Promise<WalletConnection> {
+      return this.connect();
+    },
+
+    async disconnect(): Promise<void> {
+      cachedPublicKey = undefined;
+      connected = false;
+    },
+
+      return true;
+    },
+    async connect(): Promise<{ publicKey: string; network: string; networkPassphrase: string }> {
+      return connect();
+    },
+    async reconnect(): Promise<{ publicKey: string; network: string; networkPassphrase: string }> {
+      return connect();
+    },
+    async disconnect(): Promise<void> {
+      cachedPublicKey = undefined;
+    },
     async getPublicKey(): Promise<string> {
       const { pubkey } = await albedo.publicKey({});
       cachedPublicKey = pubkey;
+      connected = true;
       return pubkey;
     },
 
