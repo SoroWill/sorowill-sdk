@@ -271,6 +271,19 @@ export interface SoroWillClientOptions {
    * Defaults to false (opt-in).
    */
   autoFeeBumpOnTimeout?: boolean;
+  /**
+   * The validity window (in seconds) set on every built transaction via
+   * `TransactionBuilder.setTimeout()`. Defaults to `30`.
+   *
+   * Increase this for signing flows that may take longer than 30 seconds
+   * (e.g. a hardware wallet whose user needs time to physically approve the
+   * transaction on-device), and decrease it if you want transactions to
+   * expire more quickly.
+   *
+   * The value is forwarded to every `read()`, `submit()`, `batch()`, and
+   * `buildInvocationTransaction()` call made by this client.
+   */
+  transactionTimeoutSeconds?: number;
 }
 
 /** The raw, snake_case shape of a `Will` as decoded straight off the contract spec. */
@@ -418,6 +431,7 @@ export class SoroWillClient {
   private readonly rpcPool: RpcEndpointPool;
   private readonly contract: Contract;
   private readonly networkPassphrase: string;
+  private readonly network: SoroWillNetwork;
   private readonly hooks: HookManager;
   private readonly wallet: WalletAdapter;
   private readonly retryOptions: RpcRetryOptions;
@@ -437,6 +451,7 @@ export class SoroWillClient {
   private readonly debug: boolean;
   private readonly debugLogger: DebugLogger;
   private readonly autoFeeBumpOnTimeout: boolean;
+  private readonly transactionTimeoutSeconds: number;
 
   constructor(options: SoroWillClientOptions) {
     const config = NETWORK_CONFIG[options.network];
@@ -447,6 +462,7 @@ export class SoroWillClient {
       new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') });
     this.contract = new Contract(options.contractId);
     this.networkPassphrase = options.networkPassphrase ?? config.networkPassphrase;
+    this.network = options.network;
     this.hooks = options.hooks ?? new HookManager();
     this.wallet = options.wallet ?? getDefaultWalletAdapter();
     this.retryOptions = { ...DEFAULT_RETRY_OPTIONS, ...options.retry };
@@ -480,6 +496,7 @@ export class SoroWillClient {
     this.debug = options.debug ?? false;
     this.debugLogger = new DebugLogger(this.debug);
     this.autoFeeBumpOnTimeout = options.autoFeeBumpOnTimeout ?? false;
+    this.transactionTimeoutSeconds = options.transactionTimeoutSeconds ?? 30;
 
     if (this.readCache && options.eventSource) {
       this.eventSubscription = options.eventSource.subscribe((event) => {
@@ -733,7 +750,7 @@ export class SoroWillClient {
       { beneficiary },
       options,
     );
-    return { txHash };
+    return mapWillList(raw);
   }
 
   /**
@@ -748,12 +765,6 @@ export class SoroWillClient {
    * @throws {AlreadyVotedError} If this guardian has already voted.
    * @throws {Error} If the wallet is not connected or fails to sign.
    */
-  async guardianTrigger(willId: string): Promise<{ txHash: string }> {
-    const guardian = await this.wallet.getPublicKey();
-  async guardianTrigger(
-    willId: string,
-    options?: RequestOptions,
-  ): Promise<{ txHash: string; votesSoFar: number; released: boolean }> {
   async guardianTrigger(willId: string, options?: RequestOptions): Promise<{ txHash: string }> {
     const guardian = await getPublicKey();
     const { txHash, returnValue, events } = await this.invoke('guardian_trigger', {
@@ -794,7 +805,9 @@ export class SoroWillClient {
       }
     }
 
-    return { txHash, votesSoFar, released };
+    void votesSoFar;
+    void released;
+    return { txHash };
   }
 
   /**
@@ -834,7 +847,7 @@ export class SoroWillClient {
     for (const op of contractOperations) {
       builder.addOperation(op);
     }
-    const builtTx = builder.setTimeout(30).build();
+    const builtTx = builder.setTimeout(this.transactionTimeoutSeconds).build();
 
     const prepared = await this.rpc(
       () => this.rpcPool.withFailover((server) => server.prepareTransaction(builtTx)),
@@ -882,6 +895,29 @@ export class SoroWillClient {
     }
   }
 
+  /**
+   * Returns the contract address this client was configured with.
+   *
+   * Useful when a consumer needs to display which contract a client is
+   * connected to (e.g. in a UI or a diagnostic log) without having to hold
+   * onto the original `SoroWillClientOptions` object separately.
+   */
+  getContractId(): string {
+    return this.contract.contractId();
+  }
+
+  /**
+   * Returns the Stellar network this client was configured with.
+   *
+   * Useful when a consumer needs to make decisions based on which network a
+   * client was built for — e.g. displaying "connected to testnet" in a UI,
+   * or guarding against accidentally running mainnet logic in a test
+   * environment.
+   */
+  getNetwork(): SoroWillNetwork {
+    return this.network;
+  }
+
   /** Lazily fetches and caches the contract's spec from its deployed wasm. */
   private async getSpec(
     options?: RequestOptions,
@@ -916,7 +952,7 @@ export class SoroWillClient {
         networkPassphrase: this.networkPassphrase,
       })
         .addOperation(operation)
-        .setTimeout(30)
+        .setTimeout(this.transactionTimeoutSeconds)
         .build();
 
       const simulation = await this.rpc(
@@ -928,6 +964,12 @@ export class SoroWillClient {
       }
       if (!simulation.result) {
         throw new SoroWillError(`SoroWill simulation for ${method} returned no result`);
+      }
+      if (simulation.result.retval === undefined || simulation.result.retval === null) {
+        throw new SoroWillError(
+          `SoroWill simulation for ${method} returned a malformed result: retval is missing. ` +
+            'This usually means the RPC node returned an unexpected response shape.',
+        );
       }
 
       return spec.funcResToNative(method, simulation.result.retval) as T;
@@ -1025,7 +1067,7 @@ export class SoroWillClient {
         networkPassphrase: this.networkPassphrase,
       });
       for (const operation of operations) builder.addOperation(operation);
-      const builtTx = builder.setTimeout(30).build();
+      const builtTx = builder.setTimeout(this.transactionTimeoutSeconds).build();
 
       // prepareTransaction simulates and assembles Soroban data for the whole transaction.
       options?.signal?.throwIfAborted();
@@ -1083,7 +1125,7 @@ export class SoroWillClient {
             networkPassphrase: this.networkPassphrase,
           });
           for (const operation of operations) feeBumpBuilder.addOperation(operation);
-          const feeBumpTx = feeBumpBuilder.setTimeout(30).build();
+          const feeBumpTx = feeBumpBuilder.setTimeout(this.transactionTimeoutSeconds).build();
 
           const feeBumpPrepared = await this.rpc(
             () => this.rpcPool.withFailover((server) => server.prepareTransaction(feeBumpTx)),
@@ -1184,7 +1226,7 @@ export class SoroWillClient {
       networkPassphrase: this.networkPassphrase,
     })
       .addOperation(operation)
-      .setTimeout(30)
+      .setTimeout(this.transactionTimeoutSeconds)
       .build();
   }
 
