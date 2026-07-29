@@ -39,7 +39,7 @@ import {
   signTransaction,
   type WalletAdapter,
 } from './wallet';
-import { mapContractError, SoroWillError } from './errors';
+import { mapContractError, SoroWillError, SoroWillInvalidAmountError } from './errors';
 import { RequestQueue } from './requestQueue';
 import { RpcEndpointPool } from './rpc';
 import { buildSep7TxUri, type BuildSep7TxUriOptions } from './sep7';
@@ -400,6 +400,25 @@ function normalizePositiveInteger(value: number | undefined, label: string): num
   return value;
 }
 
+/**
+ * Validates that `amount` is a string representing a positive integer before
+ * it is passed to `BigInt()`. Throws {@link SoroWillInvalidAmountError} for
+ * zero, negative, or malformed (non-numeric) strings so callers get a clear,
+ * SDK-level error rather than a raw `SyntaxError` or a wasted RPC round-trip.
+ */
+function validateAmount(amount: string): bigint {
+  // Only decimal digit strings with no leading minus or decimals are valid.
+  // Must be at least one character, all digits, and the parsed value > 0.
+  if (!/^\d+$/.test(amount)) {
+    throw new SoroWillInvalidAmountError(amount);
+  }
+  const value = BigInt(amount);
+  if (value <= 0n) {
+    throw new SoroWillInvalidAmountError(amount);
+  }
+  return value;
+}
+
 function getDefaultEnv(): EnvSource {
   if (typeof process !== 'undefined' && process.env) {
     return process.env as EnvSource;
@@ -557,7 +576,7 @@ export class SoroWillClient {
       {
         owner,
         token: params.token,
-        amount: BigInt(params.amount),
+        amount: validateAmount(params.amount),
         beneficiaries: params.beneficiaries,
         checkin_period_days: BigInt(params.checkinPeriodDays),
         grace_period_days: BigInt(params.gracePeriodDays),
@@ -706,12 +725,51 @@ export class SoroWillClient {
     const { txHash } = await this.invoke('top_up', {
       will_id: BigInt(willId),
       owner,
-      amount: BigInt(amount),
+      amount: validateAmount(amount),
     }, options);
     return { txHash };
   }
 
-  /** Reads the full state of a will. Does not require a connected wallet. */
+  // -----------------------------------------------------------------------
+  // Public: transaction polling
+  // -----------------------------------------------------------------------
+
+  /**
+   * Polls for the final status of a submitted transaction and returns its
+   * `createdAt` ledger timestamp and contract return value.
+   *
+   * This is the same polling-and-status-handling logic used internally by
+   * all state-changing methods. Consumers who submit transactions through a
+   * custom signing flow (e.g. using lower-level
+   * `buildTransaction`/`submitSignedTransaction` primitives) can call this
+   * directly instead of re-implementing the polling loop themselves.
+   *
+   * @param txHash - The hash returned by `sendTransaction`.
+   * @param options - Optional per-call timeout and abort signal.
+   * @returns The ledger creation timestamp and the contract return value, if any.
+   * @throws {SoroWillError} If the transaction does not reach `SUCCESS` status.
+   * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout.
+   */
+  async waitForTransaction(
+    txHash: string,
+    options?: RequestOptions,
+  ): Promise<{ createdAt: number; returnValue: xdr.ScVal | undefined }> {
+    const txResponse = await this.rpc(
+      () => this.server.pollTransaction(txHash, { attempts: this.pollAttempts }),
+      options,
+    );
+
+    if (txResponse.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+      throw new SoroWillError(
+        `SoroWill transaction ${txHash} did not succeed: ${txResponse.status}`,
+      );
+    }
+
+    return {
+      createdAt: txResponse.createdAt,
+      returnValue: txResponse.returnValue,
+    };
+  }
   async getWill(willId: string, options?: RequestOptions): Promise<Will> {
     const raw = await this.read<unknown>('get_will', { will_id: BigInt(willId) }, options);
     return mapWill(raw);
@@ -1066,12 +1124,9 @@ export class SoroWillClient {
       }
 
       // PENDING and DUPLICATE both proceed to polling.
-      let txResponse: rpc.Api.GetTransactionResponse;
+      let txResponse: { createdAt: number; returnValue: xdr.ScVal | undefined };
       try {
-        txResponse = await this.rpc(
-          () => this.server.pollTransaction(sendResponse.hash, { attempts: this.pollAttempts }),
-          options,
-        );
+        txResponse = await this.waitForTransaction(sendResponse.hash, options);
       } catch (pollError) {
         // If poll times out and auto fee-bump is enabled, retry with higher fee
         if (this.autoFeeBumpOnTimeout) {
@@ -1112,26 +1167,18 @@ export class SoroWillClient {
 
           this.debugLogger.logSubmission(label, '', feeBumpResponse.hash);
 
-          txResponse = await this.rpc(
-            () => this.server.pollTransaction(feeBumpResponse.hash, { attempts: this.pollAttempts }),
-            options,
-          );
+          txResponse = await this.waitForTransaction(feeBumpResponse.hash, options);
         } else {
           throw pollError;
         }
       }
 
-      if (txResponse.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
-        throw new SoroWillError(
-          `SoroWill transaction for ${label} did not succeed: ${txResponse.status}`,
-        );
-      }
-
       // Extract events from the transaction result meta, if available.
+      // waitForTransaction returns the raw response; cast to access events.
+      const rawResponse = txResponse as unknown as Record<string, unknown>;
       let events: Array<{ topics: string[]; data: unknown }> | undefined;
-      const txResponseAny = txResponse as unknown as Record<string, unknown>;
-      if (Array.isArray(txResponseAny.events)) {
-        events = txResponseAny.events as Array<{ topics: string[]; data: unknown }>;
+      if (Array.isArray(rawResponse.events)) {
+        events = rawResponse.events as Array<{ topics: string[]; data: unknown }>;
       }
 
       return {
