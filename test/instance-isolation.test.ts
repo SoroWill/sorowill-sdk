@@ -123,17 +123,19 @@ vi.mock('@stellar/stellar-sdk', () => {
         toXDR: () => 'TX_XDR',
       };
     }
-    static fromXDR(xdr: string, networkPassphrase: string) {
-      return { xdr, networkPassphrase };
+    static fromXDR(_xdr: string, _networkPassphrase: string) {
+      return new MockTransaction();
     }
   }
+
+  class MockTransaction {}
 
   return {
     Account: MockAccount,
     BASE_FEE: '100',
     Contract: MockContract,
     Networks: { PUBLIC: 'PUBLIC', TESTNET: 'TESTNET' },
-    Transaction: class MockTransaction {},
+    Transaction: MockTransaction,
     TransactionBuilder: MockTransactionBuilder,
     contract: {
       Spec: Object.assign(
