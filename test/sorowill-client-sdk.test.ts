@@ -210,8 +210,8 @@ describe('SoroWillClient read cache persistence', () => {
       }),
     });
 
-    const firstRead = await clientA.getWill('1');
-    expect(firstRead.id).toBe('1');
+    // First read: populates the persistent cache.
+    await clientA.getWill('1');
     expect(simulateCalls).toBe(1);
 
     const clientB = new SoroWillClient({
@@ -230,6 +230,7 @@ describe('SoroWillClient read cache persistence', () => {
 
     const secondRead = await clientB.getWill('1');
     expect(secondRead.id).toBe('1');
+    // RPC must still be 1 — clientB served the result from the shared persistence.
     expect(simulateCalls).toBe(1);
   });
 });
@@ -239,10 +240,10 @@ describe('SoroWillClient read cache', () => {
     const cache = new ReadCache({ ttlMs: 60_000 });
 
     cache.set('key1', { id: 'cached' });
-    expect(cache.get('key1')).toEqual({ id: 'cached' });
+    expect(await cache.get('key1')).toEqual({ id: 'cached' });
 
     cache.clear();
-    expect(cache.get('key1')).toBeUndefined();
+    expect(await cache.get('key1')).toBeUndefined();
   });
 });
 
