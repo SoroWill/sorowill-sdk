@@ -143,6 +143,37 @@ Contract failures are exposed as subclasses of `WillContractError`, including
 `AlreadyVotedError`, `NotGuardianError`, `CheckinNotDueError`, `ZeroAmountError`, and
 `TooManyBeneficiariesError`.
 
+### Structured error properties and error tracking
+
+Several SDK errors keep sensitive context as **typed properties** rather than embedding it in the
+error message string. This matters when you wire up an error-tracking service (Sentry, Datadog,
+etc.) — most of these services forward `error.message` automatically, so any value baked into the
+message becomes a potential data-privacy leak.
+
+| Error class | Sensitive property | What it contains |
+|---|---|---|
+| `SimulationError` | `.simulationError` | Raw RPC simulation error string (may include contract addresses) |
+| `TransactionSubmissionError` | `.errorXdr` | Base64-encoded XDR error result from the RPC node |
+| `InvalidCursorError` | `.cursor` | The user-supplied cursor value that failed validation |
+
+When integrating with an error-tracking service, filter or redact these properties before
+forwarding errors upstream:
+
+```ts
+import { SimulationError, TransactionSubmissionError } from '@sorowill/sdk';
+
+Sentry.init({
+  beforeSend(event, hint) {
+    const err = hint.originalException;
+    if (err instanceof SimulationError || err instanceof TransactionSubmissionError) {
+      // Strip the sensitive structured property from the Sentry payload.
+      event.extra = { ...event.extra, sensitiveDataRedacted: true };
+    }
+    return event;
+  },
+});
+```
+
 If the connected wallet's active network doesn't match the network `SoroWillClient` was
 configured with (e.g. Freighter set to mainnet while the app instantiated a testnet client),
 state-changing calls throw `WalletNetworkMismatchError` before ever building or signing a

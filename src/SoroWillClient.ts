@@ -39,7 +39,7 @@ import {
   signTransaction,
   type WalletAdapter,
 } from './wallet';
-import { mapContractError, SoroWillError } from './errors';
+import { mapContractError, SoroWillError, SimulationError, TransactionSubmissionError, InvalidCursorError } from './errors';
 import { RequestQueue } from './requestQueue';
 import { RpcEndpointPool } from './rpc';
 import { buildSep7TxUri, type BuildSep7TxUriOptions } from './sep7';
@@ -385,7 +385,7 @@ function parseCursor(cursor: string | undefined): number {
     return 0;
   }
   if (!/^\d+$/.test(cursor)) {
-    throw new Error(`Invalid pagination cursor: "${cursor}"`);
+    throw new InvalidCursorError(cursor);
   }
   return Number(cursor);
 }
@@ -924,7 +924,7 @@ export class SoroWillClient {
         options,
       );
       if (rpc.Api.isSimulationError(simulation)) {
-        throw new SoroWillError(`SoroWill simulation failed for ${method}: ${simulation.error}`);
+        throw new SimulationError(method, simulation.error);
       }
       if (!simulation.result) {
         throw new SoroWillError(`SoroWill simulation for ${method} returned no result`);
@@ -959,7 +959,7 @@ export class SoroWillClient {
 
     try {
       const spec = await this.getSpec(options);
-      this.debugLogger.logOperationBuild(method, String(args.will_id ?? args.owner ?? ''));
+      this.debugLogger.logOperationBuild(method, String(args.will_id ?? ''));
 
       const operation = this.contract.call(method, ...spec.funcArgsToScVals(method, args));
       const result = await this.submit([operation], method, options);
@@ -968,7 +968,7 @@ export class SoroWillClient {
 
       this.debugLogger.logSuccess(
         method,
-        String(args.will_id ?? args.owner ?? ''),
+        String(args.will_id ?? ''),
         txHash,
         Date.now() - startTime,
       );
@@ -986,7 +986,7 @@ export class SoroWillClient {
       return result;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
-      this.debugLogger.logError(method, String(args.will_id ?? args.owner ?? ''), err);
+      this.debugLogger.logError(method, String(args.will_id ?? ''), err);
       throw err;
     } finally {
       if (error) {
@@ -1047,9 +1047,7 @@ export class SoroWillClient {
       // Handle distinct sendTransaction statuses per the Soroban RPC spec.
       if (sendResponse.status === 'ERROR') {
         const errorXdr = sendResponse.errorResult?.toXDR?.('base64') ?? 'no error result';
-        throw new SoroWillError(
-          `SoroWill transaction submission failed for ${label}: ${errorXdr}`,
-        );
+        throw new TransactionSubmissionError(label, errorXdr);
       }
 
       options?.signal?.throwIfAborted();
@@ -1105,9 +1103,7 @@ export class SoroWillClient {
 
           if (feeBumpResponse.status === 'ERROR') {
             const errorXdr = feeBumpResponse.errorResult?.toXDR?.('base64') ?? 'no error result';
-            throw new SoroWillError(
-              `SoroWill fee-bump transaction submission failed for ${label}: ${errorXdr}`,
-            );
+            throw new TransactionSubmissionError(label, errorXdr);
           }
 
           this.debugLogger.logSubmission(label, '', feeBumpResponse.hash);
