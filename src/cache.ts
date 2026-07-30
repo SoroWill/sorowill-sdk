@@ -96,16 +96,14 @@ export class ReadCache {
     await this.readyPromise;
   }
 
-  async get<T>(key: string): Promise<T | undefined> {
-    await this.ready();
-
+  get<T>(key: string): T | undefined {
     const entry = this.entries.get(key);
     if (!entry) {
       return undefined;
     }
 
     if (entry.expiresAt !== null && entry.expiresAt <= this.now()) {
-      await this.delete(key);
+      this.entries.delete(key);
       return undefined;
     }
 
