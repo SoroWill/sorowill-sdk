@@ -8,6 +8,15 @@ This repo participates in the **Stellar Wave Program** on [Drips](https://drips.
 - Keep PRs scoped to the issue they resolve. Unrelated changes slow down review and can cost you the Wave window.
 - Be responsive during an active Wave — issues must be resolved before the Wave ends for Points to be awarded.
 
+## Error messages and sensitive data
+
+SoroWill is a financially sensitive application. When adding or modifying errors in `src/errors.ts` or `src/SoroWillClient.ts`, follow these rules:
+
+- **Never embed user-supplied or contract-derived values directly in `Error.message`.** Values that must not appear in a message string include: wallet addresses, contract IDs, token addresses, raw XDR blobs, and simulation error strings from the RPC node. These can all end up in a third-party error-tracking pipeline (Sentry, Datadog, etc.) if a consumer logs `error.message` without redaction.
+- **Expose sensitive context as named, typed properties instead.** The SDK's `SimulationError`, `TransactionSubmissionError`, and `InvalidCursorError` classes show the pattern: the sensitive value is stored on a typed property (`.simulationError`, `.errorXdr`, `.cursor`) so callers can decide programmatically whether to log it.
+- **Method names and status code enums are acceptable in messages** because they contain no user data.
+- **Debug-mode logging** (`DebugLogger`) is gated behind `debug: true` in `SoroWillClientOptions`. Even inside that gate, do not log owner addresses or other wallet keys — prefer will IDs, tx hashes, and timing information only.
+
 ## Branch naming
 
 Use the issue number in your branch name:

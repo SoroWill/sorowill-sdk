@@ -180,6 +180,70 @@ function errorText(error: unknown): string {
 }
 
 /**
+ * Raised when a Soroban simulation returns an error result.
+ *
+ * The raw simulation error string (which may contain contract addresses or
+ * other request details) is kept as a structured property — not embedded in
+ * the message — so callers can decide whether to log or redact it before
+ * forwarding to an error-tracking service.
+ */
+export class SimulationError extends SoroWillError {
+  /**
+   * The raw error string returned by the Soroban RPC simulation. May contain
+   * contract addresses or other context. Do not forward this to third-party
+   * error trackers without redaction.
+   */
+  readonly simulationError: string;
+
+  constructor(method: string, simulationError: string, options?: ErrorOptions) {
+    super(`SoroWill simulation failed for ${method}`, options);
+    this.simulationError = simulationError;
+  }
+}
+
+/**
+ * Raised when a Soroban transaction submission returns an ERROR status.
+ *
+ * The raw XDR error result blob is kept as a structured property — not
+ * embedded in the message — so callers can decide whether to log or redact it
+ * before forwarding to an error-tracking service.
+ */
+export class TransactionSubmissionError extends SoroWillError {
+  /**
+   * The base64-encoded XDR error result returned by the Soroban RPC node.
+   * Contains encoded transaction details. Do not forward this to third-party
+   * error trackers without redaction.
+   */
+  readonly errorXdr: string;
+
+  constructor(label: string, errorXdr: string, options?: ErrorOptions) {
+    super(`SoroWill transaction submission failed for ${label}`, options);
+    this.errorXdr = errorXdr;
+  }
+}
+
+/**
+ * Raised when a pagination cursor supplied by the caller fails validation.
+ *
+ * The offending cursor string is kept as a structured property — not embedded
+ * in the message — because it is user-supplied data that could contain
+ * arbitrary content, and embedding it in the message would surface it in any
+ * error-tracking pipeline.
+ */
+export class InvalidCursorError extends SoroWillError {
+  /**
+   * The cursor value that failed validation. User-supplied; treat as
+   * untrusted before logging.
+   */
+  readonly cursor: string;
+
+  constructor(cursor: string, options?: ErrorOptions) {
+    super('Invalid pagination cursor', options);
+    this.cursor = cursor;
+  }
+}
+
+/**
  * Raised when a Soroban simulation returns a "restore required" result,
  * indicating that archived/expired ledger entries must be restored via a
  * separate {@link https://developers.stellar.org/docs/smart-contracts/guides/archival | footprint-restoration transaction}
