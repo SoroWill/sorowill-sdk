@@ -209,12 +209,10 @@ describe('SoroWillClient read cache persistence', () => {
         },
       }),
     });
-describe('SoroWillClient read cache', () => {
-  it('caches getWill results within the TTL window', async () => {
-    const cache = new ReadCache({ ttlMs: 60_000 });
 
-    cache.set('key1', { id: 'cached' });
-    expect(cache.get('key1')).toEqual({ id: 'cached' });
+    const firstRead = await clientA.getWill('1');
+    expect(firstRead.id).toBe('1');
+    expect(simulateCalls).toBe(1);
 
     const clientB = new SoroWillClient({
       network: 'testnet',
@@ -233,6 +231,16 @@ describe('SoroWillClient read cache', () => {
     const secondRead = await clientB.getWill('1');
     expect(secondRead.id).toBe('1');
     expect(simulateCalls).toBe(1);
+  });
+});
+
+describe('SoroWillClient read cache', () => {
+  it('caches getWill results within the TTL window', async () => {
+    const cache = new ReadCache({ ttlMs: 60_000 });
+
+    cache.set('key1', { id: 'cached' });
+    expect(cache.get('key1')).toEqual({ id: 'cached' });
+
     cache.clear();
     expect(cache.get('key1')).toBeUndefined();
   });

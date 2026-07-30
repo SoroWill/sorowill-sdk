@@ -195,6 +195,7 @@ export function getNextActionableState(
       isWillGuardian &&
       (will.status === WillStatus.Active || will.status === WillStatus.Triggered),
   };
+}
 /**
  * Validates a guardian list: empty list is valid (guardians are optional),
  * at most {@link MAX_GUARDIANS} entries, no duplicate addresses, and no

@@ -65,26 +65,22 @@ export function buildSep7TxUri(transactionXdr: string, options: BuildSep7TxUriOp
 
 export function parseSep7Callback(input: string | URL | URLSearchParams): Sep7CallbackResult {
   const params = normalizeSep7Params(input);
-  const transactionXdr =
+  const transactionXdrValue =
     params.get('xdr') ??
     params.get('signedTxXdr') ??
     params.get('signed_tx_xdr') ??
     params.get('tx');
 
-  if (!transactionXdr) {
+  if (!transactionXdrValue) {
     throw new Error('SEP-7 callback did not include a signed transaction XDR');
   }
 
-  const signerAddress: string | undefined = params.get('pubkey') ?? params.get('signer') ?? undefined;
+  const transactionXdr = transactionXdrValue;
+  const signerAddressValue = params.get('pubkey') ?? params.get('signer');
+  const signerAddress: string | undefined = signerAddressValue ?? undefined;
   const status: string | undefined = params.get('status') ?? undefined;
   const message: string | undefined = params.get('message') ?? params.get('msg') ?? undefined;
 
-  return {
-    transactionXdr,
-    ...(signerAddress === undefined ? {} : { signerAddress }),
-    ...(status === undefined ? {} : { status }),
-    ...(message === undefined ? {} : { message }),
-  };
   const result: Sep7CallbackResult = { transactionXdr };
   if (signerAddress !== undefined) result.signerAddress = signerAddress;
   if (status !== undefined) result.status = status;

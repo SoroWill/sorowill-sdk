@@ -18,6 +18,10 @@ export interface WalletConnection {
  * is the default implementation, backed by the Freighter browser extension.
  */
 export interface WalletAdapter {
+  isConnected?(): Promise<boolean>;
+  connect?(): Promise<WalletConnection>;
+  reconnect?(): Promise<WalletConnection>;
+  disconnect?(): Promise<void>;
   getPublicKey(): Promise<string>;
   signTransaction(
     transactionXdr: string,
@@ -31,68 +35,6 @@ export interface WalletAdapter {
    * for signing.
    */
   getNetwork?(): Promise<{ network: string; networkPassphrase: string }>;
- * into the client by implementing this interface.
- * into the client by implementing this interface. The module-level
- * {@link getPublicKey} and {@link signTransaction} functions already satisfy
- * it (see {@link freighterAdapter}).
- *
- * ### Browser wallets
- *
- * Browser-extension adapters (Freighter, Albedo, …) implement this interface
- * and present a user-facing approval prompt when `signTransaction` is called.
- * These are the right choice for any application that handles real end-user
- * funds in a browser context.
- *
- * ### Scripts, automation, and testing — `KeypairSigner`
- *
- * For Node.js scripts, keeper bots, demo scripts, or unit tests where there is
- * no browser extension available, build a lightweight adapter directly on top
- * of `@stellar/stellar-sdk`'s `Keypair`:
- *
- * ```ts
- * import { Keypair, Transaction, TransactionBuilder } from '@stellar/stellar-sdk';
- * import type { WalletAdapter } from '@sorowill/sdk';
- *
- * export class KeypairSigner implements WalletAdapter {
- *   constructor(private readonly keypair: Keypair) {}
- *
- *   async getPublicKey(): Promise<string> {
- *     return this.keypair.publicKey();
- *   }
- *
- *   async signTransaction(
- *     transactionXdr: string,
- *     opts: { networkPassphrase: string },
- *   ): Promise<string> {
- *     const tx = TransactionBuilder.fromXDR(
- *       transactionXdr,
- *       opts.networkPassphrase,
- *     ) as Transaction;
- *     tx.sign(this.keypair);
- *     return tx.toXDR();
- *   }
- * }
- * ```
- *
- * Pass it to the client via the `wallet` option:
- *
- * ```ts
- * const signer = new KeypairSigner(Keypair.fromSecret('S...'));
- * const client = new SoroWillClient({ network: 'testnet', contractId: 'C...', wallet: signer });
- * ```
- *
- * > **Security warning:** `KeypairSigner` holds a raw secret key in memory.
- * > It is intended for scripts, automation, and testing only — never use it
- * > to handle real end-user funds in a browser or any environment where the
- * > secret could be exposed to untrusted code.
- */
-export interface WalletAdapter {
-  isConnected(): Promise<boolean>;
-  connect(): Promise<WalletConnection>;
-  reconnect(): Promise<WalletConnection>;
-  disconnect(): Promise<void>;
-  getPublicKey(): Promise<string>;
-  signTransaction(transactionXdr: string, opts: { networkPassphrase: string }): Promise<string>;
 }
 
 export class FreighterWalletAdapter implements WalletAdapter {
@@ -120,28 +62,28 @@ export class FreighterWalletAdapter implements WalletAdapter {
     }
 
     const networkDetails = await freighterApi.getNetworkDetails();
-    if (networkDetails.error) {
+    if (networkDetails?.error) {
       throw new Error(networkDetails.error.message);
     }
 
     return {
       publicKey: access.address,
-      network: networkDetails.network,
-      networkPassphrase: networkDetails.networkPassphrase,
+      network: networkDetails?.network ?? '',
+      networkPassphrase: networkDetails?.networkPassphrase ?? '',
     };
   }
 
   async reconnect(): Promise<WalletConnection> {
     const publicKey = await this.getPublicKey();
     const networkDetails = await freighterApi.getNetworkDetails();
-    if (networkDetails.error) {
+    if (networkDetails?.error) {
       throw new Error(networkDetails.error.message);
     }
 
     return {
       publicKey,
-      network: networkDetails.network,
-      networkPassphrase: networkDetails.networkPassphrase,
+      network: networkDetails?.network ?? '',
+      networkPassphrase: networkDetails?.networkPassphrase ?? '',
     };
   }
 
@@ -152,12 +94,12 @@ export class FreighterWalletAdapter implements WalletAdapter {
   /** Reports the network Freighter is currently set to, without prompting the user. */
   async getNetwork(): Promise<{ network: string; networkPassphrase: string }> {
     const networkDetails = await freighterApi.getNetworkDetails();
-    if (networkDetails.error) {
+    if (networkDetails?.error) {
       throw new Error(networkDetails.error.message);
     }
     return {
-      network: networkDetails.network,
-      networkPassphrase: networkDetails.networkPassphrase,
+      network: networkDetails?.network ?? '',
+      networkPassphrase: networkDetails?.networkPassphrase ?? '',
     };
   }
 
@@ -231,12 +173,4 @@ export function getDefaultWalletAdapter(): WalletAdapter {
  * extension. This is what {@link SoroWillClient} uses when no `wallet` option
  * is supplied, so existing Freighter-based usage keeps working unchanged.
  */
-export const freighterAdapter: WalletAdapter = {
-  isConnected: () => defaultFreighterWalletAdapter.isConnected(),
-  connect: () => defaultFreighterWalletAdapter.connect(),
-  reconnect: () => defaultFreighterWalletAdapter.reconnect(),
-  disconnect: () => defaultFreighterWalletAdapter.disconnect(),
-  getPublicKey,
-  signTransaction,
-};
 export const freighterAdapter: WalletAdapter = defaultFreighterWalletAdapter;
