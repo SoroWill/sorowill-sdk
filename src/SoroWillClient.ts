@@ -25,6 +25,7 @@ import type {
   Beneficiary,
   CreateWillParams,
   RequestOptions,
+  SoroWillEvent,
   UpdateBeneficiariesParams,
   Will,
 } from './types';
@@ -36,7 +37,22 @@ import {
   signTransaction,
   type WalletAdapter,
 } from './wallet';
-import { mapContractError, SoroWillError, SoroWillInvalidAmountError } from './errors';
+import {
+  BeneficiaryValidationError,
+  InvalidContractIdError,
+  InvalidCursorError,
+  mapContractError,
+  SimulationError,
+  SoroWillError,
+  SoroWillInvalidAmountError,
+  TooManyGuardiansError,
+  TransactionSubmissionError,
+  WalletNetworkMismatchError,
+} from './errors';
+import {
+  MAX_GUARDIANS,
+  validateBeneficiaries,
+} from './utils';
 import { RequestQueue } from './requestQueue';
 import { RpcEndpointPool } from './rpc';
 import { buildSep7TxUri, type BuildSep7TxUriOptions } from './sep7';
@@ -46,6 +62,9 @@ import { assertPreparedTransactionMatchesIntendedOperation } from './txValidatio
 import { DebugLogger } from './debugLogger';
 
 type ScVal = xdr.ScVal;
+
+/** Shape of an individual event record returned by the Soroban RPC `getEvents` endpoint. */
+type RpcEventRecord = rpc.Api.EventRecord;
 
 const { Spec } = stellarContract;
 
@@ -439,10 +458,18 @@ export class SoroWillClient {
     const config = NETWORK_CONFIG[options.network];
     const rpcUrl = options.rpcUrl ?? config.rpcUrls[0]!;
 
+    // #153: Wrap the underlying Contract constructor error with a clear SDK-level
+    // error so callers see a SoroWill-specific message rather than a raw StrKey
+    // decoding failure.
+    try {
+      this.contract = new Contract(options.contractId);
+    } catch {
+      throw new InvalidContractIdError(options.contractId ?? '');
+    }
+
     this.server =
       options.rpcServer ??
       new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') });
-    this.contract = new Contract(options.contractId);
     this.networkPassphrase = options.networkPassphrase ?? config.networkPassphrase;
     this.network = options.network;
     this.hooks = options.hooks ?? new HookManager();
@@ -546,6 +573,10 @@ export class SoroWillClient {
       throw new BeneficiaryValidationError(
         'Invalid beneficiaries: list must be 1–10 entries, every percentage must be a positive integer, and percentages must sum to exactly 100.',
       );
+    }
+    // #156: Validate guardians count synchronously before any RPC round-trip.
+    if (params.guardians.length > MAX_GUARDIANS) {
+      throw new TooManyGuardiansError(params.guardians.length, MAX_GUARDIANS);
     }
     const owner = await this.getWalletPublicKey();
     const { txHash, returnValue } = await this.invoke(
