@@ -17,21 +17,11 @@ export interface WalletConnection {
  * into the client by implementing this interface. {@link FreighterWalletAdapter}
  * is the default implementation, backed by the Freighter browser extension.
  */
-export interface WalletAdapter {
-  getPublicKey(): Promise<string>;
-  signTransaction(
-    transactionXdr: string,
-    opts: { networkPassphrase: string },
-  ): Promise<string>;
-  /**
-   * Reports the network the wallet is currently connected to, if the wallet
-   * can determine that without prompting the user. {@link SoroWillClient}
-   * uses this — when available — to confirm the wallet's active network
-   * matches the client's configured network before submitting a transaction
-   * for signing.
-   */
-  getNetwork?(): Promise<{ network: string; networkPassphrase: string }>;
- * into the client by implementing this interface.
+/**
+ * The full capability set a Stellar wallet must expose for
+ * {@link SoroWillClient} to read the connected account and sign transactions.
+ *
+ * Any wallet — Freighter, Albedo, xBull, Rabet, Lobstr, etc. — can be plugged
  * into the client by implementing this interface. The module-level
  * {@link getPublicKey} and {@link signTransaction} functions already satisfy
  * it (see {@link freighterAdapter}).
@@ -239,4 +229,3 @@ export const freighterAdapter: WalletAdapter = {
   getPublicKey,
   signTransaction,
 };
-export const freighterAdapter: WalletAdapter = defaultFreighterWalletAdapter;

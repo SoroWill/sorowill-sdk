@@ -733,7 +733,7 @@ export class SoroWillClient {
       { beneficiary },
       options,
     );
-    return { txHash };
+    return mapWillList(raw);
   }
 
   /**
@@ -748,12 +748,6 @@ export class SoroWillClient {
    * @throws {AlreadyVotedError} If this guardian has already voted.
    * @throws {Error} If the wallet is not connected or fails to sign.
    */
-  async guardianTrigger(willId: string): Promise<{ txHash: string }> {
-    const guardian = await this.wallet.getPublicKey();
-  async guardianTrigger(
-    willId: string,
-    options?: RequestOptions,
-  ): Promise<{ txHash: string; votesSoFar: number; released: boolean }> {
   async guardianTrigger(willId: string, options?: RequestOptions): Promise<{ txHash: string }> {
     const guardian = await getPublicKey();
     const { txHash, returnValue, events } = await this.invoke('guardian_trigger', {
