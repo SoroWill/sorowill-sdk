@@ -92,6 +92,7 @@ export type {
 } from './events';
 
 export {
+  AccountNotFundedError,
   AlreadyVotedError,
   BeneficiaryValidationError,
   CheckinNotDueError,
@@ -99,6 +100,7 @@ export {
   GracePeriodExpiredError,
   GracePeriodNotExpiredError,
   InvalidPercentagesError,
+  InvokeFailedError,
   NotGuardianError,
   InvalidCursorError,
   NotOwnerError,

@@ -36,7 +36,13 @@ import {
   signTransaction,
   type WalletAdapter,
 } from './wallet';
-import { mapContractError, SoroWillError, SoroWillInvalidAmountError } from './errors';
+import {
+  AccountNotFundedError,
+  InvokeFailedError,
+  mapContractError,
+  SoroWillError,
+  SoroWillInvalidAmountError,
+} from './errors';
 import { RequestQueue } from './requestQueue';
 import { RpcEndpointPool } from './rpc';
 import { buildSep7TxUri, type BuildSep7TxUriOptions } from './sep7';
@@ -402,6 +408,29 @@ function validateAmount(amount: string): bigint {
   return value;
 }
 
+/**
+ * Validates that a day-count parameter (e.g. `checkinPeriodDays` or
+ * `gracePeriodDays`) is a positive integer before it is converted to
+ * `BigInt`. Throws a clear, SDK-level {@link SoroWillError} naming the
+ * offending parameter instead of letting `BigInt()` surface a cryptic
+ * `RangeError` such as *"The number 90.5 cannot be converted to a BigInt
+ * because it is not an integer"*.
+ *
+ * @param value - The numeric value to validate.
+ * @param paramName - Human-readable parameter name used in the error message.
+ * @returns The value as a `bigint`.
+ * @throws {SoroWillError} If `value` is not a positive integer.
+ */
+function validateDays(value: number, paramName: string): bigint {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new SoroWillError(
+      `"${paramName}" must be a positive integer (received ${value}). ` +
+        `Fractional or non-positive day counts are not supported.`,
+    );
+  }
+  return BigInt(value);
+}
+
 function getDefaultEnv(): EnvSource {
   if (typeof process !== 'undefined' && process.env) {
     return process.env as EnvSource;
@@ -555,8 +584,8 @@ export class SoroWillClient {
         token: params.token,
         amount: validateAmount(params.amount),
         beneficiaries: params.beneficiaries,
-        checkin_period_days: BigInt(params.checkinPeriodDays),
-        grace_period_days: BigInt(params.gracePeriodDays),
+        checkin_period_days: validateDays(params.checkinPeriodDays, 'checkinPeriodDays'),
+        grace_period_days: validateDays(params.gracePeriodDays, 'gracePeriodDays'),
         guardians: params.guardians,
       },
       options,
@@ -742,9 +771,12 @@ export class SoroWillClient {
     );
 
     if (txResponse.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
-      throw new SoroWillError(
-        `SoroWill transaction ${txHash} did not succeed: ${txResponse.status}`,
-      );
+      throw new InvokeFailedError(txHash, `transaction did not succeed`, {
+        status: txResponse.status,
+        resultXdr: (txResponse as Record<string, unknown>).resultXdr ?? null,
+        diagnosticEventsXdr: (txResponse as Record<string, unknown>).diagnosticEventsXdr ?? null,
+        txHash,
+      });
     }
 
     return {
@@ -1085,7 +1117,14 @@ export class SoroWillClient {
       await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
       const publicKey = await this.getWalletPublicKey();
       options?.signal?.throwIfAborted();
-      const account = await this.rpc(() => this.server.getAccount(publicKey), options);
+      let account: Account;
+      try {
+        account = await this.rpc(() => this.server.getAccount(publicKey), options);
+      } catch (getAccountError) {
+        // Surface a clear, actionable error when the account is not funded or
+        // does not exist on the network, rather than leaking the raw RPC error.
+        throw new AccountNotFundedError(publicKey, { cause: getAccountError });
+      }
       const builder = new TransactionBuilder(account, {
         fee: (BigInt(BASE_FEE) * BigInt(operations.length)).toString(),
         networkPassphrase: this.networkPassphrase,
@@ -1113,7 +1152,12 @@ export class SoroWillClient {
       // Handle distinct sendTransaction statuses per the Soroban RPC spec.
       if (sendResponse.status === 'ERROR') {
         const errorXdr = sendResponse.errorResult?.toXDR?.('base64') ?? 'no error result';
-        throw new TransactionSubmissionError(label, errorXdr);
+        throw new InvokeFailedError(label, `sendTransaction returned ERROR`, {
+          status: sendResponse.status,
+          errorXdr,
+          diagnosticEventsXdr: (sendResponse as Record<string, unknown>).diagnosticEventsXdr ?? null,
+          hash: sendResponse.hash,
+        });
       }
 
       options?.signal?.throwIfAborted();
@@ -1166,7 +1210,12 @@ export class SoroWillClient {
 
           if (feeBumpResponse.status === 'ERROR') {
             const errorXdr = feeBumpResponse.errorResult?.toXDR?.('base64') ?? 'no error result';
-            throw new TransactionSubmissionError(label, errorXdr);
+            throw new InvokeFailedError(label, `fee-bump sendTransaction returned ERROR`, {
+              status: feeBumpResponse.status,
+              errorXdr,
+              diagnosticEventsXdr: (feeBumpResponse as Record<string, unknown>).diagnosticEventsXdr ?? null,
+              hash: feeBumpResponse.hash,
+            });
           }
 
           this.debugLogger.logSubmission(label, '', feeBumpResponse.hash);

@@ -239,6 +239,52 @@ export class TransactionSubmissionError extends SoroWillError {
 }
 
 /**
+ * Raised when the account returned by `getAccount()` is not found or has
+ * never been funded on the current network. A common situation for brand-new
+ * testnet addresses or mainnet addresses that have not yet received the
+ * minimum XLM reserve.
+ *
+ * The `publicKey` is stored as a structured property rather than being
+ * embedded in the message so callers can decide how to handle it (e.g.
+ * redacting or hashing it before forwarding to an error-tracking service).
+ */
+export class AccountNotFundedError extends SoroWillError {
+  /** The Stellar public key whose account could not be loaded. */
+  readonly publicKey: string;
+
+  constructor(publicKey: string, options?: ErrorOptions) {
+    super(
+      `The Stellar account for the connected wallet has not been funded on this network. ` +
+        `Fund the account with the minimum XLM reserve before submitting transactions.`,
+      options,
+    );
+    this.publicKey = publicKey;
+  }
+}
+
+/**
+ * Raised when a state-changing contract invocation fails — either because
+ * `sendTransaction` returned `ERROR`, or because the polled transaction did
+ * not reach `SUCCESS`. Unlike the previous bare `Error` throws, this class
+ * preserves the underlying RPC diagnostic payload so callers (and debugging
+ * tools) can inspect the root cause.
+ */
+export class InvokeFailedError extends SoroWillError {
+  /**
+   * Diagnostic data from the RPC response. May include fields such as
+   * `errorXdr`, `diagnosticEventsXdr`, `resultXdr`, or `status` depending
+   * on which failure branch was hit. Treat as untrusted/sensitive before
+   * forwarding to third-party error-tracking services.
+   */
+  readonly diagnostics: Record<string, unknown>;
+
+  constructor(method: string, reason: string, diagnostics: Record<string, unknown>, options?: ErrorOptions) {
+    super(`SoroWill transaction for ${method} failed: ${reason}`, options);
+    this.diagnostics = diagnostics;
+  }
+}
+
+/**
  * Raised when a pagination cursor supplied by the caller fails validation.
  *
  * The offending cursor string is kept as a structured property — not embedded
