@@ -31,6 +31,7 @@
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
+    "smoke-test": "node scripts/smoke-test.mjs",
     "docs:api": "typedoc"
   },
   "dependencies": {

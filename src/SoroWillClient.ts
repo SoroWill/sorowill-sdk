@@ -1238,7 +1238,12 @@ export class SoroWillClient {
       const signedTx = TransactionBuilder.fromXDR(
         signedTxXdr,
         this.networkPassphrase,
-      ) as Transaction;
+      );
+      if (!(signedTx instanceof Transaction)) {
+        throw new SoroWillError(
+          'Expected a plain Transaction envelope after signing, but received FeeBumpTransaction',
+        );
+      }
 
       options?.signal?.throwIfAborted();
       const sendResponse = await this.rpc(() => this.server.sendTransaction(signedTx), options);
@@ -1296,7 +1301,12 @@ export class SoroWillClient {
           const feeBumpSignedTx = TransactionBuilder.fromXDR(
             feeBumpSignedXdr,
             this.networkPassphrase,
-          ) as Transaction;
+          );
+          if (!(feeBumpSignedTx instanceof Transaction)) {
+            throw new SoroWillError(
+              'Expected a plain Transaction envelope after signing, but received FeeBumpTransaction',
+            );
+          }
 
           const feeBumpResponse = await this.rpc(
             () => this.server.sendTransaction(feeBumpSignedTx),
@@ -1355,7 +1365,12 @@ export class SoroWillClient {
     signedTxXdr: string,
     options?: RequestOptions,
   ): Promise<{ txHash: string; createdAt: number; returnValue: ScVal | undefined }> {
-    const signedTx = TransactionBuilder.fromXDR(signedTxXdr, this.networkPassphrase) as Transaction;
+    const signedTx = TransactionBuilder.fromXDR(signedTxXdr, this.networkPassphrase);
+    if (!(signedTx instanceof Transaction)) {
+      throw new SoroWillError(
+        'Expected a plain Transaction envelope after signing, but received FeeBumpTransaction',
+      );
+    }
     const publicKey = await this.getWalletPublicKey();
     await this.rpc(() => this.server.getAccount(publicKey), options);
     const sendResponse = await this.rpc(() => this.server.sendTransaction(signedTx), options);

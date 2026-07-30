@@ -90,10 +90,12 @@ vi.mock('@stellar/stellar-sdk', () => {
       };
     }
 
-    static fromXDR(xdr: string, networkPassphrase: string): { xdr: string; networkPassphrase: string } {
-      return { xdr, networkPassphrase };
+    static fromXDR(_xdr: string, _networkPassphrase: string): unknown {
+      return new MockTransaction();
     }
   }
+
+  class MockFeeBumpTransaction {}
 
   return {
     Account: MockAccount,
@@ -103,7 +105,8 @@ vi.mock('@stellar/stellar-sdk', () => {
       PUBLIC: 'PUBLIC',
       TESTNET: 'TESTNET',
     },
-    Transaction: class MockTransaction {},
+    Transaction: MockTransaction,
+    FeeBumpTransaction: MockFeeBumpTransaction,
     TransactionBuilder: MockTransactionBuilder,
     contract: {
       Spec: Object.assign(
@@ -503,4 +506,29 @@ describe('SoroWillClient', () => {
     expect(fallbackFetch).toHaveBeenCalledTimes(1);
     expect(fallbackEvents.map((event) => event.id)).toEqual(['evt-poll-1']);
   });
+
+  it('throws SoroWillError when TransactionBuilder.fromXDR returns a FeeBumpTransaction instead of a plain Transaction during invoke()', async () => {
+    const { TransactionBuilder, FeeBumpTransaction } = await import('@stellar/stellar-sdk');
+    const origFromXdr = TransactionBuilder.fromXDR;
+    TransactionBuilder.fromXDR = vi.fn().mockReturnValue(new FeeBumpTransaction());
+
+    try {
+      const client = new SoroWillClient({
+        network: 'testnet',
+        contractId: 'CCONTRACT',
+      });
+
+      await expect(
+        client.createWill({
+          beneficiaries: [{ address: 'GBENEFICIARY', percentage: 100 }],
+          amount: '1000000',
+          checkinIntervalDays: 30,
+          gracePeriodDays: 7,
+        }),
+      ).rejects.toThrow(/Expected a plain Transaction envelope after signing, but received FeeBumpTransaction/);
+    } finally {
+      TransactionBuilder.fromXDR = origFromXdr;
+    }
+  });
 });
+

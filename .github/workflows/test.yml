@@ -39,3 +39,7 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Smoke Test
+        run: npm run smoke-test
+
