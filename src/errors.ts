@@ -51,6 +51,67 @@ export class FreighterInstallCheckError extends SoroWillError {
 }
 
 /**
+ * Raised when the `contractId` passed to the {@link SoroWillClient} constructor
+ * is not a syntactically valid Stellar contract address (wrong length, wrong
+ * StrKey version byte, or not valid base32). Thrown synchronously before any
+ * RPC call is made, giving callers a clear SDK-level error rather than a
+ * low-level StrKey-decoding message.
+ */
+export class InvalidContractIdError extends SoroWillError {
+  /** The invalid contract ID that was supplied. */
+  readonly contractId: string;
+
+  constructor(contractId: string, options?: ErrorOptions) {
+    super(
+      `"${contractId}" is not a valid SoroWill contract address. ` +
+        'A Stellar contract address must be a 56-character StrKey starting with "C".',
+      options,
+    );
+    this.contractId = contractId;
+  }
+}
+
+/**
+ * Raised when the `guardians` list passed to {@link SoroWillClient.createWill}
+ * exceeds the contract's `MAX_GUARDIANS` limit. Thrown synchronously before
+ * any transaction is built or signed, saving a full round-trip.
+ */
+export class TooManyGuardiansError extends SoroWillError {
+  /** Number of guardians supplied. */
+  readonly supplied: number;
+  /** Maximum guardians allowed (mirrors the contract's MAX_GUARDIANS). */
+  readonly max: number;
+
+  constructor(supplied: number, max: number, options?: ErrorOptions) {
+    super(
+      `Too many guardians: ${supplied} supplied but the contract allows at most ${max}.`,
+      options,
+    );
+    this.supplied = supplied;
+    this.max = max;
+  }
+}
+
+/**
+ * Raised when the wallet's `signTransaction` call does not resolve within the
+ * configured timeout. This can happen when the Freighter popup is dismissed in
+ * a way that leaves the underlying promise pending, or when the extension hangs.
+ */
+export class SignTransactionTimeoutError extends SoroWillError {
+  /** The timeout value (in milliseconds) that was exceeded. */
+  readonly timeoutMs: number;
+
+  constructor(timeoutMs: number, options?: ErrorOptions) {
+    super(
+      `Wallet signTransaction timed out after ${timeoutMs}ms. ` +
+        'The signing popup may have been dismissed or the extension may have hung.',
+      options,
+    );
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
  * Raised when a beneficiary list fails client-side validation before a
  * transaction is built or sent. Thrown by {@link SoroWillClient.createWill}
  * and {@link SoroWillClient.updateBeneficiaries} when

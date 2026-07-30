@@ -1,6 +1,9 @@
 import freighterApi from '@stellar/freighter-api';
 
-import { FreighterInstallCheckError } from './errors';
+import { FreighterInstallCheckError, SignTransactionTimeoutError } from './errors';
+
+/** Default timeout (ms) for a wallet signTransaction call. */
+const DEFAULT_SIGN_TIMEOUT_MS = 120_000;
 
 /** Result of a successful wallet connection. */
 export interface WalletConnection {
@@ -82,7 +85,7 @@ export interface WalletAdapter {
   reconnect(): Promise<WalletConnection>;
   disconnect(): Promise<void>;
   getPublicKey(): Promise<string>;
-  signTransaction(transactionXdr: string, opts: { networkPassphrase: string }): Promise<string>;
+  signTransaction(transactionXdr: string, opts: { networkPassphrase: string; timeoutMs?: number }): Promise<string>;
 }
 
 export class FreighterWalletAdapter implements WalletAdapter {
@@ -164,15 +167,34 @@ export class FreighterWalletAdapter implements WalletAdapter {
 
   async signTransaction(
     transactionXdr: string,
-    opts: { networkPassphrase: string },
+    opts: { networkPassphrase: string; timeoutMs?: number },
   ): Promise<string> {
-    const { signedTxXdr, error } = await freighterApi.signTransaction(transactionXdr, {
-      networkPassphrase: opts.networkPassphrase,
+    const timeoutMs = opts.timeoutMs ?? DEFAULT_SIGN_TIMEOUT_MS;
+
+    // Race the Freighter call against a timer so that a hung or dismissed
+    // popup never leaves the caller's promise pending indefinitely (#154).
+    let timeoutHandle: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(
+        () => reject(new SignTransactionTimeoutError(timeoutMs)),
+        timeoutMs,
+      );
     });
-    if (error) {
-      throw new Error(error.message);
+
+    try {
+      const { signedTxXdr, error } = await Promise.race([
+        freighterApi.signTransaction(transactionXdr, {
+          networkPassphrase: opts.networkPassphrase,
+        }),
+        timeoutPromise,
+      ]);
+      if (error) {
+        throw new Error(error.message);
+      }
+      return signedTxXdr;
+    } finally {
+      clearTimeout(timeoutHandle!);
     }
-    return signedTxXdr;
   }
 }
 
@@ -206,7 +228,7 @@ export async function getPublicKey(): Promise<string> {
 /** Signs a transaction XDR using the connected Freighter wallet. */
 export async function signTransaction(
   transactionXdr: string,
-  opts: { networkPassphrase: string },
+  opts: { networkPassphrase: string; timeoutMs?: number },
 ): Promise<string> {
   return await defaultFreighterWalletAdapter.signTransaction(transactionXdr, opts);
 }
