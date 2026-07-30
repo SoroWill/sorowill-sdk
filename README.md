@@ -343,6 +343,32 @@ Read methods are cached in memory by default. You can disable caching with `read
 
 If you already have a contract event stream, pass it as `eventSource` and cached will reads will be invalidated automatically when matching will events arrive.
 
+## Architecture
+
+### Lazy spec-fetch-and-cache
+
+Every `SoroWillClient` instance needs a [`contract.Spec`](https://stellar.github.io/js-stellar-sdk/) to encode call arguments into XDR `ScVal`s and decode return values back into native JavaScript types. Rather than requiring callers to supply the spec at construction time, the SDK fetches it lazily on the first call that needs it:
+
+1. On the first `read()` or `invoke()` call, `getSpec()` fetches the contract's compiled WASM binary from the RPC node via `getContractWasmByContractId`.
+2. It derives a `Spec` instance from that WASM using `Spec.fromWasm()`.
+3. The resulting `Spec` is stored as `specPromise` on the instance and reused for every subsequent call — no second WASM fetch is ever made.
+
+**Why this design?**
+
+- Cold-start overhead stays minimal: the SDK doesn't block construction or delay the first call with a mandatory WASM prefetch.
+- Hot-path calls (e.g. repeated `getWill` reads) pay zero extra round-trips.
+- When a `spec` (or `specJson`) option is provided at construction time, the WASM fetch is skipped entirely — useful for tests or environments where the spec is already known.
+
+**Known limitations**
+
+- **Spec staleness.** The cached `Spec` reflects the contract's WASM at the moment of the first call. If the contract is later upgraded to a new WASM (possible on Soroban), the in-memory `Spec` will be stale for the lifetime of the client instance. Call `client.refreshSpec()` to evict the cache and re-fetch, or construct a new client.
+
+- **Poisoned promise.** If the initial WASM fetch fails (e.g. due to a transient RPC error), the cached rejection is automatically cleared so the next call transparently retries — avoiding a situation where one transient error permanently breaks the client.
+
+- **First-call latency.** The WASM binary can be several hundred kilobytes. Under constrained network conditions, the first call to any method will be noticeably slower than subsequent calls. Pre-loading with `spec` / `specJson` at construction time eliminates this cost if the spec is already available client-side.
+
+These tradeoffs and their planned mitigations are tracked in the issue tracker (see [#111](https://github.com/SoroWill/sorowill-sdk/issues/111), [#110](https://github.com/SoroWill/sorowill-sdk/issues/110), [#109](https://github.com/SoroWill/sorowill-sdk/issues/109), and [#108](https://github.com/SoroWill/sorowill-sdk/issues/108)).
+
 ## Local Setup
 
 ```bash

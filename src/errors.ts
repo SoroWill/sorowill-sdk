@@ -6,6 +6,24 @@ export class SoroWillError extends Error {
   }
 }
 
+/**
+ * Raised when an amount string passed to {@link SoroWillClient.createWill} or
+ * {@link SoroWillClient.topUp} is not a valid positive integer. This catches
+ * zero, negative, and malformed (non-numeric) strings before they reach
+ * `BigInt()` or the contract's own validation round-trip.
+ */
+export class SoroWillInvalidAmountError extends SoroWillError {
+  readonly amount: string;
+
+  constructor(amount: string, options?: ErrorOptions) {
+    super(
+      `Invalid amount "${amount}": must be a string representing a positive integer (e.g. "1000000").`,
+      options,
+    );
+    this.amount = amount;
+  }
+}
+
 /** Raised when an RPC call exceeds its configured deadline. */
 export class RequestTimeoutError extends SoroWillError {
   readonly timeoutMs: number;

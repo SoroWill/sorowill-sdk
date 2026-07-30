@@ -103,6 +103,7 @@ export {
   NotOwnerError,
   RequestTimeoutError,
   SoroWillError,
+  SoroWillInvalidAmountError,
   SoroWillRestoreRequiredError,
   TooManyBeneficiariesError,
   WalletNetworkMismatchError,
