@@ -110,28 +110,28 @@ export class FreighterWalletAdapter implements WalletAdapter {
     }
 
     const networkDetails = await freighterApi.getNetworkDetails();
-    if (networkDetails.error) {
+    if (networkDetails?.error) {
       throw new Error(networkDetails.error.message);
     }
 
     return {
       publicKey: access.address,
-      network: networkDetails.network,
-      networkPassphrase: networkDetails.networkPassphrase,
+      network: networkDetails?.network ?? '',
+      networkPassphrase: networkDetails?.networkPassphrase ?? '',
     };
   }
 
   async reconnect(): Promise<WalletConnection> {
     const publicKey = await this.getPublicKey();
     const networkDetails = await freighterApi.getNetworkDetails();
-    if (networkDetails.error) {
+    if (networkDetails?.error) {
       throw new Error(networkDetails.error.message);
     }
 
     return {
       publicKey,
-      network: networkDetails.network,
-      networkPassphrase: networkDetails.networkPassphrase,
+      network: networkDetails?.network ?? '',
+      networkPassphrase: networkDetails?.networkPassphrase ?? '',
     };
   }
 
@@ -142,12 +142,12 @@ export class FreighterWalletAdapter implements WalletAdapter {
   /** Reports the network Freighter is currently set to, without prompting the user. */
   async getNetwork(): Promise<{ network: string; networkPassphrase: string }> {
     const networkDetails = await freighterApi.getNetworkDetails();
-    if (networkDetails.error) {
+    if (networkDetails?.error) {
       throw new Error(networkDetails.error.message);
     }
     return {
-      network: networkDetails.network,
-      networkPassphrase: networkDetails.networkPassphrase,
+      network: networkDetails?.network ?? '',
+      networkPassphrase: networkDetails?.networkPassphrase ?? '',
     };
   }
 

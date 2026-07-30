@@ -51,6 +51,22 @@ export class FreighterInstallCheckError extends SoroWillError {
 }
 
 /**
+ * Raised when a beneficiary list fails client-side validation before a
+ * transaction is built or sent. Thrown by {@link SoroWillClient.createWill}
+ * and {@link SoroWillClient.updateBeneficiaries} when
+ * {@link validateBeneficiaries} returns `false`.
+ *
+ * Possible reasons include: empty list, more than 10 entries, a non-positive
+ * or non-integer percentage, or percentages that do not sum to 100.
+ */
+export class BeneficiaryValidationError extends SoroWillError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = new.target.name;
+  }
+}
+
+/**
  * Raised when the connected wallet's active network does not match the
  * network {@link SoroWillClient} was configured with — e.g. Freighter is set
  * to mainnet while the app instantiated a testnet client. Thrown before a

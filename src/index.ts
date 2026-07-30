@@ -8,7 +8,6 @@ export type {
   SoroWillNetwork,
   SoroWillRpcServer,
   SoroWillReadCacheOptions,
-  SoroWillRpcServer,
 } from './SoroWillClient';
 
 export { HookManager } from './hooks';
@@ -46,12 +45,6 @@ export type {
   BatchResult,
   Beneficiary,
   CreateWillParams,
-  EventSubscription,
-  EventSubscriptionOptions,
-  EventSubscriptionTransport,
-  EventSubscription as TypesEventSubscription,
-  EventSubscriptionOptions as TypesEventSubscriptionOptions,
-  EventSubscriptionTransport as TypesEventSubscriptionTransport,
   PaginatedWillsResult,
   PaginationOptions,
   RequestOptions,
@@ -100,6 +93,7 @@ export type {
 
 export {
   AlreadyVotedError,
+  BeneficiaryValidationError,
   CheckinNotDueError,
   FreighterInstallCheckError,
   GracePeriodExpiredError,

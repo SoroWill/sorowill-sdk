@@ -109,7 +109,8 @@ export function useWillsByOwner(
       .getWillsByOwner(owner)
       .then((wills) => {
         if (!cancelled) {
-          setData(Array.isArray(wills) ? wills : wills.wills);
+          const resolvedWills = Array.isArray(wills) ? wills : (wills as { wills?: Will[] }).wills ?? [];
+          setData(resolvedWills);
           setLoading(false);
         }
       })
@@ -162,7 +163,8 @@ export function useWillsByBeneficiary(
       .getWillsByBeneficiary(beneficiary)
       .then((wills) => {
         if (!cancelled) {
-          setData(Array.isArray(wills) ? wills : wills.wills);
+          const resolvedWills = Array.isArray(wills) ? wills : (wills as { wills?: Will[] }).wills ?? [];
+          setData(resolvedWills);
           setLoading(false);
         }
       })

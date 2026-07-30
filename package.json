@@ -38,7 +38,8 @@
     "@stellar/stellar-sdk": "^16.0.1"
   },
   "devDependencies": {
-    "@albedo-link/intent": "0.13.0",
+    "@albedo-link/intent": "^0.13.0",
+    "@eslint/js": "^9.0.0",
     "@ledgerhq/hw-app-str": "^7.7.6",
     "@stellar/freighter-api": "^6.0.1",
     "@testing-library/dom": "^10.4.1",
@@ -46,16 +47,8 @@
     "@types/node": "^26.1.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.2.3",
-    "jsdom": "^29.1.1",
-    "@types/react-dom": "^19.2.3",
-    "jsdom": "^29.1.1",
-    "react-dom": "^19.2.8"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.0.0",
-    "@types/node": "^26.1.0",
-    "@types/react": "^19.0.0",
     "eslint": "^9.0.0",
+    "jsdom": "^29.1.1",
     "react": "^19.0.0",
     "react-dom": "^19.2.8",
     "tsup": "^8.5.1",
