@@ -9,6 +9,7 @@ export type {
   SoroWillRpcServer,
   SoroWillReadCacheOptions,
 } from './SoroWillClient';
+export { DEFAULT_CONTRACT_IDS } from './SoroWillClient';
 
 export { HookManager } from './hooks';
 export type {
@@ -92,6 +93,7 @@ export type {
 } from './events';
 
 export {
+  AccountNotFundedError,
   AlreadyVotedError,
   BeneficiaryValidationError,
   CheckinNotDueError,
@@ -100,6 +102,7 @@ export {
   GracePeriodNotExpiredError,
   InvalidContractIdError,
   InvalidPercentagesError,
+  InvokeFailedError,
   NotGuardianError,
   InvalidCursorError,
   NotOwnerError,
