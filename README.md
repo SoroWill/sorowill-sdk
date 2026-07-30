@@ -35,10 +35,9 @@ import {
 // Connect the user's Freighter wallet.
 const wallet = await connectWallet();
 
-// Point the client at the deployed SoroWill contract on testnet.
-const client = new SoroWillClient({
-  network: 'testnet',
-  contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+// Quickest way to get started — uses the maintainer-managed default testnet
+// contract address (see DEFAULT_CONTRACT_IDS for the value):
+const client = SoroWillClient.forNetwork('testnet', {
   readCache: {
     ttlMs: 60_000,
     persistence: new LocalStorageCachePersistenceAdapter(window.localStorage),
@@ -51,6 +50,11 @@ const client = new SoroWillClient({
   maxConcurrentRequests: 4,
   requestsPerSecond: 10,
 });
+
+// Or point at a specific deployment (always safe if the default may be stale):
+// const client = SoroWillClient.forNetwork('testnet', {
+//   contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+// });
 
 // Or construct from environment variables in Node-based apps:
 // SOROWILL_NETWORK=testnet
@@ -165,6 +169,190 @@ client.assertWalletNetwork(connection); // throws WalletNetworkMismatchError on 
 | `calculateShares(balance, beneficiaries)` | Splits a balance across beneficiaries, mirroring on-chain rounding |
 | `formatDeadline(date)` | Formats a `Date` as a human-readable string |
 | `validateBeneficiaries(beneficiaries)` | Checks that percentages are well-formed and sum to 100 |
+
+## Full public API
+
+Every top-level export from `@sorowill/sdk` is listed below. When adding a new public export, add a row here too — see [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+### Client
+
+| Export | Kind | Source module | Description |
+|---|---|---|---|
+| `SoroWillClient` | class | `SoroWillClient` | Main client for reading and writing to a deployed SoroWill contract |
+| `DEFAULT_CONTRACT_IDS` | const | `SoroWillClient` | Maintainer-managed default contract address per network; kept in sync with `deployments/` in the contracts repo |
+
+### Wallet helpers (Freighter)
+
+| Export | Kind | Source module | Description |
+|---|---|---|---|
+| `connectWallet` | function | `wallet` | Requests Freighter access and returns the connected public key |
+| `isFreighterInstalled` | function | `wallet` | Resolves `true` if the Freighter extension is present |
+| `getPublicKey` | function | `wallet` | Returns the active Freighter account's public key |
+| `signTransaction` | function | `wallet` | Signs a transaction XDR string via Freighter |
+| `freighterAdapter` | object | `wallet` | Pre-built `WalletAdapter` backed by Freighter; used as the default when no `wallet` option is supplied |
+| `getDefaultWalletAdapter` | function | `wallet` | Returns `freighterAdapter`; exported for testing overrides |
+| `FreighterWalletAdapter` | class | `wallet` | Class form of the Freighter adapter |
+
+### Wallet adapters
+
+| Export | Kind | Source module | Description |
+|---|---|---|---|
+| `createAlbedoAdapter` | function | `adapters/albedo` | Returns a `WalletAdapter` backed by the Albedo intent API |
+| `HanaWalletAdapter` | class | `adapters` | Adapter for the Hana browser-extension wallet; accepts an injected provider |
+| `HotWalletAdapter` | class | `adapters` | Adapter for the HOT wallet; accepts an injected provider |
+| `LedgerWalletAdapter` | class | `adapters` | Adapter for Ledger hardware wallets via WebUSB/WebHID/Node transport |
+| `LobstrWalletAdapter` | class | `adapters` | Adapter for the LOBSTR mobile wallet via WalletConnect pairing |
+| `WalletConnectAdapter` | class | `walletConnect` | Generic WalletConnect adapter for any Stellar WalletConnect-compatible wallet |
+| `LocalStorageWalletConnectSessionStore` | class | `walletConnect` | Persists WalletConnect sessions to `localStorage` |
+| `MemoryWalletConnectSessionStore` | class | `walletConnect` | In-memory WalletConnect session store (useful for testing) |
+
+### Cache and persistence
+
+| Export | Kind | Source module | Description |
+|---|---|---|---|
+| `ReadCache` | class | `cache` | In-memory read cache with optional TTL and persistence |
+
+### Hooks
+
+| Export | Kind | Source module | Description |
+|---|---|---|---|
+| `HookManager` | class | `hooks` | Registers and runs `beforeInvoke` / `afterInvoke` lifecycle hooks |
+
+### Multisig
+
+| Export | Kind | Source module | Description |
+|---|---|---|---|
+| `MultisigCollector` | class | `multisig` | Collects partial signatures for a multi-sig transaction |
+| `buildMultisigTransactionXdr` | function | `multisig` | Builds an unsigned transaction XDR for multi-sig signing |
+| `signWithSecretKey` | function | `multisig` | Signs a transaction XDR with a raw secret key (scripts/testing only) |
+
+### Fee-bump helpers
+
+| Export | Kind | Source module | Description |
+|---|---|---|---|
+| `buildFeeBumpXdr` | function | `feeBump` | Wraps a transaction in a fee-bump envelope |
+| `signFeeBumpXdr` | function | `feeBump` | Signs a fee-bump transaction XDR |
+| `submitFeeBump` | function | `feeBump` | Submits a signed fee-bump transaction |
+| `submitFeeBumpTransaction` | function | `feeBump` | High-level helper: build, sign, and submit a fee-bump in one call |
+
+### SEP-7 helpers
+
+| Export | Kind | Source module | Description |
+|---|---|---|---|
+| `buildSep7TxUri` | function | `sep7` | Builds a `web+stellar:tx?...` deep-link URI for mobile wallet signing |
+| `parseSep7Callback` | function | `sep7` | Parses the signed XDR returned to a SEP-7 callback URL |
+
+### Utilities
+
+| Export | Kind | Source module | Description |
+|---|---|---|---|
+| `formatUSDC` | function | `utils` | Formats stroops as a human-readable decimal string, e.g. `"1,234.50"` |
+| `toStroops` | function | `utils` | Parses a decimal USDC string into base units as a `bigint` |
+| `getTimeUntilCheckin` | function | `utils` | Seconds until the next check-in deadline (negative if overdue) |
+| `isCheckinDue` | function | `utils` | Whether the check-in deadline has already passed |
+| `calculateShares` | function | `utils` | Splits a balance across beneficiaries, mirroring on-chain rounding |
+| `formatDeadline` | function | `utils` | Formats a `Date` as a human-readable string |
+| `validateBeneficiaries` | function | `utils` | Checks that percentages are well-formed and sum to 100 |
+| `validateGuardians` | function | `utils` | Checks that the guardian list is valid (no duplicates, ≤ `MAX_GUARDIANS`) |
+| `isBeneficiary` | function | `utils` | Returns `true` if an address appears in a will's beneficiary list |
+| `isGuardian` | function | `utils` | Returns `true` if an address appears in a will's guardian list |
+| `getNextActionableState` | function | `utils` | Returns the next action the owner or a guardian should take for a given will state |
+| `MAX_BENEFICIARIES` | const | `utils` | Maximum number of beneficiaries allowed per will |
+| `MAX_GUARDIANS` | const | `utils` | Maximum number of guardians allowed per will |
+
+### Request queue
+
+| Export | Kind | Source module | Description |
+|---|---|---|---|
+| `RequestQueue` | class | `requestQueue` | FIFO queue with concurrency and rate-limit controls used internally by the client |
+
+### Events
+
+| Export | Kind | Source module | Description |
+|---|---|---|---|
+| `unsubscribeFromWillEvents` | function | `events` | Closes an active `WillEventSubscription` |
+
+### Errors
+
+| Export | Kind | Source module | Description |
+|---|---|---|---|
+| `SoroWillError` | class | `errors` | Base error for all SDK-level errors |
+| `WillContractError` | class | `errors` | Base class for all typed contract errors |
+| `WillNotFoundError` | class | `errors` | The will does not exist |
+| `NotOwnerError` | class | `errors` | The caller is not the will's owner |
+| `WillNotActiveError` | class | `errors` | The will is not in the `Active` state |
+| `WillNotTriggeredError` | class | `errors` | The will has not been triggered |
+| `GracePeriodNotExpiredError` | class | `errors` | The grace period has not yet expired |
+| `GracePeriodExpiredError` | class | `errors` | The grace period has already expired |
+| `InvalidPercentagesError` | class | `errors` | Beneficiary percentages do not sum to 100 |
+| `AlreadyVotedError` | class | `errors` | The guardian has already voted in this cycle |
+| `NotGuardianError` | class | `errors` | The caller is not a guardian of the will |
+| `CheckinNotDueError` | class | `errors` | The check-in deadline has not yet passed |
+| `ZeroAmountError` | class | `errors` | The supplied amount is zero |
+| `TooManyBeneficiariesError` | class | `errors` | Exceeds the maximum number of beneficiaries |
+| `RequestTimeoutError` | class | `errors` | An RPC request exceeded its configured timeout |
+| `WalletNetworkMismatchError` | class | `errors` | The wallet's active network does not match the client's configured network |
+| `FreighterInstallCheckError` | class | `errors` | An unexpected error occurred while checking whether Freighter is installed |
+| `SoroWillRestoreRequiredError` | class | `errors` | The contract entry needs a ledger restore before it can be invoked |
+| `mapContractError` | function | `errors` | Maps a raw Soroban error into the appropriate typed subclass |
+
+### Types
+
+| Export | Kind | Source module | Description |
+|---|---|---|---|
+| `Will` | interface | `types` | Full on-chain state of a will decoded into native JS types |
+| `Beneficiary` | interface | `types` | A beneficiary address and its percentage share |
+| `WillStatus` | enum | `types` | Lifecycle states: `Active`, `Triggered`, `Released`, `Cancelled` |
+| `WillErrorCode` | enum | `types` | Numeric error codes from the contract's `WillError` enum |
+| `CreateWillParams` | interface | `types` | Parameters for `createWill` |
+| `UpdateBeneficiariesParams` | interface | `types` | Parameters for `updateBeneficiaries` |
+| `PaginationOptions` | interface | `types` | Client-side pagination cursor and page size |
+| `PaginatedWillsResult` | interface | `types` | A page of wills plus the next-page cursor |
+| `SoroWillEvent` | interface | `types` | Normalised contract event emitted by the SoroWill contract |
+| `EventSubscription` | interface | `types` | Handle for an active event subscription |
+| `EventSubscriptionOptions` | interface | `types` | Configuration for event subscriptions (transport, cursor, poll interval) |
+| `EventSubscriptionTransport` | type | `types` | `'polling'` or `'websocket'` |
+| `RequestOptions` | interface | `types` | Per-call options: `timeoutMs` and `signal` |
+| `BatchOperation` | interface | `types` | A single operation for inclusion in a `batch` call |
+| `BatchResult` | interface | `types` | Result of a successful `batch` submission |
+| `SoroWillClientOptions` | interface | `SoroWillClient` | Full constructor options for `SoroWillClient` |
+| `SoroWillNetwork` | type | `SoroWillClient` | `'testnet'` or `'mainnet'` |
+| `SoroWillRpcServer` | interface | `SoroWillClient` | RPC server interface (used for testing overrides) |
+| `SoroWillReadCacheOptions` | interface | `SoroWillClient` | Read-cache TTL options |
+| `RpcRetryOptions` | interface | `SoroWillClient` | Retry back-off configuration |
+| `WalletAdapter` | interface | `wallet` | Interface all wallet adapters must implement |
+| `WalletConnection` | interface | `wallet` | Result of a successful `connect()` call |
+| `WillEvent` | interface | `events` | Raw contract event passed to `WillEventSource` listeners |
+| `WillEventListener` | type | `events` | Callback type for `WillEventSource.subscribe` |
+| `WillEventSource` | interface | `events` | Source of will events used to invalidate the read cache |
+| `WillEventSubscription` | interface | `events` | Subscription handle returned by `WillEventSource.subscribe` |
+| `ReadCacheOptions` | interface | `cache` | Configuration for `ReadCache` |
+| `RequestQueueOptions` | interface | `requestQueue` | Configuration for `RequestQueue` |
+| `AfterInvokeContext` | interface | `hooks` | Context passed to `afterInvoke` hooks |
+| `AfterInvokeHook` | type | `hooks` | Function signature for `afterInvoke` hooks |
+| `BeforeInvokeContext` | interface | `hooks` | Context passed to `beforeInvoke` hooks |
+| `BeforeInvokeHook` | type | `hooks` | Function signature for `beforeInvoke` hooks |
+| `HookRegistry` | interface | `hooks` | `on`/`off` registration shape for hooks |
+| `CollectedSignature` | interface | `multisig` | A partial signature collected by `MultisigCollector` |
+| `MultisigCollectorOptions` | interface | `multisig` | Options for constructing a `MultisigCollector` |
+| `FeeBumpOptions` | interface | `feeBump` | Options for `buildFeeBumpXdr` |
+| `SubmitFeeBumpOptions` | interface | `feeBump` | Options for `submitFeeBump` |
+| `BuildSep7TxUriOptions` | interface | `sep7` | Options for `buildSep7TxUri` |
+| `Sep7CallbackResult` | interface | `sep7` | Parsed result of a SEP-7 callback URL |
+| `NextActionableState` | type | `utils` | Return type of `getNextActionableState` |
+| `WalletConnectAdapterOptions` | interface | `walletConnect` | Options for constructing a `WalletConnectAdapter` |
+| `WalletConnectClient` | interface | `walletConnect` | Minimal WalletConnect client interface |
+| `WalletConnectConnectResult` | interface | `walletConnect` | Result of `WalletConnectAdapter.connect()` |
+| `WalletConnectSession` | interface | `walletConnect` | Active WalletConnect session |
+| `WalletConnectSessionNamespace` | interface | `walletConnect` | Namespace entry in a WalletConnect session |
+| `WalletConnectSessionStore` | interface | `walletConnect` | Persistence interface for WalletConnect sessions |
+| `InjectedWalletProvider` | interface | `adapters` | Provider interface for injected browser extension wallets |
+| `LedgerStellarApp` | interface | `adapters` | Ledger Stellar app transport interface |
+| `LedgerTransport` | interface | `adapters` | Low-level Ledger transport (WebUSB/WebHID/Node) |
+| `LedgerWalletAdapterOptions` | interface | `adapters` | Options for `LedgerWalletAdapter` |
+| `LobstrSessionClient` | interface | `adapters` | WalletConnect session client for `LobstrWalletAdapter` |
+| `LobstrWalletAdapterOptions` | interface | `adapters` | Options for `LobstrWalletAdapter` |
+| `SignTransactionOptions` | interface | `adapters` | Options passed to adapter `signTransaction` methods |
 
 ## Custom fetch / environments without a global fetch
 
