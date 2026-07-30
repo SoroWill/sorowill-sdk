@@ -9,6 +9,7 @@ export type {
   SoroWillRpcServer,
   SoroWillReadCacheOptions,
 } from './SoroWillClient';
+export { DEFAULT_CONTRACT_IDS } from './SoroWillClient';
 
 export { HookManager } from './hooks';
 export type {

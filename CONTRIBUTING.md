@@ -32,6 +32,7 @@ fix/N-short-description
 - Make sure `npm run typecheck`, `npm run lint`, `npm test`, and `npm run build` all pass cleanly before requesting review.
 - Add or update unit tests in `test/` for any behavior change to `src/utils.ts` or type validation logic.
 - Keep the public API in `src/index.ts` in sync with any new exports.
+- **When adding a new top-level export**, also add a row to the _Full public API_ table in `README.md` (under the appropriate section). The table is the single source of truth for what the package exposes — keeping it current helps consumers discover the API without reading the source. A missing row will be flagged during code review.
 - **If your PR changes public behavior** (new features, breaking changes, deprecations, or behavioral fixes), add a bullet entry under the `[Unreleased]` section of [`CHANGELOG.md`](./CHANGELOG.md). The release workflow (`publish.yml`) triggers from published GitHub Releases, and the changelog is the authoritative record of what shipped in each version.
 
 ## API reference

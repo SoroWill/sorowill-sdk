@@ -55,6 +55,28 @@ const NULL_ACCOUNT = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 /** Supported Stellar networks. */
 export type SoroWillNetwork = 'testnet' | 'mainnet';
 
+/**
+ * Default contract addresses for each network, sourced from the SoroWill
+ * contracts repository's `deployments/` manifests.
+ *
+ * **IMPORTANT — keep in sync on every redeploy.**
+ * These values are baked into this SDK release. If the maintainers redeploy
+ * the SoroWill contract (e.g. after an upgrade), this map must be updated and
+ * a new SDK version published. Consumers who need to pin to a specific
+ * deployment — or who are running their own fork — should pass `contractId`
+ * explicitly to the `SoroWillClient` constructor rather than relying on this
+ * default.
+ *
+ * @see https://github.com/SoroWill/contracts/tree/main/deployments
+ */
+export const DEFAULT_CONTRACT_IDS: Record<SoroWillNetwork, string> = {
+  testnet: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+  // Mainnet is not yet deployed. This placeholder will be replaced when the
+  // mainnet contract is live. Calling forNetwork('mainnet') before that happens
+  // will throw an error so misconfiguration is caught early.
+  mainnet: '',
+};
+
 interface NetworkConfig {
   rpcUrls: string[];
   networkPassphrase: string;
@@ -521,6 +543,63 @@ export class SoroWillClient {
       ...(env.SOROWILL_EVENT_RPC_URL ? { eventRpcUrl: env.SOROWILL_EVENT_RPC_URL } : {}),
       ...(env.SOROWILL_EVENT_STREAM_URL ? { eventStreamUrl: env.SOROWILL_EVENT_STREAM_URL } : {}),
       ...(pollInterval !== undefined ? { defaultPollIntervalMs: pollInterval } : {}),
+    });
+  }
+
+  /**
+   * Convenience constructor that targets a known network using the
+   * **maintainer-managed default contract address** for that network.
+   *
+   * This is the recommended way to get started quickly. Any option accepted
+   * by the `SoroWillClient` constructor can be passed as `overrides` —
+   * including `contractId` if you need to point at a specific deployment
+   * (e.g. a staging contract or your own fork).
+   *
+   * ```ts
+   * // Simplest case — uses the default testnet contract:
+   * const client = SoroWillClient.forNetwork('testnet');
+   *
+   * // Override the contract address (e.g. after a redeploy):
+   * const client = SoroWillClient.forNetwork('testnet', {
+   *   contractId: 'CNEW...',
+   * });
+   * ```
+   *
+   * **Important — default contract ID freshness:**
+   * The default `contractId` values in {@link DEFAULT_CONTRACT_IDS} are
+   * baked into each SDK release. If the SoroWill contract is redeployed
+   * between SDK releases, you **must** pass `contractId` explicitly in
+   * `overrides` until a new SDK version is published with the updated
+   * address. Track redeployments in the contracts repo's
+   * `deployments/` directory:
+   * https://github.com/SoroWill/contracts/tree/main/deployments
+   *
+   * @param network - The target Stellar network (`'testnet'` or `'mainnet'`).
+   * @param overrides - Any `SoroWillClientOptions` to merge on top of the
+   *   per-network defaults. `network` is always taken from the first argument
+   *   and cannot be overridden here.
+   *
+   * @throws {Error} If `network` is `'mainnet'` and no mainnet contract has
+   *   been deployed yet (i.e. the default address is still the placeholder).
+   */
+  static forNetwork(
+    network: SoroWillNetwork,
+    overrides?: Partial<Omit<SoroWillClientOptions, 'network'>>,
+  ): SoroWillClient {
+    const defaultContractId = DEFAULT_CONTRACT_IDS[network];
+
+    // Guard against the mainnet placeholder until a real deployment exists.
+    if (!defaultContractId && !overrides?.contractId) {
+      throw new Error(
+        `No default contract address is available for network "${network}" yet. ` +
+          'Pass contractId explicitly in the overrides argument.',
+      );
+    }
+
+    return new SoroWillClient({
+      ...overrides,
+      network,
+      contractId: overrides?.contractId ?? defaultContractId,
     });
   }
 
