@@ -111,6 +111,7 @@ export {
   RequestTimeoutError,
   SimulationError,
   SoroWillError,
+  SoroWillInvalidAmountError,
   SoroWillRestoreRequiredError,
   TooManyBeneficiariesError,
   TransactionSubmissionError,
