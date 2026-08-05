@@ -2,7 +2,7 @@ interface DebugLog {
   timestamp: string;
   level: 'operation-build' | 'simulation' | 'submission' | 'poll' | 'success' | 'error';
   method: string;
-  willId?: string;
+  willId?: string | undefined;
   details: Record<string, unknown>;
 }
 

@@ -117,6 +117,10 @@ describe('checkIn nextDeadline consistency with getWill', () => {
     const spec = createSpec([makePreCheckinRawWill(), makePostCheckinRawWill()]);
 
     const wallet = {
+      async isConnected() { return true; },
+      async connect() { return { publicKey: TEST_ACCOUNT, network: 'testnet', networkPassphrase: 'Test SDF Network ; September 2015' }; },
+      async reconnect() { return { publicKey: TEST_ACCOUNT, network: 'testnet', networkPassphrase: 'Test SDF Network ; September 2015' }; },
+      async disconnect() {},
       async getPublicKey() { return TEST_ACCOUNT; },
       async signTransaction(xdrStr: string) { return xdrStr; },
     };
@@ -154,6 +158,10 @@ describe('checkIn nextDeadline consistency with getWill', () => {
     const spec = createSpec([makePreCheckinRawWill()]);
 
     const wallet = {
+      async isConnected() { return true; },
+      async connect() { return { publicKey: TEST_ACCOUNT, network: 'testnet', networkPassphrase: 'Test SDF Network ; September 2015' }; },
+      async reconnect() { return { publicKey: TEST_ACCOUNT, network: 'testnet', networkPassphrase: 'Test SDF Network ; September 2015' }; },
+      async disconnect() {},
       async getPublicKey() { return TEST_ACCOUNT; },
       async signTransaction(xdrStr: string) { return xdrStr; },
     };

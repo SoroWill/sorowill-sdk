@@ -1,5 +1,23 @@
-import { Account, xdr } from '@stellar/stellar-sdk';
+import { Account, Networks, Operation, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
 import { describe, expect, it, vi } from 'vitest';
+
+/**
+ * Builds a real, structurally-valid signed transaction envelope XDR string
+ * using the actual (unmocked) SDK classes — submitSignedTransaction() parses
+ * this with the real TransactionBuilder.fromXDR, so a placeholder string
+ * isn't parseable XDR and would fail before ever reaching the mocked server.
+ */
+function makeRealSignedXdr(): string {
+  const account = new Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '0');
+  const tx = new TransactionBuilder(account, {
+    fee: '100',
+    networkPassphrase: Networks.TESTNET,
+  })
+    .addOperation(Operation.bumpSequence({ bumpTo: '1' }))
+    .setTimeout(30)
+    .build();
+  return tx.toXDR();
+}
 
 vi.mock('../src/wallet', () => ({
   getPublicKey: vi.fn(async () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'),
@@ -42,15 +60,14 @@ function makeClient(
     network: 'testnet',
     contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
     rpcUrls: ['https://rpc.test'],
+    // Passed at construction (not monkey-patched after) so it's respected by
+    // both this.server (used by submitSignedTransaction) and this.rpcPool
+    // (used by buildTransaction / read paths).
+    rpcServer: fakeServer as never,
     ...overrides,
   });
 
   Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
-  Object.defineProperty(client, 'rpcPool', {
-    value: {
-      withFailover: async (op: (server: unknown) => unknown) => op(fakeServer),
-    },
-  });
   Object.defineProperty(client, 'queue', {
     value: {
       enqueue: (fn: () => Promise<unknown>) => fn(),
@@ -79,11 +96,12 @@ describe('buildTransaction', () => {
 
   it('accepts an optional sourcePublicKey override', async () => {
     const { client } = makeClient();
+    const customPublicKey = 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG';
 
     const tx = await client.buildTransaction(
       'check_in',
-      { will_id: BigInt(42), owner: 'GCUSTOM' },
-      'GCUSTOM',
+      { will_id: BigInt(42), owner: customPublicKey },
+      customPublicKey,
     );
 
     expect(tx).toBeDefined();
@@ -131,7 +149,7 @@ describe('submitSignedTransaction', () => {
   it('submits a signed XDR and returns txHash and createdAt', async () => {
     const { client } = makeClient();
 
-    const result = await client.submitSignedTransaction('AAAAAgAAAAD...');
+    const result = await client.submitSignedTransaction(makeRealSignedXdr());
 
     expect(result.txHash).toBe('tx-hash-123');
     expect(result.createdAt).toBe(1_700_000_000);
@@ -139,61 +157,48 @@ describe('submitSignedTransaction', () => {
   });
 
   it('throws SoroWillError on submission failure', async () => {
+    // submitSignedTransaction reads through this.server, not this.rpcPool,
+    // so the override must be supplied as rpcServer at construction time.
     const { client } = makeClient({
-      rpcUrls: ['https://rpc.test'],
-    });
-
-    // Override the rpcPool to simulate a sendTransaction error
-    Object.defineProperty(client, 'rpcPool', {
-      value: {
-        withFailover: async (op: (server: unknown) => unknown) => {
-          return op({
-            getAccount: async (publicKey: string) => new Account(publicKey, '0'),
-            sendTransaction: async () => ({
-              status: 'ERROR',
-              errorResult: { toXDR: () => 'base64error' },
-            }),
-            pollTransaction: async () => ({ status: 'SUCCESS', createdAt: 0, returnValue: undefined }),
-            getContractWasmByContractId: async () => new Uint8Array(),
-          });
-        },
+      rpcServer: {
+        getAccount: async (publicKey: string) => new Account(publicKey, '0'),
+        sendTransaction: async () => ({
+          status: 'ERROR',
+          errorResult: { toXDR: () => 'base64error' },
+        }),
+        pollTransaction: async () => ({ status: 'SUCCESS', createdAt: 0, returnValue: undefined }),
+        getContractWasmByContractId: async () => new Uint8Array(),
       },
     });
 
     await expect(
-      client.submitSignedTransaction('AAAAAgAAAAD...'),
+      client.submitSignedTransaction(makeRealSignedXdr()),
     ).rejects.toThrow(/transaction submission failed/);
   });
 
   it('throws on non-SUCCESS transaction status', async () => {
-    const { client } = makeClient();
-
-    Object.defineProperty(client, 'rpcPool', {
-      value: {
-        withFailover: async (op: (server: unknown) => unknown) => {
-          return op({
-            getAccount: async (publicKey: string) => new Account(publicKey, '0'),
-            sendTransaction: async () => ({ status: 'PENDING', hash: 'tx-hash-fail' }),
-            pollTransaction: async () => ({
-              status: 'FAILED',
-              createdAt: 0,
-              returnValue: undefined,
-            }),
-            getContractWasmByContractId: async () => new Uint8Array(),
-          });
-        },
+    const { client } = makeClient({
+      rpcServer: {
+        getAccount: async (publicKey: string) => new Account(publicKey, '0'),
+        sendTransaction: async () => ({ status: 'PENDING', hash: 'tx-hash-fail' }),
+        pollTransaction: async () => ({
+          status: 'FAILED',
+          createdAt: 0,
+          returnValue: undefined,
+        }),
+        getContractWasmByContractId: async () => new Uint8Array(),
       },
     });
 
     await expect(
-      client.submitSignedTransaction('AAAAAgAAAAD...'),
+      client.submitSignedTransaction(makeRealSignedXdr()),
     ).rejects.toThrow(/did not succeed/);
   });
 
   it('returns the contract returnValue on success', async () => {
     const { client } = makeClient();
 
-    const result = await client.submitSignedTransaction('AAAAAgAAAAD...');
+    const result = await client.submitSignedTransaction(makeRealSignedXdr());
 
     expect(result.returnValue).toBeDefined();
     expect(result.txHash).toBe('tx-hash-123');

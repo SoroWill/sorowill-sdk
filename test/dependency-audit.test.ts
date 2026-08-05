@@ -175,9 +175,9 @@ describe('Dependency/Supply-Chain Audit Workflow', () => {
 
       // If peer dependencies exist, they should have reasonable version constraints
       if (packageJson.peerDependencies) {
-        Object.values(packageJson.peerDependencies).forEach(version => {
+        Object.values(packageJson.peerDependencies).forEach((version) => {
           expect(typeof version).toBe('string');
-          expect(version.length).toBeGreaterThan(0);
+          expect(String(version).length).toBeGreaterThan(0);
         });
       }
     });

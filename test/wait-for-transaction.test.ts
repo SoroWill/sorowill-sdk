@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 import { SoroWillClient, type SoroWillRpcServer } from '../src/SoroWillClient';
 import { SoroWillError } from '../src/errors';
 
-const TEST_ACCOUNT = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 const VOID_SCVAL = xdr.ScVal.scvVoid();
 
 function createRpcServer(overrides: Partial<{

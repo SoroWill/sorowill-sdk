@@ -61,6 +61,11 @@ vi.mock('@stellar/stellar-sdk', () => {
     }
   }
 
+  class MockTransaction {
+    constructor(private readonly xdr: string = 'TX_XDR') {}
+    toXDR(): string { return this.xdr; }
+  }
+
   class MockTransactionBuilder {
     private ops: unknown[] = [];
     constructor(
@@ -78,7 +83,7 @@ vi.mock('@stellar/stellar-sdk', () => {
         toXDR: () => 'TX_XDR',
       };
     }
-    static fromXDR(xdr: string, _np: string) { return { xdr, toXDR: () => xdr }; }
+    static fromXDR(xdr: string, _np: string) { return new MockTransaction(xdr); }
   }
 
   class MockServer {
@@ -98,7 +103,7 @@ vi.mock('@stellar/stellar-sdk', () => {
     BASE_FEE: '100',
     Contract: MockContract,
     Networks: { PUBLIC: 'PUBLIC', TESTNET: 'Test SDF Network ; September 2015' },
-    Transaction: class MockTransaction {},
+    Transaction: MockTransaction,
     TransactionBuilder: MockTransactionBuilder,
     contract: {
       Spec: Object.assign(
@@ -124,6 +129,7 @@ vi.mock('@stellar/stellar-sdk', () => {
       Api: {
         GetTransactionStatus: { SUCCESS: 'SUCCESS' },
         isSimulationError: (s: { error?: string }) => Boolean(s.error),
+        isSimulationRestore: () => false,
       },
       Server: MockServer,
     },

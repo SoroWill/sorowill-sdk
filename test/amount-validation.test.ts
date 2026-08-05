@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 
 import { SoroWillClient, type SoroWillRpcServer } from '../src/SoroWillClient';
 import { SoroWillInvalidAmountError } from '../src/errors';
-import { WillStatus } from '../src/types';
 
 const TEST_ACCOUNT = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 const VOID_SCVAL = xdr.ScVal.scvVoid();
@@ -48,25 +47,18 @@ function createSpec(returnValues: Record<string, unknown[]>) {
   };
 }
 
-function makeRawWill(id: bigint) {
-  return {
-    id,
-    owner: 'GOWNER',
-    token: 'CTOKEN',
-    balance: 1_000_000n,
-    beneficiaries: [{ address: 'GBEN', percentage: 100 }],
-    checkin_period_days: 90n,
-    grace_period_days: 7n,
-    last_checkin: 1_700_000_000n,
-    trigger_time: undefined,
-    status: WillStatus.Active,
-    guardians: [],
-    guardian_votes: 0,
-  };
-}
-
 function makeWalletAdapter() {
   return {
+    async isConnected(): Promise<boolean> {
+      return true;
+    },
+    async connect() {
+      return { publicKey: TEST_ACCOUNT, network: 'testnet', networkPassphrase: 'Test SDF Network ; September 2015' };
+    },
+    async reconnect() {
+      return { publicKey: TEST_ACCOUNT, network: 'testnet', networkPassphrase: 'Test SDF Network ; September 2015' };
+    },
+    async disconnect(): Promise<void> {},
     async getPublicKey(): Promise<string> {
       return TEST_ACCOUNT;
     },

@@ -5,6 +5,15 @@ import { FreighterInstallCheckError, SignTransactionTimeoutError } from './error
 /** Default timeout (ms) for a wallet signTransaction call. */
 const DEFAULT_SIGN_TIMEOUT_MS = 120_000;
 
+/**
+ * The `code` Freighter's `isConnected()` API returns for the ordinary
+ * "extension not present/injected" case (e.g. running outside a browser, or
+ * no Freighter extension installed) — as opposed to an unexpected internal
+ * Freighter error, which should surface instead of being treated as "not
+ * installed".
+ */
+const FREIGHTER_NOT_INSTALLED_CODE = -1;
+
 /** Result of a successful wallet connection. */
 export interface WalletConnection {
   publicKey: string;
@@ -86,6 +95,8 @@ export interface WalletAdapter {
   disconnect(): Promise<void>;
   getPublicKey(): Promise<string>;
   signTransaction(transactionXdr: string, opts: { networkPassphrase: string; timeoutMs?: number }): Promise<string>;
+  /** Reports the network this wallet is currently set to, without prompting the user. Optional — not every wallet adapter can report this. */
+  getNetwork?(): Promise<{ network: string; networkPassphrase: string }>;
 }
 
 export class FreighterWalletAdapter implements WalletAdapter {
@@ -101,6 +112,9 @@ export class FreighterWalletAdapter implements WalletAdapter {
   async isConnected(): Promise<boolean> {
     const { isConnected, error } = await freighterApi.isConnected();
     if (error) {
+      if (error.code === FREIGHTER_NOT_INSTALLED_CODE) {
+        return false;
+      }
       throw new FreighterInstallCheckError(error.code, error.message);
     }
     return isConnected;

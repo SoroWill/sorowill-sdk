@@ -65,10 +65,6 @@ describe('contract error mapping', () => {
 
 describe('batch transactions', () => {
   it('prepares, signs, and submits two operations as one transaction', async () => {
-    const client = new SoroWillClient({
-      network: 'testnet',
-      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
-    });
     let preparedOperationCount = 0;
     const fakeSpec = {
       funcArgsToScVals: () => [] as xdr.ScVal[],
@@ -86,8 +82,12 @@ describe('batch transactions', () => {
         returnValue: xdr.ScVal.scvVoid(),
       }),
     };
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+      rpcServer: fakeServer as never,
+    });
     Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
-    Object.defineProperty(client, 'server', { value: fakeServer });
 
     await expect(
       client.batch([
@@ -104,17 +104,10 @@ describe('mapWill trigger_time decoding', () => {
   // We use the same fakeSpec + fakeServer pattern to control the raw return value.
 
   it('maps trigger_time: undefined to triggerTime: null', async () => {
-    const client = new SoroWillClient({
-      network: 'testnet',
-      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
-    });
     const fakeSpec = {
       funcArgsToScVals: () => [] as xdr.ScVal[],
       funcResToNative: (_method: string, value: unknown) => value,
     };
-    // Override specPromise to skip wasm fetch (which requires a real binary).
-    Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
-
     const fakeServer = {
       simulateTransaction: async () => ({
         result: {
@@ -135,23 +128,23 @@ describe('mapWill trigger_time decoding', () => {
         },
       }),
     };
-    Object.defineProperty(client, 'server', { value: fakeServer });
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+      rpcServer: fakeServer as never,
+    });
+    // Override specPromise to skip wasm fetch (which requires a real binary).
+    Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
 
     const will = await client.getWill('1');
     expect(will.triggerTime).toBeNull();
   });
 
   it('maps trigger_time set to a correct Date', async () => {
-    const client = new SoroWillClient({
-      network: 'testnet',
-      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
-    });
     const fakeSpec = {
       funcArgsToScVals: () => [] as xdr.ScVal[],
       funcResToNative: (_method: string, value: unknown) => value,
     };
-    Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
-
     const fakeServer = {
       simulateTransaction: async () => ({
         result: {
@@ -172,7 +165,12 @@ describe('mapWill trigger_time decoding', () => {
         },
       }),
     };
-    Object.defineProperty(client, 'server', { value: fakeServer });
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+      rpcServer: fakeServer as never,
+    });
+    Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
 
     const will = await client.getWill('1');
     expect(will.triggerTime).toBeInstanceOf(Date);
@@ -182,10 +180,6 @@ describe('mapWill trigger_time decoding', () => {
 
 describe('sendTransaction status handling', () => {
   it('throws a distinct error for TRY_AGAIN_LATER status', async () => {
-    const client = new SoroWillClient({
-      network: 'testnet',
-      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
-    });
     const fakeSpec = {
       funcArgsToScVals: () => [] as xdr.ScVal[],
     };
@@ -197,8 +191,12 @@ describe('sendTransaction status handling', () => {
         throw new Error('should not reach poll');
       },
     };
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+      rpcServer: fakeServer as never,
+    });
     Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
-    Object.defineProperty(client, 'server', { value: fakeServer });
 
     await expect(
       client.batch([{ method: 'dummy', args: {} }]),
@@ -206,10 +204,6 @@ describe('sendTransaction status handling', () => {
   });
 
   it('proceeds to poll on DUPLICATE status', async () => {
-    const client = new SoroWillClient({
-      network: 'testnet',
-      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
-    });
     const fakeSpec = {
       funcArgsToScVals: () => [] as xdr.ScVal[],
     };
@@ -227,8 +221,12 @@ describe('sendTransaction status handling', () => {
         };
       },
     };
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+      rpcServer: fakeServer as never,
+    });
     Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
-    Object.defineProperty(client, 'server', { value: fakeServer });
 
     await expect(
       client.batch([{ method: 'dummy', args: {} }]),
@@ -237,10 +235,6 @@ describe('sendTransaction status handling', () => {
   });
 
   it('throws on ERROR status without polling', async () => {
-    const client = new SoroWillClient({
-      network: 'testnet',
-      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
-    });
     const fakeSpec = {
       funcArgsToScVals: () => [] as xdr.ScVal[],
     };
@@ -254,8 +248,12 @@ describe('sendTransaction status handling', () => {
         return { status: 'SUCCESS' as const, createdAt: 0, returnValue: xdr.ScVal.scvVoid() };
       },
     };
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+      rpcServer: fakeServer as never,
+    });
     Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
-    Object.defineProperty(client, 'server', { value: fakeServer });
 
     await expect(
       client.batch([{ method: 'dummy', args: {} }]),
@@ -283,11 +281,6 @@ describe('pollAttempts option', () => {
   });
 
   it('passes custom pollAttempts to pollTransaction', async () => {
-    const client = new SoroWillClient({
-      network: 'testnet',
-      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
-      pollAttempts: 99,
-    });
     const fakeSpec = {
       funcArgsToScVals: () => [] as xdr.ScVal[],
     };
@@ -305,8 +298,13 @@ describe('pollAttempts option', () => {
         };
       },
     };
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+      pollAttempts: 99,
+      rpcServer: fakeServer as never,
+    });
     Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
-    Object.defineProperty(client, 'server', { value: fakeServer });
 
     await client.batch([{ method: 'dummy', args: {} }]);
     expect(receivedAttempts).toBe(99);

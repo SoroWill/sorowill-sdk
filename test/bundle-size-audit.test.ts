@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
+import { gzipSync } from 'zlib';
 
 /**
  * Bundle size and tree-shaking audit for SoroWill SDK.
@@ -33,11 +34,15 @@ function getFileSize(filePath: string): BundleMetrics {
     const content = readFileSync(filePath);
     const sizeBytes = content.length;
     const sizeKb = Math.round(sizeBytes / 1024 * 100) / 100;
+    const gzipSizeBytes = gzipSync(content).length;
+    const gzipSizeKb = Math.round(gzipSizeBytes / 1024 * 100) / 100;
 
     return {
       path: filePath,
       sizeBytes,
       sizeKb,
+      gzipSizeBytes,
+      gzipSizeKb,
     };
   } catch (error) {
     return {
@@ -94,6 +99,14 @@ describe('Bundle size and tree-shaking audit', () => {
       expect(reactMetric).toBeDefined();
       if (reactMetric) {
         expect(reactMetric.sizeKb).toBeLessThan(MAX_BUNDLE_SIZE_KB);
+      }
+    });
+
+    it('every bundle is under the gzipped size threshold', () => {
+      expect(bundleMetrics.length).toBeGreaterThan(0);
+      for (const metric of bundleMetrics) {
+        expect(metric.gzipSizeKb).toBeDefined();
+        expect(metric.gzipSizeKb as number).toBeLessThan(MAX_GZIP_SIZE_KB);
       }
     });
   });

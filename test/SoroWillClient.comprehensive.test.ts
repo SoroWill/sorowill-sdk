@@ -5,24 +5,37 @@ const VOID_SCVAL = xdr.ScVal.scvVoid();
 
 // Create a stub spec that can decode will-like data
 function makeStubSpec() {
+  const rawWill = {
+    id: 1n,
+    owner: 'GOWNER',
+    token: 'CTOKEN',
+    balance: 1_000_000n,
+    beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+    checkin_period_days: 90n,
+    grace_period_days: 7n,
+    last_checkin: 1_700_000_000n,
+    trigger_time: undefined,
+    status: 'Active',
+    guardians: [],
+    guardian_votes: 0,
+  };
+
   return {
     funcArgsToScVals: () => [] as xdr.ScVal[],
-    funcResToNative: (_method: string, _value: xdr.ScVal) => {
-      // Return a RawWill shape for any method
-      return {
-        id: 1n,
-        owner: 'GOWNER',
-        token: 'CTOKEN',
-        balance: 1_000_000n,
-        beneficiaries: [{ address: 'GBEN', percentage: 100 }],
-        checkin_period_days: 90n,
-        grace_period_days: 7n,
-        last_checkin: 1_700_000_000n,
-        trigger_time: undefined,
-        status: 'Active',
-        guardians: [],
-        guardian_votes: 0,
-      };
+    funcResToNative: (method: string, _value: xdr.ScVal) => {
+      switch (method) {
+        case 'get_wills_by_owner':
+        case 'get_wills_by_beneficiary':
+          return [rawWill];
+        case 'create_will':
+          return rawWill.id;
+        case 'cancel_will':
+          return rawWill.balance;
+        default:
+          // Every other method (get_will, check_in, trigger_will, ...) decodes
+          // to a RawWill shape.
+          return rawWill;
+      }
     },
   };
 }
@@ -41,15 +54,17 @@ vi.mock('@stellar/stellar-sdk', async () => {
   };
 });
 
+const TEST_ACCOUNT = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
+
 vi.mock('../src/wallet', () => ({
   getPublicKey: vi.fn(async () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'),
   signTransaction: vi.fn(async (tx: string) => tx),
   getDefaultWalletAdapter: vi.fn(() => ({
     isConnected: async () => true,
-    connect: async () => ({ publicKey: 'GAA', network: 'testnet', networkPassphrase: 'Test SDF Network ; September 2015' }),
-    reconnect: async () => ({ publicKey: 'GAA', network: 'testnet', networkPassphrase: 'Test SDF Network ; September 2015' }),
+    connect: async () => ({ publicKey: TEST_ACCOUNT, network: 'testnet', networkPassphrase: 'Test SDF Network ; September 2015' }),
+    reconnect: async () => ({ publicKey: TEST_ACCOUNT, network: 'testnet', networkPassphrase: 'Test SDF Network ; September 2015' }),
     disconnect: async () => {},
-    getPublicKey: async () => 'GAA',
+    getPublicKey: async () => TEST_ACCOUNT,
     signTransaction: async (tx: string) => tx,
   })),
 }));
@@ -57,7 +72,6 @@ vi.mock('../src/wallet', () => ({
 import { SoroWillClient, type SoroWillRpcServer } from '../src/SoroWillClient';
 import { SoroWillError, SoroWillRestoreRequiredError } from '../src/errors';
 
-const TEST_ACCOUNT = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 const WASM_BINARY = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]);
 
 function makeRpcServer(simImpl?: () => Promise<unknown>, wasmImpl?: () => Promise<Uint8Array>): SoroWillRpcServer {
@@ -71,7 +85,7 @@ function makeRpcServer(simImpl?: () => Promise<unknown>, wasmImpl?: () => Promis
       return { transactionData: 'AAAA', result: { retval: VOID_SCVAL } } as never;
     },
     async getAccount(address: string) { return new Account(address, '1'); },
-    async prepareTransaction(tx: unknown) { return tx; },
+    async prepareTransaction(tx: unknown) { return tx as never; },
     async sendTransaction() { return { status: 'PENDING', hash: 'abc123' } as never; },
     async pollTransaction() {
       return { status: 'SUCCESS', createdAt: 1_700_000_000, returnValue: VOID_SCVAL } as never;

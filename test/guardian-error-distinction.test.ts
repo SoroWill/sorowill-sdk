@@ -60,6 +60,16 @@ function createFailingRpcServer(contractErrorCode: number): SoroWillRpcServer {
 
 function makeWalletAdapter() {
   return {
+    async isConnected(): Promise<boolean> {
+      return true;
+    },
+    async connect() {
+      return { publicKey: TEST_ACCOUNT, network: 'testnet', networkPassphrase: 'Test SDF Network ; September 2015' };
+    },
+    async reconnect() {
+      return { publicKey: TEST_ACCOUNT, network: 'testnet', networkPassphrase: 'Test SDF Network ; September 2015' };
+    },
+    async disconnect(): Promise<void> {},
     async getPublicKey(): Promise<string> {
       return TEST_ACCOUNT;
     },

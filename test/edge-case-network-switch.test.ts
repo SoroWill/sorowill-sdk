@@ -1,5 +1,6 @@
 import { Account, xdr, Networks } from '@stellar/stellar-sdk';
 import { describe, expect, it, vi } from 'vitest';
+import type { WalletAdapter } from '../src/wallet';
 
 const VOID_SCVAL = xdr.ScVal.scvVoid();
 
@@ -38,27 +39,6 @@ vi.mock('@stellar/stellar-sdk', async () => {
   };
 });
 
-vi.mock('../src/wallet', () => ({
-  getPublicKey: vi.fn(async () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'),
-  signTransaction: vi.fn(async (tx: string) => tx),
-  getDefaultWalletAdapter: vi.fn(() => ({
-    isConnected: async () => true,
-    connect: async () => ({
-      publicKey: 'GAA',
-      network: 'testnet',
-      networkPassphrase: Networks.TESTNET_PASSPHRASE,
-    }),
-    reconnect: async () => ({
-      publicKey: 'GAA',
-      network: 'testnet',
-      networkPassphrase: Networks.TESTNET_PASSPHRASE,
-    }),
-    disconnect: async () => {},
-    getPublicKey: async () => 'GAA',
-    signTransaction: async (tx: string) => tx,
-  })),
-}));
-
 import { SoroWillClient, type SoroWillRpcServer } from '../src/SoroWillClient';
 import { WalletNetworkMismatchError } from '../src/errors';
 
@@ -76,7 +56,7 @@ function makeRpcServer(): SoroWillRpcServer {
       return new Account(address, '1');
     },
     async prepareTransaction(tx: unknown) {
-      return tx;
+      return tx as never;
     },
     async sendTransaction() {
       return { status: 'PENDING', hash: 'abc123' } as never;
@@ -87,67 +67,46 @@ function makeRpcServer(): SoroWillRpcServer {
   };
 }
 
+/** Builds a wallet adapter that reports a fixed network via `getNetwork()`. */
+function makeWalletAdapter(publicKey: string, networkPassphrase: string): WalletAdapter {
+  return {
+    isConnected: async () => true,
+    connect: async () => ({ publicKey, network: 'custom', networkPassphrase }),
+    reconnect: async () => ({ publicKey, network: 'custom', networkPassphrase }),
+    disconnect: async () => {},
+    getPublicKey: async () => publicKey,
+    signTransaction: async (tx: string) => tx,
+    getNetwork: async () => ({ network: 'custom', networkPassphrase }),
+  };
+}
+
 describe('Edge case: Network switch mid-session', () => {
   it('detects network mismatch when wallet is on different network than client', async () => {
     const testnetClient = new SoroWillClient({
       network: 'testnet',
       contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
-      rpcServer: makeRpcServer() as unknown as SoroWillRpcServer,
+      rpcServer: makeRpcServer(),
+      wallet: makeWalletAdapter('GAA', Networks.PUBLIC),
     });
 
-    const mockWalletAdapter = {
-      isConnected: async () => true,
-      connect: async () => ({
-        publicKey: 'GAA',
-        network: 'mainnet',
-        networkPassphrase: Networks.PUBLIC_NETWORK_PASSPHRASE,
-      }),
-      reconnect: async () => ({
-        publicKey: 'GAA',
-        network: 'mainnet',
-        networkPassphrase: Networks.PUBLIC_NETWORK_PASSPHRASE,
-      }),
-      disconnect: async () => {},
-      getPublicKey: async () => 'GAA',
-      signTransaction: async (_tx: string) => 'signed_tx',
-    };
-
-    await expect(
-      testnetClient.checkIn('1', { publicKey: 'GOWNER' }, { walletAdapter: mockWalletAdapter as any })
-    ).rejects.toThrow(WalletNetworkMismatchError);
+    await expect(testnetClient.checkIn('1')).rejects.toThrow(WalletNetworkMismatchError);
   });
 
   it('throws WalletNetworkMismatchError with expected and actual network info', async () => {
     const testnetClient = new SoroWillClient({
       network: 'testnet',
       contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
-      rpcServer: makeRpcServer() as unknown as SoroWillRpcServer,
+      rpcServer: makeRpcServer(),
+      wallet: makeWalletAdapter('GAA', Networks.PUBLIC),
     });
 
-    const mockWalletAdapter = {
-      isConnected: async () => true,
-      connect: async () => ({
-        publicKey: 'GAA',
-        network: 'mainnet',
-        networkPassphrase: Networks.PUBLIC_NETWORK_PASSPHRASE,
-      }),
-      reconnect: async () => ({
-        publicKey: 'GAA',
-        network: 'mainnet',
-        networkPassphrase: Networks.PUBLIC_NETWORK_PASSPHRASE,
-      }),
-      disconnect: async () => {},
-      getPublicKey: async () => 'GAA',
-      signTransaction: async (_tx: string) => 'signed_tx',
-    };
-
     try {
-      await testnetClient.checkIn('1', { publicKey: 'GOWNER' }, { walletAdapter: mockWalletAdapter as any });
+      await testnetClient.checkIn('1');
       expect.unreachable('Should have thrown WalletNetworkMismatchError');
     } catch (error) {
       if (error instanceof WalletNetworkMismatchError) {
-        expect(error.expectedNetworkPassphrase).toBe(Networks.TESTNET_PASSPHRASE);
-        expect(error.actualNetworkPassphrase).toBe(Networks.PUBLIC_NETWORK_PASSPHRASE);
+        expect(error.expectedNetworkPassphrase).toBe(Networks.TESTNET);
+        expect(error.actualNetworkPassphrase).toBe(Networks.PUBLIC);
         expect(error.message).toContain('configured');
         expect(error.message).toContain('wallet');
       } else {
@@ -160,29 +119,11 @@ describe('Edge case: Network switch mid-session', () => {
     const testnetClient = new SoroWillClient({
       network: 'testnet',
       contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
-      rpcServer: makeRpcServer() as unknown as SoroWillRpcServer,
+      rpcServer: makeRpcServer(),
+      wallet: makeWalletAdapter('GMAINNET_ACCOUNT', Networks.PUBLIC),
     });
 
-    const mainnetWalletAdapter = {
-      isConnected: async () => true,
-      connect: async () => ({
-        publicKey: 'GMAINNET_ACCOUNT',
-        network: 'mainnet',
-        networkPassphrase: Networks.PUBLIC_NETWORK_PASSPHRASE,
-      }),
-      reconnect: async () => ({
-        publicKey: 'GMAINNET_ACCOUNT',
-        network: 'mainnet',
-        networkPassphrase: Networks.PUBLIC_NETWORK_PASSPHRASE,
-      }),
-      disconnect: async () => {},
-      getPublicKey: async () => 'GMAINNET_ACCOUNT',
-      signTransaction: async (_tx: string) => 'signed_tx',
-    };
-
-    const trigger = testnetClient.trigger('1', { publicKey: 'GOWNER' }, {
-      walletAdapter: mainnetWalletAdapter as any,
-    });
+    const trigger = testnetClient.triggerWill('1');
 
     await expect(trigger).rejects.toThrow(WalletNetworkMismatchError);
   });
@@ -191,50 +132,11 @@ describe('Edge case: Network switch mid-session', () => {
     const testnetClient = new SoroWillClient({
       network: 'testnet',
       contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
-      rpcServer: makeRpcServer() as unknown as SoroWillRpcServer,
+      rpcServer: makeRpcServer(),
+      wallet: makeWalletAdapter('GMAINNET_ACCOUNT', Networks.PUBLIC),
     });
 
-    const testnetAdapter = {
-      isConnected: async () => true,
-      connect: async () => ({
-        publicKey: 'GTESTNET_ACCOUNT',
-        network: 'testnet',
-        networkPassphrase: Networks.TESTNET_PASSPHRASE,
-      }),
-      reconnect: async () => ({
-        publicKey: 'GTESTNET_ACCOUNT',
-        network: 'testnet',
-        networkPassphrase: Networks.TESTNET_PASSPHRASE,
-      }),
-      disconnect: async () => {},
-      getPublicKey: async () => 'GTESTNET_ACCOUNT',
-      signTransaction: async (_tx: string) => 'signed_tx',
-    };
-
-    const mainnetAdapter = {
-      isConnected: async () => true,
-      connect: async () => ({
-        publicKey: 'GMAINNET_ACCOUNT',
-        network: 'mainnet',
-        networkPassphrase: Networks.PUBLIC_NETWORK_PASSPHRASE,
-      }),
-      reconnect: async () => ({
-        publicKey: 'GMAINNET_ACCOUNT',
-        network: 'mainnet',
-        networkPassphrase: Networks.PUBLIC_NETWORK_PASSPHRASE,
-      }),
-      disconnect: async () => {},
-      getPublicKey: async () => 'GMAINNET_ACCOUNT',
-      signTransaction: async (_tx: string) => 'signed_tx',
-    };
-
-    // First call with testnet adapter should work
-    // (In reality this would fail with actual RPC, but mocked it doesn't)
-    // The important thing is mainnet adapter should throw
-
-    const mainnetCall = testnetClient.checkIn('1', { publicKey: 'GOWNER' }, {
-      walletAdapter: mainnetAdapter as any,
-    });
+    const mainnetCall = testnetClient.checkIn('1');
 
     await expect(mainnetCall).rejects.toThrow(WalletNetworkMismatchError);
   });
@@ -243,28 +145,10 @@ describe('Edge case: Network switch mid-session', () => {
     const mainnetClient = new SoroWillClient({
       network: 'mainnet',
       contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
-      rpcServer: makeRpcServer() as unknown as SoroWillRpcServer,
+      rpcServer: makeRpcServer(),
+      wallet: makeWalletAdapter('GTESTNET_ACCOUNT', Networks.TESTNET),
     });
 
-    const testnetAdapter = {
-      isConnected: async () => true,
-      connect: async () => ({
-        publicKey: 'GTESTNET_ACCOUNT',
-        network: 'testnet',
-        networkPassphrase: Networks.TESTNET_PASSPHRASE,
-      }),
-      reconnect: async () => ({
-        publicKey: 'GTESTNET_ACCOUNT',
-        network: 'testnet',
-        networkPassphrase: Networks.TESTNET_PASSPHRASE,
-      }),
-      disconnect: async () => {},
-      getPublicKey: async () => 'GTESTNET_ACCOUNT',
-      signTransaction: async (_tx: string) => 'signed_tx',
-    };
-
-    await expect(
-      mainnetClient.checkIn('1', { publicKey: 'GOWNER' }, { walletAdapter: testnetAdapter as any })
-    ).rejects.toThrow(WalletNetworkMismatchError);
+    await expect(mainnetClient.checkIn('1')).rejects.toThrow(WalletNetworkMismatchError);
   });
 });

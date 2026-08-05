@@ -39,7 +39,7 @@ describe('SoroWillClient.forNetwork()', () => {
   });
 
   it('accepts an explicit contractId override that supersedes the default', () => {
-    const overrideId = 'CNEWDEPLOYMENTXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX';
+    const overrideId = 'CCUFS2KK3DXQRGN3EG6OJ55PQ3BXJV3TSEL5MNXLMZWDFHX5DTUUI66M';
     const client = SoroWillClient.forNetwork('testnet', { contractId: overrideId });
     expect(client).toBeInstanceOf(SoroWillClient);
     const contractId = (client as unknown as { contract: { contractId: () => string } }).contract.contractId();
@@ -66,7 +66,7 @@ describe('SoroWillClient.forNetwork()', () => {
   });
 
   it('succeeds on mainnet when contractId is supplied via overrides', () => {
-    const mainnetId = 'CMAINNETCONTRACTXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX';
+    const mainnetId = 'CAQDVPJ6ZAZVI5WNJL4PBOBP232HCXMCEOHQXM5HH22LY25S4QJASHNZ';
     const client = SoroWillClient.forNetwork('mainnet', { contractId: mainnetId });
     expect(client).toBeInstanceOf(SoroWillClient);
     const contractId = (client as unknown as { contract: { contractId: () => string } }).contract.contractId();
@@ -143,11 +143,6 @@ describe('cancelWill refundAmount correctness', () => {
   });
 
   it('falls back to getWill balance when the contract returns no value (older contract versions)', async () => {
-    const client = new SoroWillClient({
-      network: 'testnet',
-      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
-    });
-
     const balanceFromRead = 3_000_000n;
 
     const fakeSpec = {
@@ -173,8 +168,12 @@ describe('cancelWill refundAmount correctness', () => {
       },
     };
 
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+      rpcServer: fakeServer as never,
+    });
     Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
-    Object.defineProperty(client, 'server', { value: fakeServer });
 
     const { txHash, refundAmount } = await client.cancelWill('1');
 

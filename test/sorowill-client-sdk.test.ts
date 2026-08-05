@@ -185,7 +185,10 @@ describe('SoroWillClient.getNetworkFeeStats', () => {
       }),
     });
 
-    const stats = await client.getNetworkFeeStats();
+    const stats = (await client.getNetworkFeeStats()) as {
+      latestLedger: number;
+      sorobanInclusionFee: { max: string };
+    };
     expect(stats.latestLedger).toBe(999);
     expect(stats.sorobanInclusionFee.max).toBe('5000');
   });
@@ -332,6 +335,16 @@ describe('SoroWillClient wallet network cross-check', () => {
   it('throws WalletNetworkMismatchError before signing when the wallet is on a different network', async () => {
     let sendTransactionCalls = 0;
     const wallet: WalletAdapter = {
+      async isConnected() {
+        return true;
+      },
+      async connect() {
+        return { publicKey: TEST_ACCOUNT, network: 'mainnet', networkPassphrase: 'Public Global Stellar Network ; September 2015' };
+      },
+      async reconnect() {
+        return { publicKey: TEST_ACCOUNT, network: 'mainnet', networkPassphrase: 'Public Global Stellar Network ; September 2015' };
+      },
+      async disconnect() {},
       async getPublicKey() {
         return TEST_ACCOUNT;
       },
@@ -376,6 +389,16 @@ describe('SoroWillClient wallet network cross-check', () => {
 
   it('skips the check for adapters that cannot report their network', async () => {
     const minimalWallet: WalletAdapter = {
+      async isConnected() {
+        return true;
+      },
+      async connect() {
+        return { publicKey: TEST_ACCOUNT, network: 'testnet', networkPassphrase: 'Test SDF Network ; September 2015' };
+      },
+      async reconnect() {
+        return { publicKey: TEST_ACCOUNT, network: 'testnet', networkPassphrase: 'Test SDF Network ; September 2015' };
+      },
+      async disconnect() {},
       async getPublicKey() {
         return TEST_ACCOUNT;
       },
@@ -396,20 +419,21 @@ describe('SoroWillClient wallet network cross-check', () => {
     await expect(client.triggerWill('1')).resolves.toEqual({ txHash: 'abc123' });
   });
 
-  it('assertWalletNetwork throws on mismatch and passes on match', () => {
+  it('assertWalletNetwork throws on mismatch and passes on match', async () => {
     const client = new SoroWillClient({
       network: 'testnet',
       contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
+      wallet: new StubWalletAdapter(),
       readCache: false,
       spec: createSpec({}),
       rpcServer: createRpcServer(),
     });
 
-    expect(() =>
+    await expect(
       client.assertWalletNetwork({ networkPassphrase: 'Public Global Stellar Network ; September 2015' }),
-    ).toThrow(WalletNetworkMismatchError);
-    expect(() =>
+    ).rejects.toBeInstanceOf(WalletNetworkMismatchError);
+    await expect(
       client.assertWalletNetwork({ networkPassphrase: 'Test SDF Network ; September 2015' }),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
   });
 });

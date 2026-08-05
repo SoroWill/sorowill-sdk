@@ -95,6 +95,12 @@ vi.mock('@stellar/stellar-sdk', () => {
     }
   }
 
+  class MockTransaction {
+    toXDR(): string {
+      return 'TX_XDR';
+    }
+  }
+
   class MockFeeBumpTransaction {}
 
   return {
@@ -130,6 +136,7 @@ vi.mock('@stellar/stellar-sdk', () => {
           SUCCESS: 'SUCCESS',
         },
         isSimulationError: (simulation: { error?: string }) => Boolean(simulation.error),
+        isSimulationRestore: () => false,
       },
       Server: MockServer,
     },
@@ -511,6 +518,8 @@ describe('SoroWillClient', () => {
     const { TransactionBuilder, FeeBumpTransaction } = await import('@stellar/stellar-sdk');
     const origFromXdr = TransactionBuilder.fromXDR;
     TransactionBuilder.fromXDR = vi.fn().mockReturnValue(new FeeBumpTransaction());
+    freighterApiMock.signTransaction.mockResolvedValue({ signedTxXdr: 'SIGNED_TX_XDR', error: undefined });
+    mockState.simulateTransaction.mockResolvedValue({ result: { retval: undefined } });
 
     try {
       const client = new SoroWillClient({
@@ -520,10 +529,12 @@ describe('SoroWillClient', () => {
 
       await expect(
         client.createWill({
+          token: 'CTOKEN',
           beneficiaries: [{ address: 'GBENEFICIARY', percentage: 100 }],
           amount: '1000000',
-          checkinIntervalDays: 30,
+          checkinPeriodDays: 30,
           gracePeriodDays: 7,
+          guardians: [],
         }),
       ).rejects.toThrow(/Expected a plain Transaction envelope after signing, but received FeeBumpTransaction/);
     } finally {

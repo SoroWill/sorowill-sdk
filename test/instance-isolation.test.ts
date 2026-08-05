@@ -152,6 +152,7 @@ vi.mock('@stellar/stellar-sdk', () => {
       Api: {
         GetTransactionStatus: { SUCCESS: 'SUCCESS' },
         isSimulationError: (simulation: { error?: string }) => Boolean(simulation?.error),
+        isSimulationRestore: () => false,
       },
       Server: MockServer,
     },

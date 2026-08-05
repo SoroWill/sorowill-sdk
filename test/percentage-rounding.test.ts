@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { calculateShares } from '../src/utils';
-import type { Beneficiary } from '../src/types';
 
 /**
  * Edge-case unit tests for calculateShares covering odd, non-evenly-divisible splits.
@@ -116,7 +115,7 @@ describe('calculateShares: Edge-Case Percentage Rounding', () => {
       const expected = [140, 140, 140, 140, 140, 140, 1000 - first6Total];
 
       shares.forEach((share, i) => {
-        expect(BigInt(share.share)).toBe(BigInt(expected[i]));
+        expect(BigInt(share.share)).toBe(BigInt(expected[i]!));
       });
 
       verifySumToTotal('1000', shares);
@@ -168,7 +167,7 @@ describe('calculateShares: Edge-Case Percentage Rounding', () => {
       const first6Total = BigInt(6) * BigInt(15000);
       const expectedLast = BigInt(balance) - first6Total;
 
-      shares.slice(0, 6).forEach((share, i) => {
+      shares.slice(0, 6).forEach((share) => {
         expect(share.share).toBe('15000');
       });
       expect(BigInt(shares[6]!.share)).toBe(expectedLast);

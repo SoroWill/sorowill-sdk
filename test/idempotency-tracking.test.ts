@@ -111,8 +111,8 @@ describe('InFlightTracker - Issue #52: Idempotency safeguards', () => {
   it('should clear all in-flight operations', async () => {
     const tracker = new InFlightTracker();
 
-    const op1 = tracker.track('123', 'check_in', () => new Promise(() => {}));
-    const op2 = tracker.track('456', 'trigger_will', () => new Promise(() => {}));
+    tracker.track('123', 'check_in', () => new Promise(() => {}));
+    tracker.track('456', 'trigger_will', () => new Promise(() => {}));
 
     expect(tracker.isInFlight('123', 'check_in')).toBe(true);
     expect(tracker.isInFlight('456', 'trigger_will')).toBe(true);
@@ -126,7 +126,7 @@ describe('InFlightTracker - Issue #52: Idempotency safeguards', () => {
   it('should abort specific in-flight operation', async () => {
     const tracker = new InFlightTracker();
 
-    const op = tracker.track('123', 'check_in', () => new Promise(() => {}));
+    tracker.track('123', 'check_in', () => new Promise(() => {}));
 
     expect(tracker.isInFlight('123', 'check_in')).toBe(true);
 

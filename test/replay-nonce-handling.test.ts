@@ -167,7 +167,7 @@ describe('Replay/Nonce Handling - Sequence Number Management', () => {
       const txSequences: string[] = [];
 
       // Simulate 3 concurrent requests, each fetching sequence independently
-      const promises = Array.from({ length: 3 }, async (_, index) => {
+      const promises = Array.from({ length: 3 }, async () => {
         // Simulate slight delay to show concurrency
         await new Promise(resolve => setTimeout(resolve, Math.random() * 10));
 
