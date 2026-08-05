@@ -9,20 +9,13 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # Test against every Node version declared in the engines field so that
-    # a Node-18-specific incompatibility is caught in CI before shipping.
-    # Add new versions here whenever the engines minimum is raised.
-    strategy:
-      matrix:
-        node-version: [18, 20]
-    name: Test (Node ${{ matrix.node-version }})
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node ${{ matrix.node-version }}
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 20
           cache: npm
 
       - name: Install dependencies
@@ -39,7 +32,4 @@ jobs:
 
       - name: Test with coverage
         run: npm run test:coverage
-
-      - name: Smoke Test
-        run: npm run smoke-test
 

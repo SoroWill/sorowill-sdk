@@ -158,8 +158,6 @@ export type {
   EventSubscriptionTransport,
 } from './types';
 
-export interface SoroWillReadCacheOptions extends Pick<ReadCacheOptions, 'ttlMs'> {}
-
 /** Options for constructing a {@link SoroWillClient}. */
 export interface SoroWillClientOptions {
   /** Which Stellar network to connect to. */
