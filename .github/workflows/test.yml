@@ -34,11 +34,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test with coverage
-        run: npm run test:coverage
-
       - name: Build
         run: npm run build
+
+      - name: Test with coverage
+        run: npm run test:coverage
 
       - name: Smoke Test
         run: npm run smoke-test
