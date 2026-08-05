@@ -3,3 +3,4 @@ dist/
 docs/api/
 .DS_Store
 *.log
+issue.md
