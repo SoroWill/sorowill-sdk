@@ -1,5 +1,4 @@
 import {
-  BASE_FEE,
   Keypair,
   Networks,
   Transaction,
@@ -12,6 +11,13 @@ import type { SoroWillNetwork } from './SoroWillClient';
 interface NetworkConfig {
   rpcUrl: string;
   networkPassphrase: string;
+}
+
+interface SendTransactionErrorResponse {
+  status: string;
+  hash?: string;
+  diagnosticEventsXdr?: string;
+  errorResultXdr?: string;
 }
 
 const NETWORK_CONFIG: Record<SoroWillNetwork, NetworkConfig> = {
@@ -111,10 +117,11 @@ export async function submitFeeBumpTransaction(
 
   const sendResponse = await server.sendTransaction(feeBumpTx);
   if (sendResponse.status === 'ERROR') {
-    const diagnosticInfo = (sendResponse as any).diagnosticEventsXdr ?
-      ` (diagnostics: ${(sendResponse as any).diagnosticEventsXdr})` : '';
-    const errorDetail = (sendResponse as any).errorResultXdr ?
-      ` (error: ${(sendResponse as any).errorResultXdr})` : '';
+    const errorResponse = sendResponse as SendTransactionErrorResponse;
+    const diagnosticInfo = errorResponse.diagnosticEventsXdr ?
+      ` (diagnostics: ${errorResponse.diagnosticEventsXdr})` : '';
+    const errorDetail = errorResponse.errorResultXdr ?
+      ` (error: ${errorResponse.errorResultXdr})` : '';
     throw new Error(
       `Fee-bump transaction submission failed${diagnosticInfo}${errorDetail}`,
       { cause: sendResponse }
