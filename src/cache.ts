@@ -78,6 +78,18 @@ export function createReadCacheKey(method: string, args: Record<string, unknown>
   return `${method}:${stableStringify(args)}`;
 }
 
+/**
+ * A memory-backed read cache with optional persistent storage.
+ *
+ * IMPORTANT: If a persistence adapter is configured, hydration (loading stored
+ * entries) happens asynchronously in the constructor. Callers must await
+ * `cache.ready()` before calling `cache.get()` to ensure all persisted entries
+ * are available. Calling `get()` before `ready()` completes will incorrectly
+ * return a cache miss for data that is being loaded.
+ *
+ * Without persistence, the cache is immediately ready and can be used after
+ * construction.
+ */
 export class ReadCache {
   private readonly entries = new Map<string, CacheEntry>();
   private readonly ttlMs: number;
@@ -96,6 +108,17 @@ export class ReadCache {
     await this.readyPromise;
   }
 
+  /**
+   * Synchronously retrieves a cached value by key.
+   *
+   * WARNING: If this cache was constructed with persistence enabled, you MUST
+   * call and await `ready()` before calling this method. Calling `get()` before
+   * `ready()` completes will return undefined for entries that are currently
+   * being loaded from persistent storage.
+   *
+   * @param key - The cache key to look up
+   * @returns The cached value if found and not expired, or undefined
+   */
   get<T>(key: string): T | undefined {
     const entry = this.entries.get(key);
     if (!entry) {
