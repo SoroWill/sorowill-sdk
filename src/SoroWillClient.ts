@@ -920,6 +920,32 @@ export class SoroWillClient {
       returnValue: txResponse.returnValue,
     };
   }
+
+  /**
+   * Proactively check whether the configured RPC endpoint is reachable.
+   * Useful for showing a 'network unavailable' banner before attempting a real call.
+   * Never throws — network failures resolve to `false` rather than propagating an exception.
+   *
+   * @returns `true` if the RPC server is healthy and responding, `false` otherwise.
+   */
+  async isHealthy(): Promise<boolean> {
+    try {
+      // The underlying rpc.Server has a getHealth() method that calls the server's
+      // JSON-RPC getHealth endpoint. We cast to any because our SoroWillRpcServer
+      // interface doesn't include it, but it's available on rpc.Server instances.
+      const server = this.server as unknown as { getHealth(): Promise<unknown> };
+      if (typeof server.getHealth === 'function') {
+        await server.getHealth();
+        return true;
+      }
+      // If getHealth is not available (e.g., custom server implementation), assume healthy
+      return true;
+    } catch {
+      // Network failures, timeouts, or any other errors mean the server is not healthy
+      return false;
+    }
+  }
+
   async getWill(willId: string, options?: RequestOptions): Promise<Will> {
     const cacheKey = createReadCacheKey('get_will', { willId });
     if (this.readCache) {
