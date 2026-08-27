@@ -95,4 +95,70 @@ describe('WalletConnectAdapter', () => {
     expect(connection.publicKey).toBe('GABC123');
     expect(await adapter.getPublicKey()).toBe('GABC123');
   });
+
+  it('reconnect throws when no session topic is stored', async () => {
+    const store = new MemoryWalletConnectSessionStore();
+    const client: WalletConnectClient = {
+      async connect() {
+        throw new Error('connect should not be called');
+      },
+      async disconnect() {
+        return;
+      },
+      async getSession() {
+        throw new Error('getSession should not be called');
+      },
+      async request() {
+        throw new Error('request should not be called');
+      },
+    };
+
+    const adapter = new WalletConnectAdapter(client, { sessionStore: store });
+    await expect(adapter.reconnect()).rejects.toThrow('No WalletConnect session topic is stored');
+  });
+
+  it('reconnect clears stored topic when session no longer exists', async () => {
+    const store = new MemoryWalletConnectSessionStore();
+    await store.setSessionTopic('stale-topic');
+
+    const client: WalletConnectClient = {
+      async connect() {
+        throw new Error('connect should not be called');
+      },
+      async disconnect() {
+        return;
+      },
+      async getSession() {
+        return null;
+      },
+      async request() {
+        throw new Error('request should not be called');
+      },
+    };
+
+    const adapter = new WalletConnectAdapter(client, { sessionStore: store });
+    await expect(adapter.reconnect()).rejects.toThrow('Stored WalletConnect session no longer exists');
+    expect(await store.getSessionTopic()).toBeNull();
+  });
+
+  it('disconnect is a no-op when never connected', async () => {
+    const client: WalletConnectClient = {
+      async connect() {
+        throw new Error('connect should not be called');
+      },
+      async disconnect() {
+        throw new Error('disconnect should not be called on client');
+      },
+      async getSession() {
+        throw new Error('getSession should not be called');
+      },
+      async request() {
+        throw new Error('request should not be called');
+      },
+    };
+
+    const adapter = new WalletConnectAdapter(client);
+    await expect(adapter.disconnect()).resolves.toBeUndefined();
+    expect(await adapter.isConnected()).toBe(false);
+  });
 });
