@@ -325,10 +325,4 @@ export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter
       request.onsuccess = () => resolve(request.result);
     });
   }
-
-  /** Invalidates any cache entries associated with a specific will ID. */
-  invalidateByWillId(_willId: string): void {
-    // Simple TTL cache doesn't track will IDs — entries expire naturally.
-    // Subclasses or future versions may add will-ID-aware eviction.
-  }
 }

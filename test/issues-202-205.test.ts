@@ -162,10 +162,10 @@ describe('Issue #203 - ReadCache.get() before hydration', () => {
 // ============================================================================
 
 describe('Issue #204 - Dead code invalidateByWillId()', () => {
-  it('removes or deprecates invalidateByWillId() from IndexedDbCachePersistenceAdapter', () => {
-    // Verify the method signature exists but is not called by ReadCache
-    // Skip instantiation in Node.js where indexedDB is not available
-    expect(typeof IndexedDbCachePersistenceAdapter.prototype.invalidateByWillId).toBe('function');
+  it('removes invalidateByWillId() from IndexedDbCachePersistenceAdapter', () => {
+    // Verify the dead method has been removed
+    // ReadCache.invalidateByWillId() handles will-ID invalidation independently
+    expect('invalidateByWillId' in IndexedDbCachePersistenceAdapter.prototype).toBe(false);
   });
 
   it('ReadCache.invalidateByWillId() properly invalidates entries by will ID', async () => {
