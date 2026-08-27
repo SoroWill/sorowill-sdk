@@ -270,7 +270,10 @@ export class WalletConnectAdapter implements WalletAdapter {
     transactionXdr: string,
     opts: { networkPassphrase: string },
   ): Promise<string> {
-    const session = this.session ?? (await this.reconnect(), this.session);
+    if (!this.session) {
+      await this.reconnect();
+    }
+    const session = this.session;
     if (!session) {
       throw new Error('WalletConnect session is not available');
     }

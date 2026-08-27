@@ -80,6 +80,11 @@ export function isCheckinDue(will: Will): boolean {
  * (see `fn distribute` — integer division with remainder assigned to the
  * last beneficiary). Keep this implementation in sync with any changes to
  * that contract function.
+ *
+ * `beneficiary.percentage` is the SDK's 0-100 value. The contract works in
+ * basis points (`percentage * 100`) and divides by 10,000, which is
+ * arithmetically identical to dividing by 100 here, so the split matches
+ * on-chain distribution exactly.
  */
 export function calculateShares(
   balance: string,
@@ -131,6 +136,10 @@ export const MAX_GUARDIANS = 3;
  * Validates that a beneficiary list is well-formed: non-empty, at most
  * {@link MAX_BENEFICIARIES} entries, every percentage is a positive
  * integer, and percentages sum to exactly 100.
+ *
+ * Percentages are on the SDK's 0-100 scale. `SoroWillClient` scales them to
+ * the contract's basis points (summing to 10,000) when it submits a
+ * transaction.
  */
 export function validateBeneficiaries(beneficiaries: Beneficiary[]): boolean {
   if (beneficiaries.length === 0 || beneficiaries.length > MAX_BENEFICIARIES) {

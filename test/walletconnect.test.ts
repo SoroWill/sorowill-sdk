@@ -95,4 +95,67 @@ describe('WalletConnectAdapter', () => {
     expect(connection.publicKey).toBe('GABC123');
     expect(await adapter.getPublicKey()).toBe('GABC123');
   });
+
+  it('signs after reconnecting when no session is held in memory yet', async () => {
+    const session = makeSession('topic-3');
+    const store = new MemoryWalletConnectSessionStore();
+    await store.setSessionTopic(session.topic);
+
+    let requestedTopic: string | null = null;
+    const client: WalletConnectClient = {
+      async connect() {
+        throw new Error('connect should not be called');
+      },
+      async disconnect() {
+        return;
+      },
+      async getSession(topic) {
+        return topic === session.topic ? session : null;
+      },
+      async request<T>(options: {
+        topic: string;
+        chainId: string;
+        request: { method: string; params: unknown };
+      }) {
+        requestedTopic = options.topic;
+        return { signedTxXdr: 'SIGNED_XDR' } as T;
+      },
+    };
+
+    const adapter = new WalletConnectAdapter(client, { sessionStore: store });
+
+    // No connect()/reconnect() call first: signTransaction must recover the
+    // session on its own.
+    const signed = await adapter.signTransaction('UNSIGNED_XDR', {
+      networkPassphrase: 'Test SDF Network ; September 2015',
+    });
+
+    expect(signed).toBe('SIGNED_XDR');
+    expect(requestedTopic).toBe(session.topic);
+  });
+
+  it('throws a clear error when the session cannot be recovered for signing', async () => {
+    const store = new MemoryWalletConnectSessionStore();
+
+    const client: WalletConnectClient = {
+      async connect() {
+        throw new Error('connect should not be called');
+      },
+      async disconnect() {
+        return;
+      },
+      async getSession() {
+        return null;
+      },
+      async request() {
+        throw new Error('request should not be called');
+      },
+    };
+
+    const adapter = new WalletConnectAdapter(client, { sessionStore: store });
+
+    await expect(
+      adapter.signTransaction('UNSIGNED_XDR', { networkPassphrase: 'Test SDF Network ; September 2015' }),
+    ).rejects.toThrow('No WalletConnect session topic is stored');
+  });
 });
