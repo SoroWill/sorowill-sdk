@@ -38,6 +38,22 @@ vi.mock('@stellar/stellar-sdk', () => {
     BASE_FEE: '100',
     Networks: { PUBLIC: 'PUBLIC', TESTNET: 'TESTNET' },
     rpc: { Server: MockServer },
+    contract: {
+      Spec: Object.assign(
+        function Spec(_entries?: unknown) {
+          return {
+            funcArgsToScVals: (_method: string, args: Record<string, unknown>) => [args],
+            funcResToNative: (_method: string, value: unknown) => value,
+          };
+        },
+        {
+          fromWasm: () => ({
+            funcArgsToScVals: (_method: string, args: Record<string, unknown>) => [args],
+            funcResToNative: (_method: string, value: unknown) => value,
+          }),
+        },
+      ),
+    },
   };
 });
 
