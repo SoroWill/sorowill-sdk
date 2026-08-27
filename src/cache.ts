@@ -119,7 +119,12 @@ export class ReadCache {
     };
 
     this.entries.set(key, entry);
-    void this.persistence?.write(this.toPersistedEntry(entry));
+    void this.persistence
+      ?.write(this.toPersistedEntry(entry))
+      .catch(() => {
+        // Silently ignore persistence failures to prevent unhandled rejections
+        // The cache remains functional in-memory; only durability is lost
+      });
   }
 
   async invalidateByWillId(willId: string): Promise<void> {
@@ -137,7 +142,10 @@ export class ReadCache {
 
   clear(): void {
     this.entries.clear();
-    void this.persistence?.clear();
+    void this.persistence?.clear().catch(() => {
+      // Silently ignore persistence failures to prevent unhandled rejections
+      // The cache is cleared in-memory; only durability guarantee is lost
+    });
   }
 
   private async delete(key: string): Promise<void> {
