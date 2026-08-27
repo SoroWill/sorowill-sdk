@@ -232,38 +232,68 @@ export class MemoryCachePersistenceAdapter implements CachePersistenceAdapter {
 export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdapter {
   private readonly storage: Storage;
   private readonly storageKey: string;
+  private readonly keysIndexKey: string;
 
   constructor(storage: Storage, options: { key?: string } = {}) {
     this.storage = storage;
     this.storageKey = options.key ?? DEFAULT_CACHE_NAMESPACE;
+    this.keysIndexKey = `${this.storageKey}:__keys__`;
   }
 
   async readAll(): Promise<PersistedCacheEntry[]> {
-    const raw = this.storage.getItem(this.storageKey);
-    if (!raw) {
+    const keysJson = this.storage.getItem(this.keysIndexKey);
+    if (!keysJson) {
       return [];
     }
 
-    const parsed = JSON.parse(raw) as PersistedCacheEntry[];
-    return Array.isArray(parsed) ? parsed : [];
+    const keys = JSON.parse(keysJson) as string[];
+    const entries: PersistedCacheEntry[] = [];
+
+    for (const key of keys) {
+      const entryJson = this.storage.getItem(`${this.storageKey}:${key}`);
+      if (entryJson) {
+        entries.push(JSON.parse(entryJson));
+      }
+    }
+
+    return entries;
   }
 
   async write(entry: PersistedCacheEntry): Promise<void> {
-    const entries = await this.readAll();
-    const nextEntries = [...entries.filter((currentEntry) => currentEntry.key !== entry.key), entry];
-    this.storage.setItem(this.storageKey, JSON.stringify(nextEntries));
+    this.storage.setItem(`${this.storageKey}:${entry.key}`, JSON.stringify(entry));
+
+    const keysJson = this.storage.getItem(this.keysIndexKey);
+    const keys = keysJson ? (JSON.parse(keysJson) as string[]) : [];
+
+    if (!keys.includes(entry.key)) {
+      keys.push(entry.key);
+      this.storage.setItem(this.keysIndexKey, JSON.stringify(keys));
+    }
   }
 
   async delete(key: string): Promise<void> {
-    const entries = await this.readAll();
-    this.storage.setItem(
-      this.storageKey,
-      JSON.stringify(entries.filter((entry) => entry.key !== key)),
-    );
+    this.storage.removeItem(`${this.storageKey}:${key}`);
+
+    const keysJson = this.storage.getItem(this.keysIndexKey);
+    if (keysJson) {
+      const keys = (JSON.parse(keysJson) as string[]).filter((k) => k !== key);
+      if (keys.length > 0) {
+        this.storage.setItem(this.keysIndexKey, JSON.stringify(keys));
+      } else {
+        this.storage.removeItem(this.keysIndexKey);
+      }
+    }
   }
 
   async clear(): Promise<void> {
-    this.storage.removeItem(this.storageKey);
+    const keysJson = this.storage.getItem(this.keysIndexKey);
+    if (keysJson) {
+      const keys = JSON.parse(keysJson) as string[];
+      for (const key of keys) {
+        this.storage.removeItem(`${this.storageKey}:${key}`);
+      }
+      this.storage.removeItem(this.keysIndexKey);
+    }
   }
 }
 
