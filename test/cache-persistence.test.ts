@@ -1,6 +1,5 @@
-import { describe, expect, it, beforeEach } from 'vitest';
-import { LocalStorageCachePersistenceAdapter, MemoryCachePersistenceAdapter, PersistedCacheEntry, ReadCache } from '../src/cache';
-import type { IndexedDbCachePersistenceAdapter } from '../src/cache';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { LocalStorageCachePersistenceAdapter, MemoryCachePersistenceAdapter, PersistedCacheEntry, ReadCache, IndexedDbCachePersistenceAdapter } from '../src/cache';
 
 describe('LocalStorageCachePersistenceAdapter', () => {
   let storage: Storage;
@@ -267,5 +266,144 @@ describe('MemoryCachePersistenceAdapter', () => {
     const result = await adapter.readAll();
 
     expect(result).toEqual([]);
+  });
+});
+
+describe.skipIf(!globalThis.indexedDB)('IndexedDbCachePersistenceAdapter', () => {
+  let adapter: IndexedDbCachePersistenceAdapter;
+  const dbName = `test-db-${Math.random()}`;
+  const storeName = 'test-store';
+
+  beforeEach(async () => {
+    adapter = new IndexedDbCachePersistenceAdapter({
+      dbName,
+      storeName,
+    });
+  });
+
+  afterEach(async () => {
+    try {
+      await adapter.clear();
+    } catch {
+      // Ignore cleanup errors
+    }
+    const deleteReq = indexedDB.deleteDatabase(dbName);
+    await new Promise<void>((resolve) => {
+      deleteReq.onsuccess = () => resolve();
+      deleteReq.onerror = () => resolve();
+    });
+  });
+
+  it('readAll returns empty array initially', async () => {
+    const result = await adapter.readAll();
+    expect(result).toEqual([]);
+  });
+
+  it('write and readAll store and retrieve entries', async () => {
+    const entry: PersistedCacheEntry = {
+      key: 'test:key',
+      value: '"test value"',
+      expiresAt: null,
+      willIds: [],
+    };
+
+    await adapter.write(entry);
+    const result = await adapter.readAll();
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual(entry);
+  });
+
+  it('write updates existing entry with same key', async () => {
+    const entry1: PersistedCacheEntry = {
+      key: 'test:key',
+      value: '"value1"',
+      expiresAt: null,
+      willIds: [],
+    };
+    const entry2: PersistedCacheEntry = {
+      key: 'test:key',
+      value: '"value2"',
+      expiresAt: null,
+      willIds: [],
+    };
+
+    await adapter.write(entry1);
+    await adapter.write(entry2);
+    const result = await adapter.readAll();
+
+    expect(result).toHaveLength(1);
+    expect(result[0].value).toBe('"value2"');
+  });
+
+  it('delete removes specific entry', async () => {
+    const entry1: PersistedCacheEntry = {
+      key: 'key1',
+      value: '"val1"',
+      expiresAt: null,
+      willIds: [],
+    };
+    const entry2: PersistedCacheEntry = {
+      key: 'key2',
+      value: '"val2"',
+      expiresAt: null,
+      willIds: [],
+    };
+
+    await adapter.write(entry1);
+    await adapter.write(entry2);
+    await adapter.delete('key1');
+    const result = await adapter.readAll();
+
+    expect(result).toHaveLength(1);
+    expect(result[0].key).toBe('key2');
+  });
+
+  it('clear removes all entries', async () => {
+    const entry1: PersistedCacheEntry = {
+      key: 'key1',
+      value: '"val1"',
+      expiresAt: null,
+      willIds: [],
+    };
+    const entry2: PersistedCacheEntry = {
+      key: 'key2',
+      value: '"val2"',
+      expiresAt: null,
+      willIds: [],
+    };
+
+    await adapter.write(entry1);
+    await adapter.write(entry2);
+    await adapter.clear();
+    const result = await adapter.readAll();
+
+    expect(result).toEqual([]);
+  });
+
+  it('handles multiple entries with bigint values', async () => {
+    const entries: PersistedCacheEntry[] = [
+      {
+        key: 'key1',
+        value: '{"__type":"bigint","value":"123456789"}',
+        expiresAt: Date.now() + 60000,
+        willIds: ['will1'],
+      },
+      {
+        key: 'key2',
+        value: '{"data":"test"}',
+        expiresAt: null,
+        willIds: ['will2', 'will3'],
+      },
+    ];
+
+    for (const entry of entries) {
+      await adapter.write(entry);
+    }
+
+    const result = await adapter.readAll();
+    expect(result).toHaveLength(2);
+    expect(result).toContainEqual(entries[0]);
+    expect(result).toContainEqual(entries[1]);
   });
 });
