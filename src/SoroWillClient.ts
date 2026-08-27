@@ -55,6 +55,7 @@ import {
 } from './errors';
 import { MAX_GUARDIANS, validateBeneficiaries } from './utils';
 import { RequestQueue } from './requestQueue';
+import { InFlightTracker } from './inFlightTracker';
 import { RpcEndpointPool } from './rpc';
 import { buildSep7TxUri, type BuildSep7TxUriOptions } from './sep7';
 import { HookManager } from './hooks';
@@ -515,6 +516,7 @@ export class SoroWillClient {
   private readonly webSocketFactory: ((url: string) => WebSocketLike) | undefined;
   private readonly fetchImpl: FetchImplementation;
   private readonly queue: RequestQueue;
+  private readonly inFlightTracker: InFlightTracker;
   private readonly timeoutMs: number;
   private readonly readCache: ReadCache | undefined;
   private readonly retryOptions: RpcRetryOptions;
@@ -569,6 +571,7 @@ export class SoroWillClient {
         ? {}
         : { requestsPerSecond: options.requestsPerSecond }),
     });
+    this.inFlightTracker = new InFlightTracker();
     this.readCache = options.readCache === false ? undefined : new ReadCache(options.readCache);
     this.retryOptions = { ...DEFAULT_RETRY_OPTIONS, ...options.retry };
     this.debug = options.debug ?? false;
@@ -1313,11 +1316,15 @@ export class SoroWillClient {
     return subscription;
   }
 
-  /** Unsubscribes from any configured event source. */
+  /** Tears down the client: unsubscribes from any event source, aborts all
+   * in-flight tracked operations, and rejects every queued-but-not-yet-started
+   * request so nothing continues running in the background after teardown. */
   destroy(): void {
     if (this.eventSubscription) {
       unsubscribeFromWillEvents(this.eventSubscription);
     }
+    this.inFlightTracker.clear();
+    this.queue.rejectAll(new Error('SoroWillClient destroyed'));
   }
 
   /**
