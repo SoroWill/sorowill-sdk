@@ -111,7 +111,14 @@ export async function submitFeeBumpTransaction(
 
   const sendResponse = await server.sendTransaction(feeBumpTx);
   if (sendResponse.status === 'ERROR') {
-    throw new Error(`Fee-bump transaction submission failed`);
+    const diagnosticInfo = (sendResponse as any).diagnosticEventsXdr ?
+      ` (diagnostics: ${(sendResponse as any).diagnosticEventsXdr})` : '';
+    const errorDetail = (sendResponse as any).errorResultXdr ?
+      ` (error: ${(sendResponse as any).errorResultXdr})` : '';
+    throw new Error(
+      `Fee-bump transaction submission failed${diagnosticInfo}${errorDetail}`,
+      { cause: sendResponse }
+    );
   }
 
   const txResponse = await server.pollTransaction(sendResponse.hash, { attempts: 30 });
