@@ -365,13 +365,13 @@ function mapWill(raw: unknown): Will {
     owner: raw.owner,
     token: raw.token,
     balance: raw.balance.toString(),
-    beneficiaries: raw.beneficiaries,
+    beneficiaries: [...raw.beneficiaries],
     checkinPeriodDays: Number(raw.checkin_period_days),
     gracePeriodDays: Number(raw.grace_period_days),
     lastCheckin: new Date(Number(raw.last_checkin) * 1000),
     triggerTime: raw.trigger_time === undefined ? null : new Date(Number(raw.trigger_time) * 1000),
     status: raw.status,
-    guardians: raw.guardians,
+    guardians: [...raw.guardians],
     guardianVotes: raw.guardian_votes,
   };
 }
