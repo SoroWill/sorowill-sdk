@@ -193,6 +193,7 @@ export async function buildMultisigTransactionXdr(options: {
   sourceAccount: string;
   fee?: string;
   timeout?: number;
+  spec?: unknown;
 }): Promise<string> {
   const { Spec } = await import('@stellar/stellar-sdk').then((m) => m.contract);
   const server = new rpc.Server(options.rpcUrl, {
@@ -200,10 +201,13 @@ export async function buildMultisigTransactionXdr(options: {
   });
   const contract = new Contract(options.contractAddress);
 
-  // We need the spec to convert native args to ScVals.
-  // Fetch the contract WASM and build the spec.
-  const wasm = await server.getContractWasmByContractId(contract.contractId());
-  const spec = Spec.fromWasm(wasm);
+  // Use provided spec or fetch fresh from WASM.
+  let spec = options.spec;
+  if (!spec) {
+    const wasm = await server.getContractWasmByContractId(contract.contractId());
+    spec = Spec.fromWasm(wasm);
+  }
+
   const scArgs = spec.funcArgsToScVals(options.method, options.args);
   const operation = contract.call(options.method, ...scArgs);
 
