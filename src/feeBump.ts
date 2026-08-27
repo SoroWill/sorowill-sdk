@@ -142,11 +142,20 @@ export async function submitFeeBump(options: {
   const keypair = Keypair.fromSecret(options.feeSourceSecretKey);
   const publicKey = keypair.publicKey();
 
+  let fee = options.fee;
+  if (!fee) {
+    const innerTx = TransactionBuilder.fromXDR(
+      options.innerTransactionXdr,
+      config.networkPassphrase,
+    ) as Transaction;
+    fee = innerTx.fee;
+  }
+
   const feeBumpXdr = await buildFeeBumpXdr({
     network: options.network,
     innerTransactionXdr: options.innerTransactionXdr,
     feeSourcePublicKey: publicKey,
-    fee: options.fee ?? BASE_FEE,
+    fee,
   });
 
   const signedXdr = signFeeBumpXdr(feeBumpXdr, options.feeSourceSecretKey, config.networkPassphrase);
