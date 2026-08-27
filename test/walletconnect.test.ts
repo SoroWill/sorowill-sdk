@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  LocalStorageWalletConnectSessionStore,
   MemoryWalletConnectSessionStore,
   WalletConnectAdapter,
   type WalletConnectClient,
@@ -94,5 +95,109 @@ describe('WalletConnectAdapter', () => {
 
     expect(connection.publicKey).toBe('GABC123');
     expect(await adapter.getPublicKey()).toBe('GABC123');
+  });
+});
+
+describe('LocalStorageWalletConnectSessionStore', () => {
+  it('getSessionTopic returns stored topic', async () => {
+    const mockStorage = {
+      getItem: (key: string) => (key === 'test-key' ? 'stored-topic' : null),
+      setItem: () => {},
+      removeItem: () => {},
+      clear: () => {},
+      length: 0,
+      key: () => null,
+    } as Storage;
+
+    const store = new LocalStorageWalletConnectSessionStore(mockStorage, 'test-key');
+    const topic = await store.getSessionTopic();
+    expect(topic).toBe('stored-topic');
+  });
+
+  it('getSessionTopic returns null when no topic is stored', async () => {
+    const mockStorage = {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+      clear: () => {},
+      length: 0,
+      key: () => null,
+    } as Storage;
+
+    const store = new LocalStorageWalletConnectSessionStore(mockStorage, 'test-key');
+    const topic = await store.getSessionTopic();
+    expect(topic).toBeNull();
+  });
+
+  it('setSessionTopic stores the topic', async () => {
+    let storedValue: string | null = null;
+    const mockStorage = {
+      getItem: (key: string) => (key === 'test-key' ? storedValue : null),
+      setItem: (key: string, value: string) => {
+        if (key === 'test-key') {
+          storedValue = value;
+        }
+      },
+      removeItem: () => {},
+      clear: () => {},
+      length: 0,
+      key: () => null,
+    } as Storage;
+
+    const store = new LocalStorageWalletConnectSessionStore(mockStorage, 'test-key');
+    await store.setSessionTopic('new-topic');
+
+    const topic = await store.getSessionTopic();
+    expect(topic).toBe('new-topic');
+  });
+
+  it('clearSessionTopic removes the stored topic', async () => {
+    let storedValue: string | null = 'initial-topic';
+    const mockStorage = {
+      getItem: (key: string) => (key === 'test-key' ? storedValue : null),
+      setItem: (key: string, value: string) => {
+        if (key === 'test-key') {
+          storedValue = value;
+        }
+      },
+      removeItem: (key: string) => {
+        if (key === 'test-key') {
+          storedValue = null;
+        }
+      },
+      clear: () => {},
+      length: 0,
+      key: () => null,
+    } as Storage;
+
+    const store = new LocalStorageWalletConnectSessionStore(mockStorage, 'test-key');
+    expect(await store.getSessionTopic()).toBe('initial-topic');
+
+    await store.clearSessionTopic();
+    expect(await store.getSessionTopic()).toBeNull();
+  });
+
+  it('uses default key when not specified', async () => {
+    let storedValue: string | null = null;
+    let setKeyUsed: string | null = null;
+    const mockStorage = {
+      getItem: (key: string) => (key === 'sorowill:walletconnect:session-topic' ? storedValue : null),
+      setItem: (key: string, value: string) => {
+        if (key === 'sorowill:walletconnect:session-topic') {
+          setKeyUsed = key;
+          storedValue = value;
+        }
+      },
+      removeItem: () => {},
+      clear: () => {},
+      length: 0,
+      key: () => null,
+    } as Storage;
+
+    const store = new LocalStorageWalletConnectSessionStore(mockStorage);
+    await store.setSessionTopic('default-key-topic');
+
+    expect(setKeyUsed).toBe('sorowill:walletconnect:session-topic');
+    expect(await store.getSessionTopic()).toBe('default-key-topic');
   });
 });
