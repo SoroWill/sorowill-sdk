@@ -66,6 +66,90 @@ describe('WalletConnectAdapter', () => {
     expect(await adapter.isConnected()).toBe(false);
   });
 
+  it('throws when signTransaction networkPassphrase does not match session network', async () => {
+    const session = makeSession();
+    const client: WalletConnectClient = {
+      async connect() {
+        return {
+          uri: 'wc:test',
+          async approval() {
+            return session;
+          },
+        };
+      },
+      async disconnect() {
+        return;
+      },
+      async getSession(topic) {
+        return topic === session.topic ? session : null;
+      },
+      async request<T>() {
+        return { signedTxXdr: 'SIGNED_XDR' } as T;
+      },
+    };
+
+    const adapter = new WalletConnectAdapter(client, {
+      networkPassphrase: 'Test SDF Network ; September 2015',
+    });
+
+    await adapter.connect();
+
+    await expect(
+      adapter.signTransaction('UNSIGNED_XDR', {
+        networkPassphrase: 'Public Global Stellar Network ; September 2015'
+      }),
+    ).rejects.toThrow('WalletConnect session is connected to');
+  });
+
+  it('selects Stellar account from multi-namespace session', async () => {
+    const multiNamespaceSession: WalletConnectSession = {
+      topic: 'topic-1',
+      namespaces: {
+        eip155: {
+          accounts: ['eip155:1:0x1234567890123456789012345678901234567890'],
+          methods: ['eth_sign'],
+          events: [],
+        },
+        stellar: {
+          accounts: ['stellar:testnet:GABC123'],
+          methods: ['stellar_signXdr'],
+          events: [],
+        },
+      },
+    };
+
+    const client: WalletConnectClient = {
+      async connect() {
+        return {
+          uri: 'wc:test',
+          async approval() {
+            return multiNamespaceSession;
+          },
+        };
+      },
+      async disconnect() {
+        return;
+      },
+      async getSession(topic) {
+        return topic === multiNamespaceSession.topic ? multiNamespaceSession : null;
+      },
+      async request<T>() {
+        return { signedTxXdr: 'SIGNED_XDR' } as T;
+      },
+    };
+
+    const adapter = new WalletConnectAdapter(client, {
+      networkPassphrase: 'Test SDF Network ; September 2015',
+    });
+
+    await adapter.connect();
+    const publicKey = await adapter.getPublicKey();
+    const network = await adapter.getNetwork();
+
+    expect(publicKey).toBe('GABC123');
+    expect(network.network).toBe('testnet');
+  });
+
   it('reconnects from a stored session topic', async () => {
     const session = makeSession('topic-2');
     const store = new MemoryWalletConnectSessionStore();
