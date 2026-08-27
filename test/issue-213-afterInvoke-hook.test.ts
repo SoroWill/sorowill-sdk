@@ -201,9 +201,18 @@ describe('Issue #213: Throwing afterInvoke hook on success path makes invoke() r
       error: undefined,
     });
 
+    // Mock that the return value is present
+    mockState.simulateTransaction.mockResolvedValue({
+      error: undefined,
+      results: [{ auth: [], xdr: 'RESULT_XDR' }],
+      minResourceFee: '1000',
+      restorePreamble: undefined,
+    });
+
     let thrownError: Error | null = null;
+    let result = null;
     try {
-      await client.createWill({
+      result = await client.createWill({
         token: 'USDC_CONTRACT',
         amount: '1000000',
         beneficiaries: [{ address: 'GBENEFICIARY', percentage: 100 }],
@@ -216,6 +225,8 @@ describe('Issue #213: Throwing afterInvoke hook on success path makes invoke() r
     }
 
     expect(thrownError).toBeNull();
+    expect(result).toBeDefined();
+    expect(result?.txHash).toBeTruthy();
   });
 
   it('should not dispatch afterInvoke hooks twice for the same invocation', async () => {
