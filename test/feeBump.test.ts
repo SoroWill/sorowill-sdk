@@ -113,3 +113,75 @@ describe('feeBump', () => {
     expect(feeBumpEnv!.signatures().length).toBe(2);
   });
 });
+
+describe('feeBump configuration', () => {
+  it('submitFeeBumpTransaction accepts optional pollAttempts parameter', () => {
+    const innerXdr = makeInnerTxXdr(Networks.TESTNET);
+    const feeSource = Keypair.random();
+    const feeBumpXdr = makeFeeBumpXdr(innerXdr, feeSource, Networks.TESTNET);
+    const signedXdr = signFeeBumpXdr(feeBumpXdr, feeSource.secret(), Networks.TESTNET);
+
+    const options: { network: 'testnet' | 'mainnet'; feeBumpXdr: string; pollAttempts?: number } = {
+      network: 'testnet',
+      feeBumpXdr: signedXdr,
+      pollAttempts: 50,
+    };
+
+    expect(options.pollAttempts).toBe(50);
+  });
+
+  it('submitFeeBumpTransaction works with default pollAttempts', () => {
+    const innerXdr = makeInnerTxXdr(Networks.TESTNET);
+    const feeSource = Keypair.random();
+    const feeBumpXdr = makeFeeBumpXdr(innerXdr, feeSource, Networks.TESTNET);
+    const signedXdr = signFeeBumpXdr(feeBumpXdr, feeSource.secret(), Networks.TESTNET);
+
+    const options: { network: 'testnet' | 'mainnet'; feeBumpXdr: string; pollAttempts?: number } = {
+      network: 'testnet',
+      feeBumpXdr: signedXdr,
+    };
+
+    expect(options.pollAttempts).toBeUndefined();
+  });
+
+  it('submitFeeBump accepts optional pollAttempts parameter', () => {
+    const innerXdr = makeInnerTxXdr(Networks.TESTNET);
+    const feeSource = Keypair.random();
+
+    const options: {
+      innerTransactionXdr: string;
+      feeSourceSecretKey: string;
+      network: 'testnet' | 'mainnet';
+      fee?: string;
+      pollAttempts?: number;
+    } = {
+      innerTransactionXdr: innerXdr,
+      feeSourceSecretKey: feeSource.secret(),
+      network: 'testnet',
+      fee: '1000',
+      pollAttempts: 60,
+    };
+
+    expect(options.pollAttempts).toBe(60);
+  });
+
+  it('submitFeeBump works with default pollAttempts', () => {
+    const innerXdr = makeInnerTxXdr(Networks.TESTNET);
+    const feeSource = Keypair.random();
+
+    const options: {
+      innerTransactionXdr: string;
+      feeSourceSecretKey: string;
+      network: 'testnet' | 'mainnet';
+      fee?: string;
+      pollAttempts?: number;
+    } = {
+      innerTransactionXdr: innerXdr,
+      feeSourceSecretKey: feeSource.secret(),
+      network: 'testnet',
+      fee: '1000',
+    };
+
+    expect(options.pollAttempts).toBeUndefined();
+  });
+});

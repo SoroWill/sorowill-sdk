@@ -43,6 +43,8 @@ export interface SubmitFeeBumpOptions {
   network: SoroWillNetwork;
   /** The base64-encoded XDR of the signed fee-bump transaction. */
   feeBumpXdr: string;
+  /** The maximum number of attempts to poll for transaction confirmation. Defaults to 30. */
+  pollAttempts?: number;
 }
 
 /**
@@ -114,7 +116,8 @@ export async function submitFeeBumpTransaction(
     throw new Error(`Fee-bump transaction submission failed`);
   }
 
-  const txResponse = await server.pollTransaction(sendResponse.hash, { attempts: 30 });
+  const pollAttempts = options.pollAttempts ?? 30;
+  const txResponse = await server.pollTransaction(sendResponse.hash, { attempts: pollAttempts });
   if (txResponse.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
     throw new Error(`Fee-bump transaction did not succeed: ${txResponse.status}`);
   }
@@ -131,12 +134,14 @@ export async function submitFeeBumpTransaction(
  * @param options.innerTransactionXdr - Prepared inner transaction XDR (unsigned, after `server.prepareTransaction()`).
  * @param options.feeSourceSecretKey - Secret key of the fee sponsor account.
  * @param options.network - Stellar network to use.
+ * @param options.pollAttempts - Maximum number of attempts to poll for transaction confirmation. Defaults to 30.
  */
 export async function submitFeeBump(options: {
   innerTransactionXdr: string;
   feeSourceSecretKey: string;
   network: SoroWillNetwork;
   fee?: string;
+  pollAttempts?: number;
 }): Promise<{ txHash: string; createdAt: number }> {
   const config = NETWORK_CONFIG[options.network];
   const keypair = Keypair.fromSecret(options.feeSourceSecretKey);
@@ -151,8 +156,13 @@ export async function submitFeeBump(options: {
 
   const signedXdr = signFeeBumpXdr(feeBumpXdr, options.feeSourceSecretKey, config.networkPassphrase);
 
-  return submitFeeBumpTransaction({
+  const submitOptions: SubmitFeeBumpOptions = {
     network: options.network,
     feeBumpXdr: signedXdr,
-  });
+  };
+  if (options.pollAttempts !== undefined) {
+    submitOptions.pollAttempts = options.pollAttempts;
+  }
+
+  return submitFeeBumpTransaction(submitOptions);
 }
