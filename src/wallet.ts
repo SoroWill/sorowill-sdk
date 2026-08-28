@@ -204,7 +204,10 @@ export class FreighterWalletAdapter implements WalletAdapter {
     opts: { networkPassphrase: string; timeoutMs?: number },
   ): Promise<string> {
     const timeoutMs = opts.timeoutMs ?? DEFAULT_SIGN_TIMEOUT_MS;
-    const freighterApi = await loadFreighterApi();
+    // Kicked off synchronously (not awaited yet) so the timeout below is
+    // still registered before this function's first `await`, regardless of
+    // how long the dynamic import takes to resolve.
+    const freighterApiPromise = loadFreighterApi();
 
     // Race the Freighter call against a timer so that a hung or dismissed
     // popup never leaves the caller's promise pending indefinitely (#154).
@@ -218,9 +221,11 @@ export class FreighterWalletAdapter implements WalletAdapter {
 
     try {
       const { signedTxXdr, error } = await Promise.race([
-        freighterApi.signTransaction(transactionXdr, {
-          networkPassphrase: opts.networkPassphrase,
-        }),
+        freighterApiPromise.then((freighterApi) =>
+          freighterApi.signTransaction(transactionXdr, {
+            networkPassphrase: opts.networkPassphrase,
+          }),
+        ),
         timeoutPromise,
       ]);
       if (error) {
