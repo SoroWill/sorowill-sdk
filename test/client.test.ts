@@ -1,5 +1,5 @@
 import { Account, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ReadCache } from '../src/cache';
 import { isRetryableRpcConnectionError, RpcEndpointPool } from '../src/rpc';
@@ -405,6 +405,48 @@ describe('RpcEndpointPool', () => {
         throw new Error('contract execution failed');
       }),
     ).rejects.toThrow('contract execution failed');
+  });
+
+  it('re-promotes the primary endpoint after the cooldown elapses, once it recovers', async () => {
+    vi.useFakeTimers();
+    try {
+      const cooldownMs = 30_000;
+      const pool = new RpcEndpointPool(
+        ['https://rpc-a.example', 'https://rpc-b.example'],
+        undefined,
+        cooldownMs,
+      );
+
+      // Primary fails, pool fails over to the backup.
+      await pool.withFailover(async (_server, rpcUrl) => {
+        if (rpcUrl.endsWith('rpc-a.example')) {
+          throw new Error('fetch failed');
+        }
+        return 'ok';
+      });
+      expect(pool.getActiveRpcUrl()).toBe('https://rpc-b.example');
+
+      // Before the cooldown elapses, the pool keeps using the backup.
+      vi.advanceTimersByTime(cooldownMs - 1);
+      const attemptsBeforeCooldown: string[] = [];
+      await pool.withFailover(async (_server, rpcUrl) => {
+        attemptsBeforeCooldown.push(rpcUrl);
+        return 'ok';
+      });
+      expect(attemptsBeforeCooldown).toEqual(['https://rpc-b.example']);
+
+      // Once the cooldown elapses, the pool retries the recovered primary.
+      vi.advanceTimersByTime(1);
+      const attemptsAfterCooldown: string[] = [];
+      await pool.withFailover(async (_server, rpcUrl) => {
+        attemptsAfterCooldown.push(rpcUrl);
+        return 'ok';
+      });
+      expect(attemptsAfterCooldown).toEqual(['https://rpc-a.example']);
+      expect(pool.getActiveRpcUrl()).toBe('https://rpc-a.example');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
