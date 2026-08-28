@@ -1,3 +1,5 @@
+import { StrKey } from '@stellar/stellar-sdk';
+
 import type { Beneficiary, Will } from './types';
 import { WillStatus } from './types';
 
@@ -134,11 +136,15 @@ export const MAX_GUARDIANS = 3;
 
 /**
  * Validates that a beneficiary list is well-formed: non-empty, at most
- * {@link MAX_BENEFICIARIES} entries, every percentage is a positive
- * integer, and percentages sum to exactly 100.
+ * {@link MAX_BENEFICIARIES} entries, every `address` is a syntactically
+ * valid Stellar public key, every percentage is a positive integer, and
+ * percentages sum to exactly 100.
  */
 export function validateBeneficiaries(beneficiaries: Beneficiary[]): boolean {
   if (beneficiaries.length === 0 || beneficiaries.length > MAX_BENEFICIARIES) {
+    return false;
+  }
+  if (!beneficiaries.every((b) => StrKey.isValidEd25519PublicKey(b.address))) {
     return false;
   }
   if (!beneficiaries.every((b) => Number.isInteger(b.percentage) && b.percentage > 0)) {
@@ -203,8 +209,9 @@ export function getNextActionableState(
 }
 /**
  * Validates a guardian list: empty list is valid (guardians are optional),
- * at most {@link MAX_GUARDIANS} entries, no duplicate addresses, and no
- * owner address in the list.
+ * at most {@link MAX_GUARDIANS} entries, every address (including the
+ * optional `ownerAddress`) is a syntactically valid Stellar public key, no
+ * duplicate addresses, and no owner address in the list.
  *
  * @param guardians - The list of guardian addresses to validate.
  * @param ownerAddress - Optional owner address; when supplied, the function
@@ -212,6 +219,12 @@ export function getNextActionableState(
  */
 export function validateGuardians(guardians: string[], ownerAddress?: string): boolean {
   if (guardians.length > MAX_GUARDIANS) {
+    return false;
+  }
+  if (!guardians.every((address) => StrKey.isValidEd25519PublicKey(address))) {
+    return false;
+  }
+  if (ownerAddress !== undefined && !StrKey.isValidEd25519PublicKey(ownerAddress)) {
     return false;
   }
   const unique = new Set(guardians);
