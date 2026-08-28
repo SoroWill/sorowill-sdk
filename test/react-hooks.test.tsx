@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react';
 import { waitFor } from '@testing-library/dom';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { WillStatus, type Will } from '../src/types';
-import type { SoroWillClientOptions } from '../src/SoroWillClient';
+import type { SoroWillClient, SoroWillClientOptions } from '../src/SoroWillClient';
 
 const mockWills: Will[] = [
   {
@@ -50,6 +50,17 @@ vi.mock('../src/SoroWillClient', () => ({
 import { useWill, useWillsByBeneficiary, useWillsByOwner } from '../src/react/hooks';
 
 const CLIENT_OPTIONS = { network: 'testnet' as const, contractId: 'CABC' };
+
+// Regression guard for #216: useWillsByOwner/useWillsByBeneficiary assume
+// SoroWillClient's read methods resolve to a plain Will[] when called without
+// pagination options. Never invoked at runtime — this only needs to typecheck,
+// and fails to if that assumption ever drifts (e.g. the no-options overload
+// starts returning a wrapper object).
+function _assertWillsReturnTypeUnwrapped(client: SoroWillClient) {
+  expectTypeOf(client.getWillsByOwner('G...')).resolves.toEqualTypeOf<Will[]>();
+  expectTypeOf(client.getWillsByBeneficiary('G...')).resolves.toEqualTypeOf<Will[]>();
+}
+void _assertWillsReturnTypeUnwrapped;
 
 describe('useWill', () => {
   beforeEach(() => {
