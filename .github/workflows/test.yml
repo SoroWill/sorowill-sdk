@@ -30,6 +30,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Smoke test (fresh install without optional peers)
+        run: npm run smoke-test
+
       - name: Test with coverage
         run: npm run test:coverage
 
