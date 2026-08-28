@@ -18,6 +18,15 @@ export function isRetryableRpcConnectionError(error: unknown): boolean {
     'enotfound',
     'econnreset',
     'connect',
+    '429',
+    'too many requests',
+    'rate limit',
+    '502',
+    'bad gateway',
+    '503',
+    'service unavailable',
+    '504',
+    'gateway timeout',
   ].some((fragment) => message.includes(fragment));
 }
 
