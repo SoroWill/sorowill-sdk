@@ -116,6 +116,7 @@ export {
   TooManyGuardiansError,
   TransactionSubmissionError,
   WalletNetworkMismatchError,
+  WebSocketNotConfiguredError,
   WillContractError,
   WillNotActiveError,
   WillNotFoundError,

@@ -52,6 +52,7 @@ import {
   SoroWillRestoreRequiredError,
   TooManyGuardiansError,
   WalletNetworkMismatchError,
+  WebSocketNotConfiguredError,
 } from './errors';
 import { MAX_GUARDIANS, validateBeneficiaries } from './utils';
 import { RequestQueue } from './requestQueue';
@@ -1171,7 +1172,10 @@ export class SoroWillClient {
    * `webSocketFactory` and `eventStreamUrl`) when both are configured,
    * automatically falling back to HTTP polling (via `fetch` and
    * `eventRpcUrl`) if the WebSocket connection fails to open. Pass
-   * `{ transport: 'polling' }` to skip WebSocket entirely.
+   * `{ transport: 'polling' }` to skip WebSocket entirely, or
+   * `{ transport: 'websocket' }` to require it — this throws
+   * {@link WebSocketNotConfiguredError} instead of silently falling back to
+   * polling if `webSocketFactory`/`eventStreamUrl` aren't configured.
    *
    * @returns A handle that can be used to close the subscription.
    */
@@ -1183,6 +1187,9 @@ export class SoroWillClient {
     const canUseWebSocket = wantsWebSocket && !!this.webSocketFactory && !!this.eventStreamUrl;
 
     if (!canUseWebSocket) {
+      if (options.transport === 'websocket') {
+        throw new WebSocketNotConfiguredError();
+      }
       return this.startPollingSubscription(listener, options);
     }
 

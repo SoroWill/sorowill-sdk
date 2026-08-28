@@ -144,7 +144,13 @@ export interface EventSubscriptionOptions {
   pageSize?: number;
   /** Polling interval when the polling transport is used. */
   pollIntervalMs?: number;
-  /** Force a specific transport, or auto-negotiate with WebSocket fallback. */
+  /**
+   * Force a specific transport, or auto-negotiate with WebSocket fallback.
+   * `'websocket'` requires the client to be configured with both
+   * `webSocketFactory` and `eventStreamUrl` — unlike `'auto'`, it throws
+   * `WebSocketNotConfiguredError` rather than silently falling back to
+   * polling when they aren't.
+   */
   transport?: 'auto' | EventSubscriptionTransport;
   /** Optional callback for transport-level errors. */
   onError?: (error: Error) => void;
