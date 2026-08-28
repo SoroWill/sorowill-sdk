@@ -80,6 +80,19 @@ export function isCheckinDue(will: Will): boolean {
  * (see `fn distribute` — integer division with remainder assigned to the
  * last beneficiary). Keep this implementation in sync with any changes to
  * that contract function.
+ *
+ * **IMPORTANT — order matters:** because the rounding remainder always goes
+ * to the *last* element of `beneficiaries`, the array must be passed in
+ * exactly the same order the contract stored the beneficiaries on-chain
+ * (i.e. `will.beneficiaries` as returned by the client, unmodified). Sorting,
+ * filtering, or otherwise reordering the array before calling this function
+ * — for example to display beneficiaries alphabetically in a UI — will
+ * change which beneficiary the preview attributes the remainder to, and the
+ * preview will no longer match the real on-chain payout. If you need a
+ * reordered copy for display, sort a copy for rendering only and keep
+ * calling `calculateShares` with the original, unmodified array (see
+ * {@link tagOnChainOrder} for a way to sort a display copy while still being
+ * able to recover the original on-chain order).
  */
 export function calculateShares(
   balance: string,
@@ -96,6 +109,19 @@ export function calculateShares(
     remaining -= share;
     return { address: beneficiary.address, share: share.toString() };
   });
+}
+
+/**
+ * Tags each beneficiary with its index in the on-chain order. Callers who
+ * want to sort or filter beneficiaries for display (e.g. alphabetically)
+ * can sort the tagged copy and still recover the original on-chain order
+ * (by sorting on `onChainIndex`) before passing beneficiaries to
+ * {@link calculateShares}, so the rounding remainder is attributed correctly.
+ */
+export function tagOnChainOrder(
+  beneficiaries: Beneficiary[],
+): Array<Beneficiary & { onChainIndex: number }> {
+  return beneficiaries.map((beneficiary, onChainIndex) => ({ ...beneficiary, onChainIndex }));
 }
 
 /** Formats a `Date` as a human-readable string, e.g. `"Jan 5, 2027, 3:45 PM"`. */
