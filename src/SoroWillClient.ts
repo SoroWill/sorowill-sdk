@@ -84,7 +84,7 @@ export type SoroWillNetwork = 'testnet' | 'mainnet';
  * explicitly to the `SoroWillClient` constructor rather than relying on this
  * default.
  *
- * @see https://github.com/SoroWill/contracts/tree/main/deployments
+ * @see https://github.com/SoroWill/sorowill-contracts/tree/main/deployments
  */
 export const DEFAULT_CONTRACT_IDS: Record<SoroWillNetwork, string> = {
   testnet: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
@@ -654,7 +654,7 @@ export class SoroWillClient {
    * `overrides` until a new SDK version is published with the updated
    * address. Track redeployments in the contracts repo's
    * `deployments/` directory:
-   * https://github.com/SoroWill/contracts/tree/main/deployments
+   * https://github.com/SoroWill/sorowill-contracts/tree/main/deployments
    *
    * @param network - The target Stellar network (`'testnet'` or `'mainnet'`).
    * @param overrides - Any `SoroWillClientOptions` to merge on top of the
