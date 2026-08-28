@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react';
 import { waitFor } from '@testing-library/dom';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WillStatus, type Will } from '../src/types';
+import type { SoroWillClientOptions } from '../src/SoroWillClient';
 
 const mockWills: Will[] = [
   {
@@ -21,8 +22,16 @@ const mockWills: Will[] = [
   },
 ];
 
+const constructedClients: Array<{ network: string; destroy: ReturnType<typeof vi.fn> }> = [];
+
 vi.mock('../src/SoroWillClient', () => ({
   SoroWillClient: class {
+    network: string;
+    destroy = vi.fn();
+    constructor(options: { network: string }) {
+      this.network = options.network;
+      constructedClients.push(this);
+    }
     getWill = vi.fn().mockImplementation((willId: string) => {
       if (willId === '999') return Promise.reject(new Error('Will not found'));
       return Promise.resolve(mockWills[0]);
@@ -43,6 +52,10 @@ import { useWill, useWillsByBeneficiary, useWillsByOwner } from '../src/react/ho
 const CLIENT_OPTIONS = { network: 'testnet' as const, contractId: 'CABC' };
 
 describe('useWill', () => {
+  beforeEach(() => {
+    constructedClients.length = 0;
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
   });
@@ -86,6 +99,19 @@ describe('useWill', () => {
     });
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.data).toBeDefined();
+  });
+
+  it('recreates the client when clientOptions.network changes', () => {
+    const { rerender } = renderHook(
+      (options: SoroWillClientOptions) => useWill(options, '1'),
+      { initialProps: CLIENT_OPTIONS as SoroWillClientOptions },
+    );
+    expect(constructedClients).toHaveLength(1);
+    expect(constructedClients[0]?.network).toBe('testnet');
+
+    rerender({ ...CLIENT_OPTIONS, network: 'mainnet' });
+    expect(constructedClients).toHaveLength(2);
+    expect(constructedClients[1]?.network).toBe('mainnet');
   });
 });
 

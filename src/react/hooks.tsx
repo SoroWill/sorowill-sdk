@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { SoroWillClient } from '../SoroWillClient';
 import type { SoroWillClientOptions } from '../SoroWillClient';
@@ -13,13 +13,10 @@ export interface UseQueryResult<T> {
 }
 
 function useSoroWillClient(options: SoroWillClientOptions): SoroWillClient {
-  const clientRef = useRef<SoroWillClient | null>(null);
-
-  if (clientRef.current === null) {
-    clientRef.current = new SoroWillClient(options);
-  }
-
-  return clientRef.current;
+  return useMemo(
+    () => new SoroWillClient(options),
+    [options.network, options.contractId],
+  );
 }
 
 /**
