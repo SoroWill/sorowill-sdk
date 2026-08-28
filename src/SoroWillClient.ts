@@ -1068,44 +1068,78 @@ export class SoroWillClient {
     if (operations.length === 0) {
       throw new RangeError('A batch must contain at least one operation');
     }
-    const spec = await this.getSpec(options);
-    const contractOperations = operations.map(({ method, args }) =>
-      this.contract.call(method, ...spec.funcArgsToScVals(method, args)),
-    );
-
-    // Build a multi-operation transaction manually (batch has its own path
-    // since buildTransaction handles single operations)
-    const publicKey = await this.getWalletPublicKey();
-    const account = await this.rpc(
-      () => this.rpcPool.withFailover((server) => server.getAccount(publicKey)),
-      options,
-    );
-    const builder = new TransactionBuilder(account, {
-      fee: (BigInt(BASE_FEE) * BigInt(contractOperations.length)).toString(),
-      networkPassphrase: this.networkPassphrase,
-    });
-    for (const op of contractOperations) {
-      builder.addOperation(op);
+    const hookContexts = operations.map(({ method, args }) => ({
+      before: {
+        method,
+        args,
+        timestamp: new Date().toISOString(),
+      } satisfies BeforeInvokeContext,
+      startTime: Date.now(),
+    }));
+    for (const { before } of hookContexts) {
+      const proceed = await this.hooks.runBeforeInvoke(before);
+      if (!proceed) {
+        throw new SoroWillError(`SoroWill invocation aborted by beforeInvoke hook for ${before.method}`);
+      }
     }
-    const builtTx = builder.setTimeout(this.transactionTimeoutSeconds).build();
 
-    const prepared = await this.rpc(
-      () => this.rpcPool.withFailover((server) => server.prepareTransaction(builtTx)),
-      options,
-    );
+    let txHash: string | null = null;
+    let error: string | null = null;
+    try {
+      const spec = await this.getSpec(options);
+      const contractOperations = operations.map(({ method, args }) =>
+        this.contract.call(method, ...spec.funcArgsToScVals(method, args)),
+      );
 
-    assertPreparedTransactionMatchesIntendedOperation({
-      intendedTransactionXdr: builtTx.toXDR(),
-      preparedTransactionXdr: prepared.toXDR(),
-      networkPassphrase: this.networkPassphrase,
-      context: 'batch',
-    });
+      // Build a multi-operation transaction manually (batch has its own path
+      // since buildTransaction handles single operations)
+      const publicKey = await this.getWalletPublicKey();
+      const account = await this.rpc(
+        () => this.rpcPool.withFailover((server) => server.getAccount(publicKey)),
+        options,
+      );
+      const builder = new TransactionBuilder(account, {
+        fee: (BigInt(BASE_FEE) * BigInt(contractOperations.length)).toString(),
+        networkPassphrase: this.networkPassphrase,
+      });
+      for (const op of contractOperations) {
+        builder.addOperation(op);
+      }
+      const builtTx = builder.setTimeout(this.transactionTimeoutSeconds).build();
 
-    const signedTxXdr = await this.wallet.signTransaction(prepared.toXDR(), {
-      networkPassphrase: this.networkPassphrase,
-    });
-    const result = await this.submitSignedTransaction(signedTxXdr, options);
-    return { txHash: result.txHash, createdAt: result.createdAt };
+      const prepared = await this.rpc(
+        () => this.rpcPool.withFailover((server) => server.prepareTransaction(builtTx)),
+        options,
+      );
+
+      assertPreparedTransactionMatchesIntendedOperation({
+        intendedTransactionXdr: builtTx.toXDR(),
+        preparedTransactionXdr: prepared.toXDR(),
+        networkPassphrase: this.networkPassphrase,
+        context: 'batch',
+      });
+
+      const signedTxXdr = await this.wallet.signTransaction(prepared.toXDR(), {
+        networkPassphrase: this.networkPassphrase,
+      });
+      const result = await this.submitSignedTransaction(signedTxXdr, options);
+      txHash = result.txHash;
+      return { txHash: result.txHash, createdAt: result.createdAt };
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+      throw err;
+    } finally {
+      for (const { before, startTime } of hookContexts) {
+        await this.hooks.runAfterInvoke({
+          method: before.method,
+          args: before.args,
+          timestamp: new Date().toISOString(),
+          txHash,
+          error,
+          durationMs: Date.now() - startTime,
+        });
+      }
+    }
   }
 
   /**
