@@ -39,3 +39,7 @@ jobs:
       - name: Test with coverage
         run: npm run test:coverage
 
+      - name: Warn if Soroban sandbox integration tests are skipped
+        if: env.SOROBAN_CONTRACT_ID == '' || env.SOROBAN_OWNER_ACCOUNT == '' || env.SOROBAN_BENEFICIARY_ACCOUNT == ''
+        run: echo "::warning file=test/soroban-sandbox-integration.test.ts::soroban-sandbox-integration.test.ts was skipped — SOROBAN_CONTRACT_ID, SOROBAN_OWNER_ACCOUNT, and SOROBAN_BENEFICIARY_ACCOUNT are not set in this workflow. See CONTRIBUTING.md for how to run it locally against a sandbox."
+
