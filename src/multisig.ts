@@ -132,7 +132,10 @@ export class MultisigCollector {
       throw new Error('Unsupported transaction envelope type');
     }
 
-    const txV1 = envelope.v1();
+    const txV1 =
+      envelope.switch() === xdr.EnvelopeType.envelopeTypeTx()
+        ? envelope.v1()
+        : envelope.feeBump().tx().innerTx().v1();
     if (!txV1) {
       throw new Error('Transaction envelope is not a V1 transaction');
     }
