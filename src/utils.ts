@@ -44,7 +44,12 @@ export function toStroops(usdc: string): bigint {
   const negative = cleaned.startsWith('-');
   const unsigned = negative ? cleaned.slice(1) : cleaned;
   const [wholePart = '', fractionPart = ''] = unsigned.split('.');
-  const paddedFraction = (fractionPart + '0'.repeat(USDC_DECIMALS)).slice(0, USDC_DECIMALS);
+  if (fractionPart.length > USDC_DECIMALS) {
+    throw new Error(
+      `Invalid USDC amount: "${usdc}" has more than ${USDC_DECIMALS} fractional digits, which would silently lose precision.`,
+    );
+  }
+  const paddedFraction = fractionPart.padEnd(USDC_DECIMALS, '0');
 
   const whole = BigInt(wholePart === '' ? '0' : wholePart);
   const fraction = BigInt(paddedFraction === '' ? '0' : paddedFraction);
