@@ -199,17 +199,25 @@ export interface NextActionableState {
  * check in; triggering and releasing are permissionless once their
  * on-chain preconditions are met; and guardians may vote for an early
  * release at any point before the will is released or cancelled.
+ *
+ * @param now - The current time, used to evaluate whether the grace period
+ * has expired. Defaults to the local wall clock (`new Date()`), but callers
+ * that don't trust the local clock (the same client-clock-trust concern
+ * tracked for `getTimeUntilCheckin`/`isCheckinDue`) can pass a trusted time
+ * source instead, e.g. one derived from the RPC server's latest ledger
+ * close time.
  */
 export function getNextActionableState(
   will: Will,
   connectedAddress: string,
+  now: Date = new Date(),
 ): NextActionableState {
   const isOwner = will.owner === connectedAddress;
   const isWillGuardian = isGuardian(will, connectedAddress);
 
   const graceDeadlineMs =
     (will.triggerTime?.getTime() ?? 0) + will.gracePeriodDays * 86_400 * 1000;
-  const isGracePeriodExpired = will.triggerTime !== null && Date.now() >= graceDeadlineMs;
+  const isGracePeriodExpired = will.triggerTime !== null && now.getTime() >= graceDeadlineMs;
 
   return {
     canCheckIn: isOwner && will.status === WillStatus.Active,

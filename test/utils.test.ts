@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { calculateShares, getNextActionableState, isBeneficiary, isGuardian, tagOnChainOrder } from '../src/utils';
 import { WillStatus, type Will } from '../src/types';
@@ -172,5 +172,25 @@ describe('getNextActionableState', () => {
     expect(state.canCheckIn).toBe(false);
     expect(state.canCancel).toBe(false);
     expect(state.canGuardianVote).toBe(false);
+  });
+
+  it('evaluates the grace period against an injected trusted time instead of a skewed local clock', () => {
+    const triggerTime = new Date('2026-01-01T00:00:00Z');
+    const will = makeWill({ status: WillStatus.Triggered, gracePeriodDays: 7, triggerTime });
+
+    // The local wall clock is skewed far into the future, past the real
+    // grace deadline, but a trusted `now` still within the grace period
+    // (e.g. derived from the RPC server's ledger close time) is passed in.
+    const skewedLocalClock = new Date('2026-06-01T00:00:00Z');
+    const trustedNow = new Date('2026-01-03T00:00:00Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(skewedLocalClock);
+    try {
+      const state = getNextActionableState(will, 'GOWNER', trustedNow);
+      expect(state.canEmergencyCheckIn).toBe(true);
+      expect(state.canRelease).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
