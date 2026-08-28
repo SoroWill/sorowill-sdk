@@ -17,7 +17,9 @@ export function isRetryableRpcConnectionError(error: unknown): boolean {
     'socket hang up',
     'enotfound',
     'econnreset',
-    'connect',
+    'connection refused',
+    'could not connect',
+    'unable to connect',
   ].some((fragment) => message.includes(fragment));
 }
 

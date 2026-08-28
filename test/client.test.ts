@@ -2,7 +2,7 @@ import { Account, Networks, Operation, TransactionBuilder } from '@stellar/stell
 import { describe, expect, it } from 'vitest';
 
 import { ReadCache } from '../src/cache';
-import { RpcEndpointPool } from '../src/rpc';
+import { isRetryableRpcConnectionError, RpcEndpointPool } from '../src/rpc';
 import { buildSep7TxUri, parseSep7Callback } from '../src/sep7';
 import { assertPreparedTransactionMatchesIntendedOperation } from '../src/txValidation';
 import {
@@ -363,6 +363,19 @@ describe('ReadCache', () => {
     now = 1_501;
 
     expect(cache.get<string[]>('owner:GABC')).toBeUndefined();
+  });
+});
+
+describe('isRetryableRpcConnectionError', () => {
+  it('classifies genuine network/connection failures as retryable', () => {
+    expect(isRetryableRpcConnectionError(new Error('fetch failed'))).toBe(true);
+    expect(isRetryableRpcConnectionError(new Error('ECONNREFUSED'))).toBe(true);
+    expect(isRetryableRpcConnectionError(new Error('could not connect to host'))).toBe(true);
+  });
+
+  it('does not classify an unrelated application error containing "connect" as retryable', () => {
+    expect(isRetryableRpcConnectionError(new Error('wallet not connected'))).toBe(false);
+    expect(isRetryableRpcConnectionError(new Error('signer disconnected mid-flow'))).toBe(false);
   });
 });
 
