@@ -13,10 +13,16 @@ export interface UseQueryResult<T> {
 }
 
 function useSoroWillClient(options: SoroWillClientOptions): SoroWillClient {
-  return useMemo(
+  const client = useMemo(
     () => new SoroWillClient(options),
     [options.network, options.contractId],
   );
+
+  useEffect(() => {
+    return () => client.destroy();
+  }, [client]);
+
+  return client;
 }
 
 /**

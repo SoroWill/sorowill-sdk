@@ -113,6 +113,15 @@ describe('useWill', () => {
     expect(constructedClients).toHaveLength(2);
     expect(constructedClients[1]?.network).toBe('mainnet');
   });
+
+  it('calls client.destroy() on unmount', () => {
+    const { unmount } = renderHook(() => useWill(CLIENT_OPTIONS, '1'));
+    expect(constructedClients).toHaveLength(1);
+    const client = constructedClients[0]!;
+
+    unmount();
+    expect(client.destroy).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('useWillsByOwner', () => {
