@@ -1589,6 +1589,14 @@ export class SoroWillClient {
     };
     const proceed = await this.hooks.runBeforeInvoke(beforeCtx);
     if (!proceed) {
+      await this.hooks.runAfterInvoke({
+        method,
+        args,
+        timestamp: new Date().toISOString(),
+        txHash: null,
+        error: `SoroWill invocation aborted by beforeInvoke hook for ${method}`,
+        durationMs: 0,
+      });
       throw new SoroWillError(`SoroWill invocation aborted by beforeInvoke hook for ${method}`);
     }
 

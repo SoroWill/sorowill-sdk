@@ -42,6 +42,10 @@ describe('formatUSDC', () => {
   it('handles zero', () => {
     expect(formatUSDC(0n)).toBe('0.00');
   });
+
+  it('supports custom decimal precision when formatting', () => {
+    expect(formatUSDC(123_450n, 4)).toBe('12.34');
+  });
 });
 
 describe('toStroops', () => {

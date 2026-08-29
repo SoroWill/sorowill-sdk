@@ -20,12 +20,13 @@ export const SOROBAN_LEDGER_CLOSE_TIME_MS = 5_000;
  * human-readable decimal string with thousands separators, e.g.
  * `formatUSDC(12345000000n) === "1,234.50"`.
  */
-export function formatUSDC(stroops: bigint): string {
+export function formatUSDC(stroops: bigint, decimals = USDC_DECIMALS): string {
   const negative = stroops < 0n;
   const absolute = negative ? -stroops : stroops;
-  const whole = absolute / USDC_BASE;
-  const fraction = absolute % USDC_BASE;
-  const cents = fraction / 10n ** BigInt(USDC_DECIMALS - 2);
+  const base = 10n ** BigInt(decimals);
+  const whole = absolute / base;
+  const fraction = absolute % base;
+  const cents = fraction / 10n ** BigInt(Math.max(decimals - 2, 0));
 
   const wholeFormatted = whole.toLocaleString('en-US');
   const centsFormatted = cents.toString().padStart(2, '0');
@@ -37,7 +38,7 @@ export function formatUSDC(stroops: bigint): string {
  * Parses a human-readable decimal USDC string (e.g. `"1234.50"` or
  * `"1,234.5"`) into base units (stroops), as a `bigint`.
  */
-export function toStroops(usdc: string): bigint {
+export function toStroops(usdc: string, decimals = USDC_DECIMALS): bigint {
   const cleaned = usdc.replace(/,/g, '').trim();
   if (cleaned === '' || !/^-?\d*\.?\d*$/.test(cleaned) || cleaned === '-' || cleaned === '.') {
     throw new Error(`Invalid USDC amount: "${usdc}"`);
@@ -55,7 +56,7 @@ export function toStroops(usdc: string): bigint {
 
   const whole = BigInt(wholePart === '' ? '0' : wholePart);
   const fraction = BigInt(paddedFraction === '' ? '0' : paddedFraction);
-  const total = whole * USDC_BASE + fraction;
+  const total = whole * (10n ** BigInt(decimals)) + fraction;
 
   return negative ? -total : total;
 }
@@ -199,6 +200,10 @@ export interface NextActionableState {
   canGuardianVote: boolean;
 }
 
+export interface NextActionableStateOptions {
+  guardianAlreadyVoted?: boolean;
+}
+
 /**
  * Computes {@link NextActionableState} for `will` from the perspective of
  * `connectedAddress`. Only the owner may check in, cancel, or emergency
@@ -248,6 +253,7 @@ export function getNextActionableState(
     canCancel: isOwner && will.status === WillStatus.Active,
     canGuardianVote:
       isWillGuardian &&
+      !options.guardianAlreadyVoted &&
       (will.status === WillStatus.Active || will.status === WillStatus.Triggered),
   };
 }
