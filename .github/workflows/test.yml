@@ -21,6 +21,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Lint
         run: npm run lint
 
@@ -30,6 +33,13 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Smoke test (fresh install without optional peers)
+        run: npm run smoke-test
+
       - name: Test with coverage
         run: npm run test:coverage
+
+      - name: Warn if Soroban sandbox integration tests are skipped
+        if: env.SOROBAN_CONTRACT_ID == '' || env.SOROBAN_OWNER_ACCOUNT == '' || env.SOROBAN_BENEFICIARY_ACCOUNT == ''
+        run: echo "::warning file=test/soroban-sandbox-integration.test.ts::soroban-sandbox-integration.test.ts was skipped — SOROBAN_CONTRACT_ID, SOROBAN_OWNER_ACCOUNT, and SOROBAN_BENEFICIARY_ACCOUNT are not set in this workflow. See CONTRIBUTING.md for how to run it locally against a sandbox."
 
