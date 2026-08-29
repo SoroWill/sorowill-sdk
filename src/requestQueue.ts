@@ -46,6 +46,25 @@ export class RequestQueue {
     });
   }
 
+  /**
+   * Rejects every request that is queued but not yet started, clearing the
+   * pending list. Active (already-started) requests are not affected here —
+   * callers should abort those separately via {@link InFlightTracker.clear}.
+   *
+   * Intended to be called by {@link SoroWillClient.destroy} so that any
+   * requests enqueued after unmount/teardown do not run to completion.
+   */
+  rejectAll(reason: unknown): void {
+    if (this.wakeTimer !== undefined) {
+      clearTimeout(this.wakeTimer);
+      this.wakeTimer = undefined;
+    }
+    const drained = this.pending.splice(0);
+    for (const request of drained) {
+      request.reject(reason);
+    }
+  }
+
   private drain(): void {
     if (this.wakeTimer !== undefined) {
       clearTimeout(this.wakeTimer);

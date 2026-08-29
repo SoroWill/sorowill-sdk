@@ -132,7 +132,10 @@ export class MultisigCollector {
       throw new Error('Unsupported transaction envelope type');
     }
 
-    const txV1 = envelope.v1();
+    const txV1 =
+      envelope.switch() === xdr.EnvelopeType.envelopeTypeTx()
+        ? envelope.v1()
+        : envelope.feeBump().tx().innerTx().v1();
     if (!txV1) {
       throw new Error('Transaction envelope is not a V1 transaction');
     }
@@ -184,6 +187,10 @@ export class MultisigCollector {
  * without signing or submitting it. The returned XDR can be distributed
  * to signers and collected via {@link MultisigCollector}.
  */
+interface ContractSpec {
+  funcArgsToScVals(method: string, args: Record<string, unknown>): unknown[];
+}
+
 export async function buildMultisigTransactionXdr(options: {
   rpcUrl: string;
   networkPassphrase: string;
@@ -193,6 +200,7 @@ export async function buildMultisigTransactionXdr(options: {
   sourceAccount: string;
   fee?: string;
   timeout?: number;
+  spec?: ContractSpec;
 }): Promise<string> {
   const { Spec } = await import('@stellar/stellar-sdk').then((m) => m.contract);
   const server = new rpc.Server(options.rpcUrl, {
@@ -200,11 +208,15 @@ export async function buildMultisigTransactionXdr(options: {
   });
   const contract = new Contract(options.contractAddress);
 
-  // We need the spec to convert native args to ScVals.
-  // Fetch the contract WASM and build the spec.
-  const wasm = await server.getContractWasmByContractId(contract.contractId());
-  const spec = Spec.fromWasm(wasm);
+  // Use provided spec or fetch fresh from WASM.
+  let spec: ContractSpec | undefined = options.spec;
+  if (!spec) {
+    const wasm = await server.getContractWasmByContractId(contract.contractId());
+    spec = Spec.fromWasm(wasm) as ContractSpec;
+  }
+
   const scArgs = spec.funcArgsToScVals(options.method, options.args);
+  // @ts-expect-error scArgs type mismatch between ContractSpec and stellar-sdk
   const operation = contract.call(options.method, ...scArgs);
 
   const account = new Account(options.sourceAccount, '0');

@@ -52,6 +52,9 @@ export abstract class InjectedWalletAdapter implements WalletAdapter {
     transactionXdr: string,
     options: SignTransactionOptions,
   ): Promise<string> {
+    if (!this.connection) {
+      throw new Error(`${this.name} is not connected. Call connect() first.`);
+    }
     const result = await this.provider.signTransaction(transactionXdr, options);
     return typeof result === 'string' ? result : result.signedTxXdr;
   }
