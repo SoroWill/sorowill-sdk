@@ -1,6 +1,8 @@
 import { Account, Keypair, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { SignTransactionTimeoutError } from '../src/errors';
+
 const publicKeyMock = vi.fn();
 const txMock = vi.fn();
 
@@ -136,6 +138,7 @@ import {
   LobstrWalletAdapter,
   type InjectedWalletProvider,
   type LedgerStellarApp,
+  type LobstrSessionClient,
 } from '../src/adapters';
 
 const connection = {
@@ -177,23 +180,41 @@ describe.each([
     await expect(adapter.isConnected()).resolves.toBe(false);
     await expect(adapter.getPublicKey()).rejects.toThrow('Call connect() first');
   });
+
+  it('rejects signTransaction() with a clear error before connect()', async () => {
+    const adapter = new Adapter(injectedProvider());
+
+    await expect(
+      adapter.signTransaction('unsigned-xdr', { networkPassphrase: Networks.TESTNET }),
+    ).rejects.toThrow('Call connect() first');
+  });
 });
 
 describe('LobstrWalletAdapter', () => {
-  it('publishes a pairing URI and waits for mobile approval', async () => {
-    const approved = vi.fn().mockResolvedValue(connection);
-    const onPairingUri = vi.fn();
-    const openDeepLink = vi.fn();
-    const client = {
+  function lobstrClient(overrides: Partial<LobstrSessionClient> = {}): LobstrSessionClient {
+    return {
       connect: vi.fn().mockResolvedValue({
         uri: 'wc:pairing@2?key=value',
-        approval: approved,
+        approval: vi.fn().mockResolvedValue(connection),
       }),
       disconnect: vi.fn().mockResolvedValue(undefined),
       isConnected: vi.fn().mockResolvedValue(true),
       getPublicKey: vi.fn().mockResolvedValue('GTEST'),
       signTransaction: vi.fn().mockResolvedValue('signed-xdr'),
+      ...overrides,
     };
+  }
+
+  it('publishes a pairing URI and waits for mobile approval', async () => {
+    const approved = vi.fn().mockResolvedValue(connection);
+    const onPairingUri = vi.fn();
+    const openDeepLink = vi.fn();
+    const client = lobstrClient({
+      connect: vi.fn().mockResolvedValue({
+        uri: 'wc:pairing@2?key=value',
+        approval: approved,
+      }),
+    });
     const adapter = new LobstrWalletAdapter({ client, onPairingUri, openDeepLink });
 
     await expect(adapter.connect()).resolves.toEqual(connection);
@@ -202,6 +223,54 @@ describe('LobstrWalletAdapter', () => {
       'lobstr://wallet-connect?uri=wc%3Apairing%402%3Fkey%3Dvalue',
     );
     expect(approved).toHaveBeenCalledOnce();
+  });
+
+  it('resumes an existing session without emitting a pairing URI or deep link', async () => {
+    const approved = vi.fn().mockResolvedValue(connection);
+    const onPairingUri = vi.fn();
+    const openDeepLink = vi.fn();
+    const client = lobstrClient({
+      connect: vi.fn().mockResolvedValue({ approval: approved }),
+    });
+    const adapter = new LobstrWalletAdapter({ client, onPairingUri, openDeepLink });
+
+    await expect(adapter.connect()).resolves.toEqual(connection);
+    expect(onPairingUri).not.toHaveBeenCalled();
+    expect(openDeepLink).not.toHaveBeenCalled();
+    expect(approved).toHaveBeenCalledOnce();
+  });
+
+  it('delegates disconnect() to the session client', async () => {
+    const client = lobstrClient();
+    const adapter = new LobstrWalletAdapter({ client });
+
+    await adapter.disconnect();
+    expect(client.disconnect).toHaveBeenCalledOnce();
+  });
+
+  it('delegates isConnected() to the session client', async () => {
+    const client = lobstrClient({ isConnected: vi.fn().mockResolvedValue(false) });
+    const adapter = new LobstrWalletAdapter({ client });
+
+    await expect(adapter.isConnected()).resolves.toBe(false);
+    expect(client.isConnected).toHaveBeenCalledOnce();
+  });
+
+  it('delegates getPublicKey() to the session client', async () => {
+    const client = lobstrClient({ getPublicKey: vi.fn().mockResolvedValue('GLOBSTR') });
+    const adapter = new LobstrWalletAdapter({ client });
+
+    await expect(adapter.getPublicKey()).resolves.toBe('GLOBSTR');
+    expect(client.getPublicKey).toHaveBeenCalledOnce();
+  });
+
+  it('forwards signTransaction() arguments to the session client unchanged', async () => {
+    const client = lobstrClient({ signTransaction: vi.fn().mockResolvedValue('signed-through') });
+    const adapter = new LobstrWalletAdapter({ client });
+    const options = { networkPassphrase: Networks.TESTNET };
+
+    await expect(adapter.signTransaction('unsigned-xdr', options)).resolves.toBe('signed-through');
+    expect(client.signTransaction).toHaveBeenCalledWith('unsigned-xdr', options);
   });
 });
 
@@ -245,5 +314,63 @@ describe('LedgerWalletAdapter', () => {
     confirm?.({ signature: keypair.sign(transaction.hash()) });
     const signed = TransactionBuilder.fromXDR(await signing, Networks.TESTNET);
     expect(signed.signatures).toHaveLength(1);
+  });
+
+  const ledgerKeypair = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 7));
+
+  function ledgerApp(overrides: Partial<LedgerStellarApp> = {}): LedgerStellarApp {
+    return {
+      getPublicKey: vi.fn().mockResolvedValue({ rawPublicKey: ledgerKeypair.rawPublicKey() }),
+      signTransaction: vi.fn().mockResolvedValue({ signature: Buffer.alloc(64) }),
+      ...overrides,
+    };
+  }
+
+  function ledgerAdapter(app: LedgerStellarApp, timeoutMs?: number): LedgerWalletAdapter {
+    return new LedgerWalletAdapter({
+      transport: {} as never,
+      app,
+      network: 'testnet',
+      networkPassphrase: Networks.TESTNET,
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    });
+  }
+
+  it('clears the public key on disconnect and reports isConnected() as false', async () => {
+    const adapter = ledgerAdapter(ledgerApp());
+    await adapter.connect();
+    await expect(adapter.isConnected()).resolves.toBe(true);
+
+    await adapter.disconnect();
+
+    await expect(adapter.isConnected()).resolves.toBe(false);
+    await expect(adapter.getPublicKey()).rejects.toThrow('Ledger is not connected. Call connect() first.');
+  });
+
+  it('rejects getPublicKey() before connect()', async () => {
+    const adapter = ledgerAdapter(ledgerApp());
+
+    await expect(adapter.getPublicKey()).rejects.toThrow(
+      'Ledger is not connected. Call connect() first.',
+    );
+  });
+
+  it('rejects signTransaction() with SignTransactionTimeoutError when the device never confirms', async () => {
+    const transaction = new TransactionBuilder(new Account(ledgerKeypair.publicKey(), '1'), {
+      fee: '100',
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(Operation.manageData({ name: 'test', value: 'value' }))
+      .setTimeout(0)
+      .build();
+    const adapter = ledgerAdapter(
+      ledgerApp({ signTransaction: vi.fn().mockReturnValue(new Promise<never>(() => {})) }),
+      1,
+    );
+    await adapter.connect();
+
+    await expect(
+      adapter.signTransaction(transaction.toXDR(), { networkPassphrase: Networks.TESTNET }),
+    ).rejects.toBeInstanceOf(SignTransactionTimeoutError);
   });
 });

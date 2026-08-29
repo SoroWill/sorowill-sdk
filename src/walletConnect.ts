@@ -69,7 +69,13 @@ const DEFAULT_REQUIRED_NAMESPACES: Record<string, WalletConnectSessionNamespace>
 const DEFAULT_DISCONNECT_REASON = { code: 6000, message: 'Disconnected by client' };
 
 function getFirstAccount(session: WalletConnectSession): string | undefined {
-  for (const namespace of Object.values(session.namespaces ?? {})) {
+  const namespaces = session.namespaces ?? {};
+  const stellarNamespace = namespaces['stellar'];
+  if (stellarNamespace?.accounts?.[0]) {
+    return stellarNamespace.accounts[0];
+  }
+
+  for (const namespace of Object.values(namespaces)) {
     const account = namespace.accounts?.[0];
     if (account) {
       return account;
@@ -276,6 +282,13 @@ export class WalletConnectAdapter implements WalletAdapter {
     const session = this.session;
     if (!session) {
       throw new Error('WalletConnect session is not available');
+    }
+
+    const sessionNetwork = this.options.getNetworkFromSession?.(session) ?? getDefaultNetwork(session);
+    if (opts.networkPassphrase !== sessionNetwork.networkPassphrase) {
+      throw new Error(
+        `WalletConnect session is connected to ${sessionNetwork.network} (${sessionNetwork.networkPassphrase}) but transaction is for a different network (${opts.networkPassphrase})`,
+      );
     }
 
     const response = await this.client.request({
