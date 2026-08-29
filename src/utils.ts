@@ -182,11 +182,33 @@ export interface NextActionableState {
  * check in; triggering and releasing are permissionless once their
  * on-chain preconditions are met; and guardians may vote for an early
  * release at any point before the will is released or cancelled.
+ *
+ * PendingConfirmation: the will exists but is not yet active, so no
+ * owner actions are available until it transitions to Active.
+ *
+ * Settled: the will is fully closed; no further actions are possible.
  */
 export function getNextActionableState(
   will: Will,
   connectedAddress: string,
 ): NextActionableState {
+  // Terminal / pre-active states with no available actions
+  if (
+    will.status === WillStatus.PendingConfirmation ||
+    will.status === WillStatus.Released ||
+    will.status === WillStatus.Cancelled ||
+    will.status === WillStatus.Settled
+  ) {
+    return {
+      canCheckIn: false,
+      canTrigger: false,
+      canEmergencyCheckIn: false,
+      canRelease: false,
+      canCancel: false,
+      canGuardianVote: false,
+    };
+  }
+
   const isOwner = will.owner === connectedAddress;
   const isWillGuardian = isGuardian(will, connectedAddress);
 

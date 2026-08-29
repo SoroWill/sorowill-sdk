@@ -101,6 +101,8 @@ export interface Beneficiary {
 
 /** Lifecycle state of a will, mirroring `WillStatus` in the SoroWill contract. */
 export enum WillStatus {
+  /** The will has been created but is not yet fully confirmed on-chain (e.g. awaiting initial deposit settlement). */
+  PendingConfirmation = 'PendingConfirmation',
   /** The will is funded and the owner is checking in on schedule. */
   Active = 'Active',
   /** The owner missed a check-in deadline; the grace period is running. */
@@ -109,6 +111,8 @@ export enum WillStatus {
   Released = 'Released',
   /** The owner cancelled the will and withdrew the remaining balance. */
   Cancelled = 'Cancelled',
+  /** The will has been fully settled: all balances distributed and the record is closed. */
+  Settled = 'Settled',
 }
 
 /** The full on-chain state of a single will, decoded into native JS types. */
