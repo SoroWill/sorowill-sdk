@@ -22,6 +22,20 @@ function makeSession(topic = 'topic-1'): WalletConnectSession {
 }
 
 describe('WalletConnectAdapter', () => {
+  it('persists session topics through the localStorage store', async () => {
+    const storage = new Map<string, string>();
+    const store = new LocalStorageWalletConnectSessionStore({
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => void storage.set(key, value),
+      removeItem: (key: string) => void storage.delete(key),
+    } as Storage);
+
+    await store.setSessionTopic('topic-local');
+    await expect(store.getSessionTopic()).resolves.toBe('topic-local');
+    await store.clearSessionTopic();
+    await expect(store.getSessionTopic()).resolves.toBeNull();
+  });
+
   it('connects, signs, and disconnects through the generic WalletConnect client', async () => {
     const session = makeSession();
     let disconnectedTopic: string | null = null;
