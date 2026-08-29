@@ -7,7 +7,7 @@ describe('InFlightTracker - Issue #52: Idempotency safeguards', () => {
     const willId = '123';
     const method = 'check_in';
 
-    const operation = () => Promise.resolve({ result: 'success' });
+    const operation = (_signal: AbortSignal) => Promise.resolve({ result: 'success' });
     const promise1 = tracker.track(willId, method, operation);
 
     expect(tracker.isInFlight(willId, method)).toBe(true);
@@ -23,7 +23,7 @@ describe('InFlightTracker - Issue #52: Idempotency safeguards', () => {
     const method = 'check_in';
     const spy = vi.fn();
 
-    const operation = async () => {
+    const operation = async (_signal: AbortSignal) => {
       spy();
       return { result: 'success' };
     };
@@ -41,8 +41,8 @@ describe('InFlightTracker - Issue #52: Idempotency safeguards', () => {
     const tracker = new InFlightTracker();
     const willId = '123';
 
-    const op1 = () => Promise.resolve('check_in');
-    const op2 = () => Promise.resolve('trigger_will');
+    const op1 = (_signal: AbortSignal) => Promise.resolve('check_in');
+    const op2 = (_signal: AbortSignal) => Promise.resolve('trigger_will');
 
     const promise1 = tracker.track(willId, 'check_in', op1);
     const promise2 = tracker.track(willId, 'trigger_will', op2);
@@ -61,8 +61,8 @@ describe('InFlightTracker - Issue #52: Idempotency safeguards', () => {
     const tracker = new InFlightTracker();
     const method = 'check_in';
 
-    const op1 = () => Promise.resolve('will1');
-    const op2 = () => Promise.resolve('will2');
+    const op1 = (_signal: AbortSignal) => Promise.resolve('will1');
+    const op2 = (_signal: AbortSignal) => Promise.resolve('will2');
 
     const promise1 = tracker.track('123', method, op1);
     const promise2 = tracker.track('456', method, op2);
@@ -82,7 +82,7 @@ describe('InFlightTracker - Issue #52: Idempotency safeguards', () => {
     const willId = BigInt('123');
     const method = 'check_in';
 
-    const operation = () => Promise.resolve('success');
+    const operation = (_signal: AbortSignal) => Promise.resolve('success');
     const promise = tracker.track(willId, method, operation);
 
     expect(tracker.isInFlight(willId, method)).toBe(true);
@@ -98,7 +98,7 @@ describe('InFlightTracker - Issue #52: Idempotency safeguards', () => {
     const method = 'check_in';
 
     const error = new Error('Simulation failed');
-    const operation = () => Promise.reject(error);
+    const operation = (_signal: AbortSignal) => Promise.reject(error);
 
     const promise = tracker.track(willId, method, operation);
 
@@ -111,8 +111,8 @@ describe('InFlightTracker - Issue #52: Idempotency safeguards', () => {
   it('should clear all in-flight operations', async () => {
     const tracker = new InFlightTracker();
 
-    tracker.track('123', 'check_in', () => new Promise(() => {}));
-    tracker.track('456', 'trigger_will', () => new Promise(() => {}));
+    tracker.track('123', 'check_in', (_signal: AbortSignal) => new Promise(() => {}));
+    tracker.track('456', 'trigger_will', (_signal: AbortSignal) => new Promise(() => {}));
 
     expect(tracker.isInFlight('123', 'check_in')).toBe(true);
     expect(tracker.isInFlight('456', 'trigger_will')).toBe(true);
@@ -126,7 +126,7 @@ describe('InFlightTracker - Issue #52: Idempotency safeguards', () => {
   it('should abort specific in-flight operation', async () => {
     const tracker = new InFlightTracker();
 
-    tracker.track('123', 'check_in', () => new Promise(() => {}));
+    tracker.track('123', 'check_in', (_signal: AbortSignal) => new Promise(() => {}));
 
     expect(tracker.isInFlight('123', 'check_in')).toBe(true);
 
