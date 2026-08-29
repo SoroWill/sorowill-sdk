@@ -652,6 +652,9 @@ export class SoroWillClient {
     const pollInterval = env.SOROWILL_EVENTS_POLL_INTERVAL_MS
       ? Number(env.SOROWILL_EVENTS_POLL_INTERVAL_MS)
       : undefined;
+    if (pollInterval !== undefined && (!Number.isFinite(pollInterval) || pollInterval <= 0)) {
+      throw new Error('SOROWILL_EVENTS_POLL_INTERVAL_MS must be a finite positive number');
+    }
 
     return new SoroWillClient({
       network,
@@ -1008,8 +1011,18 @@ export class SoroWillClient {
     owner: string,
     options?: (PaginationOptions & RequestOptions) | RequestOptions,
   ): Promise<Will[] | PaginatedWillsResult> {
+    const cacheKey = createReadCacheKey('get_wills_by_owner', { owner });
+    if (this.readCache) {
+      await this.readCache.ready();
+      const cached = this.readCache.get<Will[]>(cacheKey);
+      if (cached !== undefined) {
+        return this.paginate(cached, options);
+      }
+    }
     const raw = await this.read<unknown>('get_wills_by_owner', { owner }, options);
-    return this.paginate(mapWillList(raw), options);
+    const wills = mapWillList(raw);
+    this.readCache?.set(cacheKey, wills, wills.map((will) => will.id));
+    return this.paginate(wills, options);
   }
 
   /** Lists every will `beneficiary` is named in. Does not require a connected wallet. */
@@ -1026,12 +1039,22 @@ export class SoroWillClient {
     beneficiary: string,
     options?: (PaginationOptions & RequestOptions) | RequestOptions,
   ): Promise<Will[] | PaginatedWillsResult> {
+    const cacheKey = createReadCacheKey('get_wills_by_beneficiary', { beneficiary });
+    if (this.readCache) {
+      await this.readCache.ready();
+      const cached = this.readCache.get<Will[]>(cacheKey);
+      if (cached !== undefined) {
+        return this.paginate(cached, options);
+      }
+    }
     const raw = await this.read<unknown>(
       'get_wills_by_beneficiary',
       { beneficiary },
       options,
     );
-    return this.paginate(mapWillList(raw), options);
+    const wills = mapWillList(raw);
+    this.readCache?.set(cacheKey, wills, wills.map((will) => will.id));
+    return this.paginate(wills, options);
   }
 
   /**

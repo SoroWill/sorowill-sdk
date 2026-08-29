@@ -35,8 +35,6 @@
     "docs:api": "typedoc"
   },
   "dependencies": {
-    "@albedo-link/intent": "^0.13.0",
-    "@ledgerhq/hw-app-str": "^7.7.6",
     "@stellar/stellar-sdk": "^16.0.1"
   },
   "devDependencies": {
@@ -61,10 +59,18 @@
     "vitest": "^4.1.9"
   },
   "peerDependencies": {
+    "@albedo-link/intent": "^0.13.0",
+    "@ledgerhq/hw-app-str": "^7.7.6",
     "@stellar/freighter-api": "^6.0.1",
     "react": ">=18.0.0"
   },
   "peerDependenciesMeta": {
+    "@albedo-link/intent": {
+      "optional": true
+    },
+    "@ledgerhq/hw-app-str": {
+      "optional": true
+    },
     "@stellar/freighter-api": {
       "optional": true
     },
