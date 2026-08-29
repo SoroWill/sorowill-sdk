@@ -48,12 +48,13 @@ export function useWill(
       return;
     }
 
+    const controller = new AbortController();
     let cancelled = false;
     setLoading(true);
     setError(null);
 
     client
-      .getWill(willId)
+      .getWill(willId, { signal: controller.signal })
       .then((will) => {
         if (!cancelled) {
           setData(will);
@@ -69,6 +70,7 @@ export function useWill(
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [client, willId, fetchKey]);
 
@@ -101,12 +103,13 @@ export function useWillsByOwner(
       return;
     }
 
+    const controller = new AbortController();
     let cancelled = false;
     setLoading(true);
     setError(null);
 
     client
-      .getWillsByOwner(owner)
+      .getWillsByOwner(owner, { signal: controller.signal })
       .then((wills) => {
         if (!cancelled) {
           const resolvedWills = Array.isArray(wills) ? wills : (wills as { wills?: Will[] }).wills ?? [];
@@ -123,6 +126,7 @@ export function useWillsByOwner(
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [client, owner, fetchKey]);
 
@@ -155,12 +159,13 @@ export function useWillsByBeneficiary(
       return;
     }
 
+    const controller = new AbortController();
     let cancelled = false;
     setLoading(true);
     setError(null);
 
     client
-      .getWillsByBeneficiary(beneficiary)
+      .getWillsByBeneficiary(beneficiary, { signal: controller.signal })
       .then((wills) => {
         if (!cancelled) {
           const resolvedWills = Array.isArray(wills) ? wills : (wills as { wills?: Will[] }).wills ?? [];
@@ -177,6 +182,7 @@ export function useWillsByBeneficiary(
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [client, beneficiary, fetchKey]);
 

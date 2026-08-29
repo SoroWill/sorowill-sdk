@@ -1,7 +1,12 @@
 import Str from '@ledgerhq/hw-app-str';
 import { StrKey, TransactionBuilder } from '@stellar/stellar-sdk';
 
+import { SignTransactionTimeoutError } from '../errors';
+
 import type { SignTransactionOptions, WalletAdapter, WalletConnection } from './types';
+
+/** Default timeout (ms) for a Ledger signTransaction call. */
+const DEFAULT_SIGN_TIMEOUT_MS = 120_000;
 
 export interface LedgerTransport {
   close?(): Promise<void>;
@@ -18,6 +23,14 @@ export interface LedgerWalletAdapterOptions {
   derivationPath?: string;
   network?: string;
   networkPassphrase: string;
+  /**
+   * Milliseconds to wait for the on-device confirmation before rejecting with
+   * {@link SignTransactionTimeoutError}. Defaults to 120000. The Ledger promise
+   * stays pending until the user physically approves or rejects on the device,
+   * so a host that sets this should also surface a "waiting for device
+   * confirmation — cancel?" affordance while the call is in flight.
+   */
+  timeoutMs?: number;
   /** Test seam for a mocked Ledger Stellar application. */
   app?: LedgerStellarApp;
 }
@@ -70,12 +83,30 @@ export class LedgerWalletAdapter implements WalletAdapter {
   ): Promise<string> {
     const publicKey = await this.getPublicKey();
     const transaction = TransactionBuilder.fromXDR(transactionXdr, options.networkPassphrase);
+    const timeoutMs = this.options.timeoutMs ?? DEFAULT_SIGN_TIMEOUT_MS;
 
     // The Ledger promise remains pending while the device displays transaction
-    // details. This method therefore cannot resolve before physical approval.
+    // details and cannot resolve before physical approval. Race it against a
+    // timer so a walked-away user, a mid-approval disconnect, or a confirmation
+    // that never comes rejects the caller instead of hanging forever (#154).
     const signatureBase = Buffer.from(transaction.signatureBase());
-    const { signature } = await this.app.signTransaction(this.derivationPath, signatureBase);
-    transaction.addSignature(publicKey, signature.toString('base64'));
-    return transaction.toXDR();
+    let timeoutHandle: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(
+        () => reject(new SignTransactionTimeoutError(timeoutMs)),
+        timeoutMs,
+      );
+    });
+
+    try {
+      const { signature } = await Promise.race([
+        this.app.signTransaction(this.derivationPath, signatureBase),
+        timeoutPromise,
+      ]);
+      transaction.addSignature(publicKey, signature.toString('base64'));
+      return transaction.toXDR();
+    } finally {
+      clearTimeout(timeoutHandle!);
+    }
   }
 }
