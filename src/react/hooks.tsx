@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { SoroWillClient } from '../SoroWillClient';
 import type { SoroWillClientOptions } from '../SoroWillClient';
@@ -13,13 +13,16 @@ export interface UseQueryResult<T> {
 }
 
 function useSoroWillClient(options: SoroWillClientOptions): SoroWillClient {
-  const clientRef = useRef<SoroWillClient | null>(null);
+  const client = useMemo(
+    () => new SoroWillClient(options),
+    [options.network, options.contractId],
+  );
 
-  if (clientRef.current === null) {
-    clientRef.current = new SoroWillClient(options);
-  }
+  useEffect(() => {
+    return () => client.destroy();
+  }, [client]);
 
-  return clientRef.current;
+  return client;
 }
 
 /**
@@ -112,8 +115,7 @@ export function useWillsByOwner(
       .getWillsByOwner(owner, { signal: controller.signal })
       .then((wills) => {
         if (!cancelled) {
-          const resolvedWills = Array.isArray(wills) ? wills : (wills as { wills?: Will[] }).wills ?? [];
-          setData(resolvedWills);
+          setData(wills);
           setLoading(false);
         }
       })
@@ -168,8 +170,7 @@ export function useWillsByBeneficiary(
       .getWillsByBeneficiary(beneficiary, { signal: controller.signal })
       .then((wills) => {
         if (!cancelled) {
-          const resolvedWills = Array.isArray(wills) ? wills : (wills as { wills?: Will[] }).wills ?? [];
-          setData(resolvedWills);
+          setData(wills);
           setLoading(false);
         }
       })
