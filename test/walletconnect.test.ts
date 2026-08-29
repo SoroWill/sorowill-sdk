@@ -95,4 +95,59 @@ describe('WalletConnectAdapter', () => {
     expect(connection.publicKey).toBe('GABC123');
     expect(await adapter.getPublicKey()).toBe('GABC123');
   });
+
+  it('clears cached session state even when disconnect fails', async () => {
+    const session = makeSession('topic-3');
+    const store = new MemoryWalletConnectSessionStore();
+    const client: WalletConnectClient = {
+      async connect() {
+        return {
+          async approval() {
+            return session;
+          },
+        };
+      },
+      async disconnect() {
+        throw new Error('disconnect failed');
+      },
+      async getSession(topic) {
+        return topic === session.topic ? session : null;
+      },
+      async request<T>() {
+        return 'SIGNED_XDR' as T;
+      },
+    };
+
+    const adapter = new WalletConnectAdapter(client, { sessionStore: store });
+    await adapter.connect();
+    await expect(adapter.disconnect()).rejects.toThrow('disconnect failed');
+    await expect(adapter.isConnected()).resolves.toBe(false);
+  });
+
+  it('parses default network and public key from the stored session', async () => {
+    const store = new MemoryWalletConnectSessionStore();
+    await store.setSessionTopic('topic-4');
+    const session = makeSession('topic-4');
+    const client: WalletConnectClient = {
+      async connect() {
+        throw new Error('unused');
+      },
+      async disconnect() {
+        return;
+      },
+      async getSession(topic) {
+        return topic === session.topic ? session : null;
+      },
+      async request<T>() {
+        return { signedTxXdr: 'SIGNED_XDR' } as T;
+      },
+    };
+
+    const adapter = new WalletConnectAdapter(client, { sessionStore: store });
+    await expect(adapter.reconnect()).resolves.toEqual({
+      publicKey: 'GABC123',
+      network: 'testnet',
+      networkPassphrase: 'Test SDF Network ; September 2015',
+    });
+  });
 });
