@@ -351,6 +351,12 @@ describe('HookManager', () => {
 });
 
 describe('ReadCache', () => {
+  it('builds stable cache keys regardless of argument order', () => {
+    expect(
+      createReadCacheKey('get_will', { owner: 'GOWNER', willId: '1' }),
+    ).toBe(createReadCacheKey('get_will', { willId: '1', owner: 'GOWNER' }));
+  });
+
   it('returns cached values before expiry', () => {
     let now = 1_000;
     const cache = new ReadCache({ ttlMs: 500, now: () => now });

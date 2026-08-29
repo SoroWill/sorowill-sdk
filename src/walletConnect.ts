@@ -256,16 +256,18 @@ export class WalletConnectAdapter implements WalletAdapter {
   }
 
   async disconnect(): Promise<void> {
-    if (this.session) {
-      await this.client.disconnect({
-        topic: this.session.topic,
-        reason: this.options.disconnectReason ?? DEFAULT_DISCONNECT_REASON,
-      });
+    try {
+      if (this.session) {
+        await this.client.disconnect({
+          topic: this.session.topic,
+          reason: this.options.disconnectReason ?? DEFAULT_DISCONNECT_REASON,
+        });
+      }
+    } finally {
+      this.session = null;
+      this.connection = null;
+      await this.sessionStore.clearSessionTopic();
     }
-
-    this.session = null;
-    this.connection = null;
-    await this.sessionStore.clearSessionTopic();
   }
 
   async getPublicKey(): Promise<string> {
