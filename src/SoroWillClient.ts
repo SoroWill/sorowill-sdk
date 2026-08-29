@@ -320,6 +320,15 @@ interface RawWill {
 
 const DEFAULT_POLL_ATTEMPTS = 30;
 
+/**
+ * How long `subscribeToEvents` waits for a WebSocket to fire `onopen` before
+ * giving up and falling back to HTTP polling. Guards against a server that
+ * accepts the TCP/TLS connection but never completes the WebSocket handshake
+ * (and never fires `onopen`, `onerror`, or `onclose`), which would otherwise
+ * leave the returned promise pending forever.
+ */
+const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS = 10_000;
+
 const DEFAULT_RETRY_OPTIONS: RpcRetryOptions = {
   maxAttempts: 1,
   initialDelayMs: 200,
@@ -384,6 +393,28 @@ function mapWillList(raw: unknown): Will[] {
     );
   }
   return raw.map(mapWill);
+}
+
+// === Beneficiary scale conversion
+
+/**
+ * The SDK's public `Beneficiary.percentage` is on a 0-100 scale, but the
+ * deployed contract's `Beneficiary` struct stores `basis_points` (0-10,000,
+ * where 1 bp = 0.01%) and its `distribute()` divides each share by 10,000.
+ * Multiplying by this factor converts an SDK percentage into the contract's
+ * basis-point representation, so a 30% share binds on-chain as
+ * `basis_points = 3000` rather than `30`.
+ */
+const PERCENT_TO_BASIS_POINTS = 100;
+
+/** Maps SDK beneficiaries (0-100 `percentage`) to the contract's `{ address, basis_points }` shape. */
+function toContractBeneficiaries(
+  beneficiaries: Beneficiary[],
+): Array<{ address: string; basis_points: number }> {
+  return beneficiaries.map((beneficiary) => ({
+    address: beneficiary.address,
+    basis_points: beneficiary.percentage * PERCENT_TO_BASIS_POINTS,
+  }));
 }
 
 /**
@@ -719,7 +750,7 @@ export class SoroWillClient {
         owner,
         token: params.token,
         amount: validateAmount(params.amount),
-        beneficiaries: params.beneficiaries,
+        beneficiaries: toContractBeneficiaries(params.beneficiaries),
         checkin_period_days: validateDays(params.checkinPeriodDays, 'checkinPeriodDays'),
         grace_period_days: validateDays(params.gracePeriodDays, 'gracePeriodDays'),
         guardians: params.guardians,
@@ -856,7 +887,7 @@ export class SoroWillClient {
     const owner = await this.getWalletPublicKey();
     const { txHash } = await this.invoke(
       'update_beneficiaries',
-      { will_id: BigInt(params.willId), owner, beneficiaries: params.beneficiaries },
+      { will_id: BigInt(params.willId), owner, beneficiaries: toContractBeneficiaries(params.beneficiaries) },
       options,
     );
     return { txHash };
@@ -1217,6 +1248,33 @@ export class SoroWillClient {
       let settled = false;
       let closed = false;
 
+      const connectTimeoutMs =
+        options.websocketConnectTimeoutMs ?? DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS;
+      let connectTimer: ReturnType<typeof setTimeout> | undefined;
+      const clearConnectTimer = (): void => {
+        if (connectTimer !== undefined) {
+          clearTimeout(connectTimer);
+          connectTimer = undefined;
+        }
+      };
+      if (Number.isFinite(connectTimeoutMs) && connectTimeoutMs > 0) {
+        connectTimer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          try {
+            socket.close();
+          } catch {
+            // Best-effort close on a socket that never finished connecting.
+          }
+          options.onError?.(
+            new Error(
+              `SoroWill event WebSocket did not open within ${connectTimeoutMs}ms; falling back to polling.`,
+            ),
+          );
+          resolve(this.startPollingSubscription(listener, options));
+        }, connectTimeoutMs);
+      }
+
       const subscription: EventSubscription = {
         transport: 'websocket',
         get closed() {
@@ -1225,6 +1283,7 @@ export class SoroWillClient {
         close: () => {
           if (closed) return;
           closed = true;
+          clearConnectTimer();
           try {
             socket.close();
           } catch {
@@ -1236,6 +1295,7 @@ export class SoroWillClient {
       socket.onopen = () => {
         if (settled) return;
         settled = true;
+        clearConnectTimer();
         socket.send(
           JSON.stringify({
             type: 'subscribe',
@@ -1264,6 +1324,7 @@ export class SoroWillClient {
           return;
         }
         settled = true;
+        clearConnectTimer();
         try {
           socket.close();
         } catch {
@@ -1274,6 +1335,10 @@ export class SoroWillClient {
 
       socket.onclose = () => {
         closed = true;
+        if (settled) return;
+        settled = true;
+        clearConnectTimer();
+        resolve(this.startPollingSubscription(listener, options));
       };
     });
   }
