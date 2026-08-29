@@ -61,6 +61,7 @@ import { HookManager } from './hooks';
 import type { BeforeInvokeContext, AfterInvokeContext } from './hooks';
 import { assertPreparedTransactionMatchesIntendedOperation } from './txValidation';
 import { DebugLogger } from './debugLogger';
+import { InFlightTracker } from './inFlightTracker';
 
 type ScVal = xdr.ScVal;
 
@@ -523,6 +524,7 @@ export class SoroWillClient {
   private readonly debugLogger: DebugLogger;
   private readonly autoFeeBumpOnTimeout: boolean;
   private readonly transactionTimeoutSeconds: number;
+  private readonly inFlightTracker = new InFlightTracker();
 
   constructor(options: SoroWillClientOptions) {
     const config = NETWORK_CONFIG[options.network];
@@ -1427,6 +1429,13 @@ export class SoroWillClient {
     args: Record<string, unknown>,
     options?: RequestOptions,
   ): Promise<{ txHash: string; createdAt: number; returnValue: ScVal | undefined; events?: Array<{ topics: string[]; data: unknown }> }> {
+    const willId = args.will_id === undefined ? undefined : String(args.will_id);
+    const run = async (): Promise<{
+      txHash: string;
+      createdAt: number;
+      returnValue: ScVal | undefined;
+      events?: Array<{ topics: string[]; data: unknown }>;
+    }> => {
     // Run beforeInvoke hooks
     const beforeCtx: BeforeInvokeContext = {
       method,
@@ -1444,7 +1453,7 @@ export class SoroWillClient {
 
     try {
       const spec = await this.getSpec(options);
-      this.debugLogger.logOperationBuild(method, String(args.will_id ?? ''));
+      this.debugLogger.logOperationBuild(method, willId);
 
       const operation = this.contract.call(method, ...spec.funcArgsToScVals(method, args));
       const result = await this.submit([operation], method, options);
@@ -1453,7 +1462,7 @@ export class SoroWillClient {
 
       this.debugLogger.logSuccess(
         method,
-        String(args.will_id ?? ''),
+        willId,
         txHash,
         Date.now() - startTime,
       );
@@ -1471,7 +1480,7 @@ export class SoroWillClient {
       return result;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
-      this.debugLogger.logError(method, String(args.will_id ?? ''), err instanceof Error ? err : String(err));
+      this.debugLogger.logError(method, willId, err instanceof Error ? err : String(err));
       throw err;
     } finally {
       if (error) {
@@ -1486,6 +1495,16 @@ export class SoroWillClient {
         await this.hooks.runAfterInvoke(afterCtx);
       }
     }
+    };
+
+    return willId === undefined
+      ? run()
+      : this.inFlightTracker.track(willId, method, run) as Promise<{
+          txHash: string;
+          createdAt: number;
+          returnValue: ScVal | undefined;
+          events?: Array<{ topics: string[]; data: unknown }>;
+        }>;
   }
 
   /** Builds, signs, submits, and polls a set of operations as one transaction. */
@@ -1523,7 +1542,7 @@ export class SoroWillClient {
       // prepareTransaction simulates and assembles Soroban data for the whole transaction.
       options?.signal?.throwIfAborted();
       const prepared = await this.rpc(() => this.server.prepareTransaction(builtTx), options);
-      this.debugLogger.logSimulation(label);
+      this.debugLogger.logSimulation(label, undefined, prepared.minResourceFee);
 
       const signedTxXdr = await this.wallet.signTransaction(prepared.toXDR(), {
         networkPassphrase: this.networkPassphrase,
@@ -1540,7 +1559,7 @@ export class SoroWillClient {
 
       options?.signal?.throwIfAborted();
       const sendResponse = await this.rpc(() => this.server.sendTransaction(signedTx), options);
-      this.debugLogger.logSubmission(label, '', sendResponse.hash);
+      this.debugLogger.logSubmission(label, undefined, sendResponse.hash);
 
       // Handle distinct sendTransaction statuses per the Soroban RPC spec.
       if (sendResponse.status === 'ERROR') {
@@ -1573,7 +1592,7 @@ export class SoroWillClient {
       } catch (pollError) {
         // If poll times out and auto fee-bump is enabled, retry with higher fee
         if (this.autoFeeBumpOnTimeout) {
-          this.debugLogger.logPoll(label, '');
+          this.debugLogger.logPoll(label);
 
           const feeBumpFee = (BigInt(BASE_FEE) * BigInt(operations.length) * BigInt(2)).toString();
           const feeBumpBuilder = new TransactionBuilder(account, {
@@ -1616,7 +1635,7 @@ export class SoroWillClient {
             });
           }
 
-          this.debugLogger.logSubmission(label, '', feeBumpResponse.hash);
+          this.debugLogger.logSubmission(label, undefined, feeBumpResponse.hash);
 
           txResponse = await this.waitForTransaction(feeBumpResponse.hash, options);
         } else {
