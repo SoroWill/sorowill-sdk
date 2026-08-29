@@ -1,5 +1,4 @@
 import {
-  BASE_FEE,
   Keypair,
   Networks,
   Transaction,
@@ -12,6 +11,13 @@ import type { SoroWillNetwork } from './SoroWillClient';
 interface NetworkConfig {
   rpcUrl: string;
   networkPassphrase: string;
+}
+
+interface SendTransactionErrorResponse {
+  status: string;
+  hash?: string;
+  diagnosticEventsXdr?: string;
+  errorResultXdr?: string;
 }
 
 const NETWORK_CONFIG: Record<SoroWillNetwork, NetworkConfig> = {
@@ -111,7 +117,15 @@ export async function submitFeeBumpTransaction(
 
   const sendResponse = await server.sendTransaction(feeBumpTx);
   if (sendResponse.status === 'ERROR') {
-    throw new Error(`Fee-bump transaction submission failed`);
+    const errorResponse = sendResponse as SendTransactionErrorResponse;
+    const diagnosticInfo = errorResponse.diagnosticEventsXdr ?
+      ` (diagnostics: ${errorResponse.diagnosticEventsXdr})` : '';
+    const errorDetail = errorResponse.errorResultXdr ?
+      ` (error: ${errorResponse.errorResultXdr})` : '';
+    throw new Error(
+      `Fee-bump transaction submission failed${diagnosticInfo}${errorDetail}`,
+      { cause: sendResponse }
+    );
   }
 
   const txResponse = await server.pollTransaction(sendResponse.hash, { attempts: 30 });
@@ -142,11 +156,20 @@ export async function submitFeeBump(options: {
   const keypair = Keypair.fromSecret(options.feeSourceSecretKey);
   const publicKey = keypair.publicKey();
 
+  let fee = options.fee;
+  if (!fee) {
+    const innerTx = TransactionBuilder.fromXDR(
+      options.innerTransactionXdr,
+      config.networkPassphrase,
+    ) as Transaction;
+    fee = innerTx.fee;
+  }
+
   const feeBumpXdr = await buildFeeBumpXdr({
     network: options.network,
     innerTransactionXdr: options.innerTransactionXdr,
     feeSourcePublicKey: publicKey,
-    fee: options.fee ?? BASE_FEE,
+    fee,
   });
 
   const signedXdr = signFeeBumpXdr(feeBumpXdr, options.feeSourceSecretKey, config.networkPassphrase);

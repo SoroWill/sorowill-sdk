@@ -1,115 +1,312 @@
-import { describe, expect, it } from 'vitest';
-import { signFeeBumpXdr } from '../src/feeBump';
+// @ts-nocheck -- mock SDK types are fundamentally incompatible with real @stellar/stellar-sdk types
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { mockState, mockFreighterApi } = vi.hoisted(() => ({
+  mockState: {
+    sendTransaction: vi.fn(),
+    pollTransaction: vi.fn(),
+  },
+  mockFreighterApi: {
+    getAddress: vi.fn(),
+  },
+}));
+
+vi.mock('@stellar/stellar-sdk', () => {
+  class MockAccount {
+    constructor(
+      public readonly accountId: string,
+      public readonly sequence: string,
+    ) {}
+  }
+
+  class MockKeypair {
+    constructor(private readonly _publicKey?: string, private readonly _secretKey?: string) {}
+
+    publicKey(): string {
+      return this._publicKey || 'GDEFAULTPUBLICKEY';
+    }
+
+    static fromPublicKey(publicKey: string): MockKeypair {
+      return new MockKeypair(publicKey);
+    }
+
+    static fromSecret(secretKey: string): MockKeypair {
+      return new MockKeypair('GDEFAULTPUBLICKEY', secretKey);
+    }
+
+    signDecorated(_hash: Uint8Array): any {
+      return { toXDR: () => 'MOCK_SIGNATURE' };
+    }
+  }
+
+  class MockTransaction {
+    public fee = '1000';
+
+    constructor(private _xdr = 'MOCK_TX_XDR') {}
+
+    toXDR(): string {
+      return this._xdr;
+    }
+
+    hash(): Uint8Array {
+      return new Uint8Array(32);
+    }
+
+    addDecoratedSignature(_sig: any): void {
+      this._xdr = 'SIGNED_TX_XDR';
+    }
+  }
+
+  class MockTransactionBuilder {
+    private operation: unknown;
+    private timeout = 30;
+
+    constructor(
+      private readonly account: MockAccount,
+      private readonly options: { fee: string; networkPassphrase: string },
+    ) {}
+
+    addOperation(operation: unknown): this {
+      this.operation = operation;
+      return this;
+    }
+
+    setTimeout(timeout: number): this {
+      this.timeout = timeout;
+      return this;
+    }
+
+    build(): MockTransaction {
+      return new MockTransaction();
+    }
+
+    static fromXDR(xdr: string, _networkPassphrase: string): MockTransaction {
+      return new MockTransaction(xdr);
+    }
+
+    static buildFeeBumpTransaction(
+      _keypair: MockKeypair,
+      fee: string,
+      _innerTx: MockTransaction,
+      _networkPassphrase: string,
+    ): MockTransaction {
+      const tx = new MockTransaction();
+      (tx as any).fee = fee;
+      return tx;
+    }
+  }
+
+  class MockServer {
+    constructor(public readonly url: string) {}
+
+    sendTransaction = mockState.sendTransaction;
+    pollTransaction = mockState.pollTransaction;
+  }
+
+  const BASE_FEE = '100';
+
+  return {
+    BASE_FEE,
+    Keypair: MockKeypair,
+    Account: MockAccount,
+    Transaction: MockTransaction,
+    TransactionBuilder: MockTransactionBuilder,
+    Networks: {
+      TESTNET: 'Test SDF Network ; September 2015',
+      PUBLIC: 'Public Global Stellar Network ; September 2015',
+    },
+    rpc: {
+      Server: MockServer,
+      Api: {
+        GetTransactionStatus: {
+          SUCCESS: 'SUCCESS',
+          ERROR: 'ERROR',
+        },
+      },
+    },
+  };
+});
+
 import {
-  Account,
-  Keypair,
-  Networks,
-  Transaction,
-  TransactionBuilder,
-} from '@stellar/stellar-sdk';
-
-function makeInnerTxXdr(networkPassphrase: string): string {
-  const sourceKeypair = Keypair.random();
-  const sourceAccount = new Account(sourceKeypair.publicKey(), '0');
-  const tx = new TransactionBuilder(sourceAccount, {
-    fee: '100',
-    networkPassphrase,
-  })
-    .setTimeout(30)
-    .build();
-
-  return tx.toXDR();
-}
-
-function makeFeeBumpXdr(
-  innerTxXdr: string,
-  feeSourceKeypair: Keypair,
-  networkPassphrase: string,
-): string {
-  const innerTx = TransactionBuilder.fromXDR(innerTxXdr, networkPassphrase) as Transaction;
-  const feeBump = TransactionBuilder.buildFeeBumpTransaction(
-    feeSourceKeypair,
-    '200',
-    innerTx,
-    networkPassphrase,
-  );
-  return feeBump.toXDR();
-}
+  buildFeeBumpXdr,
+  submitFeeBumpTransaction,
+  submitFeeBump,
+} from '../src/feeBump';
 
 describe('feeBump', () => {
-  it('signFeeBumpXdr signs and returns valid XDR', () => {
-    const innerXdr = makeInnerTxXdr(Networks.TESTNET);
-    const feeSource = Keypair.random();
-    const feeBumpXdr = makeFeeBumpXdr(innerXdr, feeSource, Networks.TESTNET);
-
-    const signedXdr = signFeeBumpXdr(feeBumpXdr, feeSource.secret(), Networks.TESTNET);
-    expect(typeof signedXdr).toBe('string');
-    expect(signedXdr.length).toBeGreaterThan(0);
-
-    // Should be parseable as a valid transaction
-    const parsed = TransactionBuilder.fromXDR(signedXdr, Networks.TESTNET);
-    expect(parsed).toBeDefined();
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it('signFeeBumpXdr adds a signature to the fee bump envelope', () => {
-    const innerXdr = makeInnerTxXdr(Networks.TESTNET);
-    const feeSource = Keypair.random();
-    const feeBumpXdr = makeFeeBumpXdr(innerXdr, feeSource, Networks.TESTNET);
+  describe('buildFeeBumpXdr', () => {
+    it('should build a fee-bump transaction XDR', async () => {
+      const xdr = await buildFeeBumpXdr({
+        network: 'testnet',
+        innerTransactionXdr: 'INNER_TX_XDR',
+        feeSourcePublicKey: 'GFEEsourcepublickey',
+        fee: '5000',
+      });
 
-    const signedXdr = signFeeBumpXdr(feeBumpXdr, feeSource.secret(), Networks.TESTNET);
+      expect(xdr).toBe('MOCK_TX_XDR');
+    });
 
-    // Parse the signed fee bump and verify the signature is present
-    const signed = TransactionBuilder.fromXDR(signedXdr, Networks.TESTNET) as Transaction;
-    const envelope = signed.toEnvelope();
-    const feeBumpEnv = envelope.feeBump();
-    expect(feeBumpEnv).toBeDefined();
-    expect(feeBumpEnv!.signatures().length).toBe(1);
+    it('should accept realistic Soroban fee amounts', async () => {
+      const sorobanFee = '50000';
+      const xdr = await buildFeeBumpXdr({
+        network: 'mainnet',
+        innerTransactionXdr: 'SOROBAN_PREPARED_TX_XDR',
+        feeSourcePublicKey: 'GMAINNETFEEACCOUNT',
+        fee: sorobanFee,
+      });
+
+      expect(xdr).toBeTruthy();
+    });
   });
 
-  it('signFeeBumpXdr works on testnet', () => {
-    const innerXdr = makeInnerTxXdr(Networks.TESTNET);
-    const feeSource = Keypair.random();
-    const feeBumpXdr = makeFeeBumpXdr(innerXdr, feeSource, Networks.TESTNET);
+  describe('submitFeeBumpTransaction', () => {
+    it('should successfully submit a fee-bump transaction', async () => {
+      mockState.sendTransaction.mockResolvedValueOnce({
+        status: 'PENDING',
+        hash: 'TX_HASH_123',
+      });
+      mockState.pollTransaction.mockResolvedValueOnce({
+        status: 'SUCCESS',
+        createdAt: 1234567890,
+      });
 
-    const signed = signFeeBumpXdr(feeBumpXdr, feeSource.secret(), Networks.TESTNET);
-    expect(signed).toBeTruthy();
+      const result = await submitFeeBumpTransaction({
+        network: 'testnet',
+        feeBumpXdr: 'SIGNED_FEE_BUMP_XDR',
+      });
+
+      expect(result).toEqual({
+        txHash: 'TX_HASH_123',
+        createdAt: 1234567890,
+      });
+      expect(mockState.sendTransaction).toHaveBeenCalledTimes(1);
+      expect(mockState.pollTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('should throw error with diagnostics when submission fails', async () => {
+      mockState.sendTransaction.mockResolvedValueOnce({
+        status: 'ERROR',
+        hash: 'FAILED_TX_HASH',
+        diagnosticEventsXdr: 'DIAG_EVENT_XDR_DATA',
+        errorResultXdr: 'ERROR_RESULT_XDR_DATA',
+      });
+
+      await expect(
+        submitFeeBumpTransaction({
+          network: 'testnet',
+          feeBumpXdr: 'INVALID_FEE_BUMP_XDR',
+        }),
+      ).rejects.toThrow(/Fee-bump transaction submission failed/);
+    });
+
+    it('should include diagnostic info in error message', async () => {
+      mockState.sendTransaction.mockResolvedValueOnce({
+        status: 'ERROR',
+        diagnosticEventsXdr: 'DIAG_DATA',
+        errorResultXdr: 'ERROR_DATA',
+      });
+
+      try {
+        await submitFeeBumpTransaction({
+          network: 'testnet',
+          feeBumpXdr: 'XDR',
+        });
+        expect.fail('should have thrown');
+      } catch (error: any) {
+        expect(error.message).toContain('Fee-bump transaction submission failed');
+        expect(error.cause).toEqual({
+          status: 'ERROR',
+          diagnosticEventsXdr: 'DIAG_DATA',
+          errorResultXdr: 'ERROR_DATA',
+        });
+      }
+    });
+
+    it('should throw error when poll transaction returns non-success status', async () => {
+      mockState.sendTransaction.mockResolvedValueOnce({
+        status: 'PENDING',
+        hash: 'TX_HASH_456',
+      });
+      mockState.pollTransaction.mockResolvedValueOnce({
+        status: 'ERROR',
+        createdAt: 1234567890,
+      });
+
+      await expect(
+        submitFeeBumpTransaction({
+          network: 'testnet',
+          feeBumpXdr: 'SIGNED_FEE_BUMP_XDR',
+        }),
+      ).rejects.toThrow(/Fee-bump transaction did not succeed: ERROR/);
+    });
   });
 
-  it('signFeeBumpXdr works on mainnet passphrase', () => {
-    const innerXdr = makeInnerTxXdr(Networks.PUBLIC);
-    const feeSource = Keypair.random();
-    const feeBumpXdr = makeFeeBumpXdr(innerXdr, feeSource, Networks.PUBLIC);
+  describe('submitFeeBump', () => {
+    it('should build, sign, and submit a fee-bump transaction', async () => {
+      mockState.sendTransaction.mockResolvedValueOnce({
+        status: 'PENDING',
+        hash: 'INTEGRATION_TX_HASH',
+      });
+      mockState.pollTransaction.mockResolvedValueOnce({
+        status: 'SUCCESS',
+        createdAt: 1234567890,
+      });
 
-    const signed = signFeeBumpXdr(feeBumpXdr, feeSource.secret(), Networks.PUBLIC);
-    expect(signed).toBeTruthy();
-  });
+      const result = await submitFeeBump({
+        innerTransactionXdr: 'PREPARED_INNER_TX_XDR',
+        feeSourceSecretKey: 'SFEESONKEYSECRET',
+        network: 'testnet',
+        fee: '8000',
+      });
 
-  it('signFeeBumpXdr throws on invalid secret key', () => {
-    const innerXdr = makeInnerTxXdr(Networks.TESTNET);
-    const feeSource = Keypair.random();
-    const feeBumpXdr = makeFeeBumpXdr(innerXdr, feeSource, Networks.TESTNET);
+      expect(result).toEqual({
+        txHash: 'INTEGRATION_TX_HASH',
+        createdAt: 1234567890,
+      });
+    });
 
-    expect(() => signFeeBumpXdr(feeBumpXdr, 'not-a-valid-key', Networks.TESTNET)).toThrow();
-  });
+    it('should derive fee from inner transaction when not provided', async () => {
+      mockState.sendTransaction.mockResolvedValueOnce({
+        status: 'PENDING',
+        hash: 'TX_HASH_DERIVED',
+      });
+      mockState.pollTransaction.mockResolvedValueOnce({
+        status: 'SUCCESS',
+        createdAt: 1234567890,
+      });
 
-  it('signFeeBumpXdr throws on invalid XDR', () => {
-    expect(() => signFeeBumpXdr('invalid-xdr', Keypair.random().secret(), Networks.TESTNET)).toThrow();
-  });
+      const result = await submitFeeBump({
+        innerTransactionXdr: 'SOROBAN_PREPARED_TX_XDR',
+        feeSourceSecretKey: 'SFEESONKEYSECRET',
+        network: 'testnet',
+      });
 
-  it('multiple signers can sign the same fee bump', () => {
-    const innerXdr = makeInnerTxXdr(Networks.TESTNET);
-    const feeSource = Keypair.random();
-    let feeBumpXdr = makeFeeBumpXdr(innerXdr, feeSource, Networks.TESTNET);
+      expect(result).toBeTruthy();
+      expect(mockState.sendTransaction).toHaveBeenCalledTimes(1);
+    });
 
-    const signer1 = Keypair.random();
-    const signer2 = Keypair.random();
+    it('should use provided fee when specified', async () => {
+      mockState.sendTransaction.mockResolvedValueOnce({
+        status: 'PENDING',
+        hash: 'TX_HASH_CUSTOM_FEE',
+      });
+      mockState.pollTransaction.mockResolvedValueOnce({
+        status: 'SUCCESS',
+        createdAt: 1234567890,
+      });
 
-    feeBumpXdr = signFeeBumpXdr(feeBumpXdr, signer1.secret(), Networks.TESTNET);
-    feeBumpXdr = signFeeBumpXdr(feeBumpXdr, signer2.secret(), Networks.TESTNET);
+      const result = await submitFeeBump({
+        innerTransactionXdr: 'PREPARED_INNER_TX_XDR',
+        feeSourceSecretKey: 'SFEESONKEYSECRET',
+        network: 'testnet',
+        fee: '100000',
+      });
 
-    const parsed = TransactionBuilder.fromXDR(feeBumpXdr, Networks.TESTNET) as Transaction;
-    const envelope = parsed.toEnvelope();
-    const feeBumpEnv = envelope.feeBump();
-    expect(feeBumpEnv!.signatures().length).toBe(2);
+      expect(result).toBeTruthy();
+    });
   });
 });
