@@ -242,12 +242,29 @@ const CONTRACT_ERRORS: Readonly<Record<number, ContractErrorConstructor>> = {
   12: TooManyBeneficiariesError,
 };
 
-function errorText(error: unknown): string {
+function errorText(
+  error: unknown,
+  seen = new WeakSet<object>(),
+  depth = 0,
+): string {
+  if (depth >= 5) {
+    return '[error depth limit reached]';
+  }
   if (error instanceof Error) {
-    return `${error.message} ${error.cause === undefined ? '' : errorText(error.cause)}`;
+    if (seen.has(error)) {
+      return error.message;
+    }
+    seen.add(error);
+    return `${error.message} ${error.cause === undefined ? '' : errorText(error.cause, seen, depth + 1)}`;
   }
   if (typeof error === 'string') {
     return error;
+  }
+  if (error && typeof error === 'object') {
+    if (seen.has(error)) {
+      return '[circular error object]';
+    }
+    seen.add(error);
   }
   try {
     return JSON.stringify(error);
