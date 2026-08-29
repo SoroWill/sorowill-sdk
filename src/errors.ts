@@ -537,6 +537,24 @@ export class SoroWillRestoreRequiredError extends SoroWillError {
   }
 }
 
+/**
+ * Raised when {@link SoroWillClient.subscribeToEvents} is called with
+ * `{ transport: 'websocket' }` but the client was not constructed with both
+ * `webSocketFactory` and `eventStreamUrl`. Thrown instead of silently
+ * downgrading to polling, since an explicit `'websocket'` request implies the
+ * caller relies on WebSocket-specific behavior (e.g. push latency).
+ */
+export class WebSocketNotConfiguredError extends SoroWillError {
+  constructor(options?: ErrorOptions) {
+    super(
+      'transport: "websocket" was requested but this client was not configured with ' +
+        'both webSocketFactory and eventStreamUrl. Configure both, or use transport: "auto" ' +
+        'to allow falling back to polling.',
+      options,
+    );
+  }
+}
+
 /** Converts a Soroban contract error code embedded in an RPC error into its typed SDK error. */
 export function mapContractError(error: unknown): Error {
   if (error instanceof WillContractError || error instanceof RequestTimeoutError) {

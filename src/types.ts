@@ -5,7 +5,7 @@
  * **IMPORTANT**: These values must be kept in sync manually with the
  * contract repo until the spec-drift tooling proposed there exists.
  *
- * @see {@link https://github.com/SoroWill/contracts/blob/main/src/errors.rs}
+ * @see {@link https://github.com/SoroWill/sorowill-contracts/blob/main/src/errors.rs}
  */
 export enum WillErrorCode {
   /** The will was not found. */
@@ -212,7 +212,13 @@ export interface EventSubscriptionOptions {
   pageSize?: number;
   /** Polling interval when the polling transport is used. */
   pollIntervalMs?: number;
-  /** Force a specific transport, or auto-negotiate with WebSocket fallback. */
+  /**
+   * Force a specific transport, or auto-negotiate with WebSocket fallback.
+   * `'websocket'` requires the client to be configured with both
+   * `webSocketFactory` and `eventStreamUrl` — unlike `'auto'`, it throws
+   * `WebSocketNotConfiguredError` rather than silently falling back to
+   * polling when they aren't.
+   */
   transport?: 'auto' | EventSubscriptionTransport;
   /**
    * How long to wait for the WebSocket to open before falling back to HTTP

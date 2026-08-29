@@ -1,3 +1,5 @@
+import { StrKey } from '@stellar/stellar-sdk';
+
 import type { Beneficiary, Will } from './types';
 import { WillStatus } from './types';
 
@@ -44,7 +46,12 @@ export function toStroops(usdc: string): bigint {
   const negative = cleaned.startsWith('-');
   const unsigned = negative ? cleaned.slice(1) : cleaned;
   const [wholePart = '', fractionPart = ''] = unsigned.split('.');
-  const paddedFraction = (fractionPart + '0'.repeat(USDC_DECIMALS)).slice(0, USDC_DECIMALS);
+  if (fractionPart.length > USDC_DECIMALS) {
+    throw new Error(
+      `Invalid USDC amount: "${usdc}" has more than ${USDC_DECIMALS} fractional digits, which would silently lose precision.`,
+    );
+  }
+  const paddedFraction = fractionPart.padEnd(USDC_DECIMALS, '0');
 
   const whole = BigInt(wholePart === '' ? '0' : wholePart);
   const fraction = BigInt(paddedFraction === '' ? '0' : paddedFraction);
@@ -145,6 +152,9 @@ export function validateBeneficiaries(beneficiaries: Beneficiary[]): boolean {
   if (beneficiaries.length === 0 || beneficiaries.length > MAX_BENEFICIARIES) {
     return false;
   }
+  if (!beneficiaries.every((b) => StrKey.isValidEd25519PublicKey(b.address))) {
+    return false;
+  }
   if (!beneficiaries.every((b) => Number.isInteger(b.percentage) && b.percentage > 0)) {
     return false;
   }
@@ -229,8 +239,9 @@ export function getNextActionableState(
 }
 /**
  * Validates a guardian list: empty list is valid (guardians are optional),
- * at most {@link MAX_GUARDIANS} entries, no duplicate addresses, and no
- * owner address in the list.
+ * at most {@link MAX_GUARDIANS} entries, every address (including the
+ * optional `ownerAddress`) is a syntactically valid Stellar public key, no
+ * duplicate addresses, and no owner address in the list.
  *
  * @param guardians - The list of guardian addresses to validate.
  * @param ownerAddress - Optional owner address; when supplied, the function
@@ -238,6 +249,12 @@ export function getNextActionableState(
  */
 export function validateGuardians(guardians: string[], ownerAddress?: string): boolean {
   if (guardians.length > MAX_GUARDIANS) {
+    return false;
+  }
+  if (!guardians.every((address) => StrKey.isValidEd25519PublicKey(address))) {
+    return false;
+  }
+  if (ownerAddress !== undefined && !StrKey.isValidEd25519PublicKey(ownerAddress)) {
     return false;
   }
   const unique = new Set(guardians);

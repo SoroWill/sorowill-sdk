@@ -52,6 +52,7 @@ import {
   SoroWillRestoreRequiredError,
   TooManyGuardiansError,
   WalletNetworkMismatchError,
+  WebSocketNotConfiguredError,
 } from './errors';
 import { MAX_GUARDIANS, validateBeneficiaries } from './utils';
 import { RequestQueue } from './requestQueue';
@@ -85,7 +86,7 @@ export type SoroWillNetwork = 'testnet' | 'mainnet';
  * explicitly to the `SoroWillClient` constructor rather than relying on this
  * default.
  *
- * @see https://github.com/SoroWill/contracts/tree/main/deployments
+ * @see https://github.com/SoroWill/sorowill-contracts/tree/main/deployments
  */
 export const DEFAULT_CONTRACT_IDS: Record<SoroWillNetwork, string> = {
   testnet: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
@@ -688,7 +689,7 @@ export class SoroWillClient {
    * `overrides` until a new SDK version is published with the updated
    * address. Track redeployments in the contracts repo's
    * `deployments/` directory:
-   * https://github.com/SoroWill/contracts/tree/main/deployments
+   * https://github.com/SoroWill/sorowill-contracts/tree/main/deployments
    *
    * @param network - The target Stellar network (`'testnet'` or `'mainnet'`).
    * @param overrides - Any `SoroWillClientOptions` to merge on top of the
@@ -1265,7 +1266,10 @@ export class SoroWillClient {
    * `webSocketFactory` and `eventStreamUrl`) when both are configured,
    * automatically falling back to HTTP polling (via `fetch` and
    * `eventRpcUrl`) if the WebSocket connection fails to open. Pass
-   * `{ transport: 'polling' }` to skip WebSocket entirely.
+   * `{ transport: 'polling' }` to skip WebSocket entirely, or
+   * `{ transport: 'websocket' }` to require it — this throws
+   * {@link WebSocketNotConfiguredError} instead of silently falling back to
+   * polling if `webSocketFactory`/`eventStreamUrl` aren't configured.
    *
    * @returns A handle that can be used to close the subscription.
    */
@@ -1277,6 +1281,9 @@ export class SoroWillClient {
     const canUseWebSocket = wantsWebSocket && !!this.webSocketFactory && !!this.eventStreamUrl;
 
     if (!canUseWebSocket) {
+      if (options.transport === 'websocket') {
+        throw new WebSocketNotConfiguredError();
+      }
       return this.startPollingSubscription(listener, options);
     }
 

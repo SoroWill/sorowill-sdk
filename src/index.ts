@@ -137,6 +137,7 @@ export {
   TooManyWillsError,
   TransactionSubmissionError,
   WalletNetworkMismatchError,
+  WebSocketNotConfiguredError,
   WillContractError,
   WillNotActiveError,
   WillNotBothActiveError,
