@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { getNextActionableState, isBeneficiary, isGuardian } from '../src/utils';
+import { calculateShares, getNextActionableState, isBeneficiary, isGuardian, tagOnChainOrder } from '../src/utils';
 import { WillStatus, type Will } from '../src/types';
 
 function makeWill(overrides: Partial<Will> = {}): Will {
@@ -52,6 +52,37 @@ describe('isBeneficiary', () => {
   it('returns false for an address not in the beneficiaries list', () => {
     const will = makeWill({ beneficiaries: [{ address: 'GBEN_A', percentage: 100 }] });
     expect(isBeneficiary(will, 'GUNRELATED')).toBe(false);
+  });
+});
+
+describe('tagOnChainOrder', () => {
+  it('tags each beneficiary with its original on-chain index', () => {
+    const beneficiaries = [
+      { address: 'GBEN_B', percentage: 40 },
+      { address: 'GBEN_A', percentage: 60 },
+    ];
+
+    const tagged = tagOnChainOrder(beneficiaries);
+    expect(tagged).toEqual([
+      { address: 'GBEN_B', percentage: 40, onChainIndex: 0 },
+      { address: 'GBEN_A', percentage: 60, onChainIndex: 1 },
+    ]);
+  });
+
+  it('lets callers sort a display copy while still recovering the on-chain order for calculateShares', () => {
+    const onChainOrder = [
+      { address: 'GBEN_B', percentage: 40 },
+      { address: 'GBEN_A', percentage: 60 },
+    ];
+
+    const displayOrder = [...tagOnChainOrder(onChainOrder)].sort((a, b) =>
+      a.address.localeCompare(b.address),
+    );
+    const restoredOnChainOrder = [...displayOrder].sort((a, b) => a.onChainIndex - b.onChainIndex);
+
+    expect(calculateShares('100', restoredOnChainOrder)).toEqual(
+      calculateShares('100', onChainOrder),
+    );
   });
 });
 
@@ -148,5 +179,25 @@ describe('getNextActionableState', () => {
     expect(state.canCheckIn).toBe(false);
     expect(state.canCancel).toBe(false);
     expect(state.canGuardianVote).toBe(false);
+  });
+
+  it('evaluates the grace period against an injected trusted time instead of a skewed local clock', () => {
+    const triggerTime = new Date('2026-01-01T00:00:00Z');
+    const will = makeWill({ status: WillStatus.Triggered, gracePeriodDays: 7, triggerTime });
+
+    // The local wall clock is skewed far into the future, past the real
+    // grace deadline, but a trusted `now` still within the grace period
+    // (e.g. derived from the RPC server's ledger close time) is passed in.
+    const skewedLocalClock = new Date('2026-06-01T00:00:00Z');
+    const trustedNow = new Date('2026-01-03T00:00:00Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(skewedLocalClock);
+    try {
+      const state = getNextActionableState(will, 'GOWNER', trustedNow);
+      expect(state.canEmergencyCheckIn).toBe(true);
+      expect(state.canRelease).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

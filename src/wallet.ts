@@ -1,6 +1,21 @@
-import freighterApi from '@stellar/freighter-api';
+import type FreighterApi from '@stellar/freighter-api';
 
 import { FreighterInstallCheckError, SignTransactionTimeoutError } from './errors';
+
+/**
+ * `@stellar/freighter-api` is an optional peer dependency — consumers who
+ * only use Albedo, Ledger, WalletConnect, or a custom {@link WalletAdapter}
+ * are not required to install it. Importing it lazily (only when a
+ * `FreighterWalletAdapter` method actually runs) keeps the SDK's main entry
+ * point importable without it installed.
+ */
+let freighterApiPromise: Promise<typeof FreighterApi> | undefined;
+function loadFreighterApi(): Promise<typeof FreighterApi> {
+  if (!freighterApiPromise) {
+    freighterApiPromise = import('@stellar/freighter-api').then((mod) => mod.default);
+  }
+  return freighterApiPromise;
+}
 
 /** Default timeout (ms) for a wallet signTransaction call. */
 const DEFAULT_SIGN_TIMEOUT_MS = 120_000;
@@ -110,6 +125,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
    * silently treated as "not installed".
    */
   async isConnected(): Promise<boolean> {
+    const freighterApi = await loadFreighterApi();
     const { isConnected, error } = await freighterApi.isConnected();
     if (error) {
       if (error.code === FREIGHTER_NOT_INSTALLED_CODE) {
@@ -121,6 +137,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
   }
 
   async connect(): Promise<WalletConnection> {
+    const freighterApi = await loadFreighterApi();
     const access = await freighterApi.requestAccess();
     if (access.error) {
       throw new Error(access.error.message);
@@ -140,6 +157,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
 
   async reconnect(): Promise<WalletConnection> {
     const publicKey = await this.getPublicKey();
+    const freighterApi = await loadFreighterApi();
     const networkDetails = await freighterApi.getNetworkDetails();
     if (networkDetails?.error) {
       throw new Error(networkDetails.error.message);
@@ -158,6 +176,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
 
   /** Reports the network Freighter is currently set to, without prompting the user. */
   async getNetwork(): Promise<{ network: string; networkPassphrase: string }> {
+    const freighterApi = await loadFreighterApi();
     const networkDetails = await freighterApi.getNetworkDetails();
     if (networkDetails?.error) {
       throw new Error(networkDetails.error.message);
@@ -169,6 +188,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
   }
 
   async getPublicKey(): Promise<string> {
+    const freighterApi = await loadFreighterApi();
     const { address, error } = await freighterApi.getAddress();
     if (error) {
       throw new Error(error.message);
@@ -184,6 +204,10 @@ export class FreighterWalletAdapter implements WalletAdapter {
     opts: { networkPassphrase: string; timeoutMs?: number },
   ): Promise<string> {
     const timeoutMs = opts.timeoutMs ?? DEFAULT_SIGN_TIMEOUT_MS;
+    // Kicked off synchronously (not awaited yet) so the timeout below is
+    // still registered before this function's first `await`, regardless of
+    // how long the dynamic import takes to resolve.
+    const freighterApiPromise = loadFreighterApi();
 
     // Race the Freighter call against a timer so that a hung or dismissed
     // popup never leaves the caller's promise pending indefinitely (#154).
@@ -197,9 +221,11 @@ export class FreighterWalletAdapter implements WalletAdapter {
 
     try {
       const { signedTxXdr, error } = await Promise.race([
-        freighterApi.signTransaction(transactionXdr, {
-          networkPassphrase: opts.networkPassphrase,
-        }),
+        freighterApiPromise.then((freighterApi) =>
+          freighterApi.signTransaction(transactionXdr, {
+            networkPassphrase: opts.networkPassphrase,
+          }),
+        ),
         timeoutPromise,
       ]);
       if (error) {

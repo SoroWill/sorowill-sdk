@@ -1,5 +1,4 @@
 import {
-  BASE_FEE,
   Keypair,
   Networks,
   Transaction,
@@ -12,6 +11,13 @@ import type { SoroWillNetwork } from './SoroWillClient';
 interface NetworkConfig {
   rpcUrl: string;
   networkPassphrase: string;
+}
+
+interface SendTransactionErrorResponse {
+  status: string;
+  hash?: string;
+  diagnosticEventsXdr?: string;
+  errorResultXdr?: string;
 }
 
 const NETWORK_CONFIG: Record<SoroWillNetwork, NetworkConfig> = {
@@ -43,6 +49,8 @@ export interface SubmitFeeBumpOptions {
   network: SoroWillNetwork;
   /** The base64-encoded XDR of the signed fee-bump transaction. */
   feeBumpXdr: string;
+  /** The maximum number of attempts to poll for transaction confirmation. Defaults to 30. */
+  pollAttempts?: number;
 }
 
 /**
@@ -111,10 +119,19 @@ export async function submitFeeBumpTransaction(
 
   const sendResponse = await server.sendTransaction(feeBumpTx);
   if (sendResponse.status === 'ERROR') {
-    throw new Error(`Fee-bump transaction submission failed`);
+    const errorResponse = sendResponse as SendTransactionErrorResponse;
+    const diagnosticInfo = errorResponse.diagnosticEventsXdr ?
+      ` (diagnostics: ${errorResponse.diagnosticEventsXdr})` : '';
+    const errorDetail = errorResponse.errorResultXdr ?
+      ` (error: ${errorResponse.errorResultXdr})` : '';
+    throw new Error(
+      `Fee-bump transaction submission failed${diagnosticInfo}${errorDetail}`,
+      { cause: sendResponse }
+    );
   }
 
-  const txResponse = await server.pollTransaction(sendResponse.hash, { attempts: 30 });
+  const pollAttempts = options.pollAttempts ?? 30;
+  const txResponse = await server.pollTransaction(sendResponse.hash, { attempts: pollAttempts });
   if (txResponse.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
     throw new Error(`Fee-bump transaction did not succeed: ${txResponse.status}`);
   }
@@ -131,28 +148,44 @@ export async function submitFeeBumpTransaction(
  * @param options.innerTransactionXdr - Prepared inner transaction XDR (unsigned, after `server.prepareTransaction()`).
  * @param options.feeSourceSecretKey - Secret key of the fee sponsor account.
  * @param options.network - Stellar network to use.
+ * @param options.pollAttempts - Maximum number of attempts to poll for transaction confirmation. Defaults to 30.
  */
 export async function submitFeeBump(options: {
   innerTransactionXdr: string;
   feeSourceSecretKey: string;
   network: SoroWillNetwork;
   fee?: string;
+  pollAttempts?: number;
 }): Promise<{ txHash: string; createdAt: number }> {
   const config = NETWORK_CONFIG[options.network];
   const keypair = Keypair.fromSecret(options.feeSourceSecretKey);
   const publicKey = keypair.publicKey();
 
+  let fee = options.fee;
+  if (!fee) {
+    const innerTx = TransactionBuilder.fromXDR(
+      options.innerTransactionXdr,
+      config.networkPassphrase,
+    ) as Transaction;
+    fee = innerTx.fee;
+  }
+
   const feeBumpXdr = await buildFeeBumpXdr({
     network: options.network,
     innerTransactionXdr: options.innerTransactionXdr,
     feeSourcePublicKey: publicKey,
-    fee: options.fee ?? BASE_FEE,
+    fee,
   });
 
   const signedXdr = signFeeBumpXdr(feeBumpXdr, options.feeSourceSecretKey, config.networkPassphrase);
 
-  return submitFeeBumpTransaction({
+  const submitOptions: SubmitFeeBumpOptions = {
     network: options.network,
     feeBumpXdr: signedXdr,
-  });
+  };
+  if (options.pollAttempts !== undefined) {
+    submitOptions.pollAttempts = options.pollAttempts;
+  }
+
+  return submitFeeBumpTransaction(submitOptions);
 }

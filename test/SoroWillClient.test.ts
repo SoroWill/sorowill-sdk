@@ -169,6 +169,7 @@ vi.mock('@stellar/stellar-sdk', () => {
 
 import { SoroWillClient } from '../src/SoroWillClient';
 import { WillStatus, WillErrorCode, type EventSubscription, type SoroWillEvent } from '../src/types';
+import { WebSocketNotConfiguredError } from '../src/errors';
 
 function rawWill(id: number): {
   balance: bigint;
@@ -377,6 +378,17 @@ describe('SoroWillClient', () => {
     expect(seen.map((event) => event.id)).toEqual(['evt-1']);
   });
 
+  it('throws WebSocketNotConfiguredError when transport: "websocket" is explicitly requested but unconfigured', async () => {
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CCONTRACT',
+    });
+
+    await expect(
+      client.subscribeToEvents(() => {}, { transport: 'websocket' }),
+    ).rejects.toThrow(WebSocketNotConfiguredError);
+  });
+
   it('skips WASM fetch when specJson is provided', async () => {
     const client = new SoroWillClient({
       network: 'testnet',
@@ -542,4 +554,3 @@ describe('SoroWillClient', () => {
     }
   });
 });
-

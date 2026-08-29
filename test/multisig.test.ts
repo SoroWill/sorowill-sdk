@@ -1,4 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import {
+  Account,
+  Keypair,
+  Networks,
+  TransactionBuilder,
+} from '@stellar/stellar-sdk';
 import { MultisigCollector } from '../src/multisig';
 
 const SAMPLE_TX_XDR = 'AAAAAgAAAADAAAAAAAAAAQAAAAAAAAAYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB2UJH0AAAAAE5AUdAAAAAA';
@@ -114,5 +120,36 @@ describe('MultisigCollector', () => {
     const sigs = c.signatures;
     expect(sigs.length).toBe(1);
     expect(sigs[0]).toEqual({ signerPublicKey: 'GABC', signature: 'sig1' });
+  });
+
+  it('builds a fee-bump-wrapped transaction with collected signatures', () => {
+    const signer = Keypair.random();
+    const feeSource = Keypair.random();
+    const innerTransaction = new TransactionBuilder(new Account(signer.publicKey(), '0'), {
+      fee: '100',
+      networkPassphrase: Networks.TESTNET,
+    })
+      .setTimeout(30)
+      .build();
+    const feeBumpTransaction = TransactionBuilder.buildFeeBumpTransaction(
+      feeSource,
+      '200',
+      innerTransaction,
+      Networks.TESTNET,
+    );
+    const collector = new MultisigCollector({
+      transactionXdr: feeBumpTransaction.toXDR(),
+      networkPassphrase: Networks.TESTNET,
+      threshold: 1,
+    });
+
+    collector.addSignature(
+      signer.publicKey(),
+      signer.signDecorated(innerTransaction.hash()).toXDR('base64'),
+    );
+
+    const built = collector.build();
+    const builtEnvelope = built.toEnvelope();
+    expect(builtEnvelope.feeBump().tx().innerTx().v1().signatures()).toHaveLength(1);
   });
 });
