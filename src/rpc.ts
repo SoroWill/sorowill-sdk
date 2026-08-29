@@ -2,12 +2,7 @@ import { rpc } from '@stellar/stellar-sdk';
 import type { SoroWillRpcServer } from './SoroWillClient';
 
 export function isRetryableRpcConnectionError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  return [
+  const CONNECTION_FRAGMENTS = [
     'fetch failed',
     'network error',
     'failed to fetch',
@@ -18,7 +13,34 @@ export function isRetryableRpcConnectionError(error: unknown): boolean {
     'enotfound',
     'econnreset',
     'connect',
-  ].some((fragment) => message.includes(fragment));
+  ];
+
+  const matches = (text: string): boolean => {
+    const lower = text.toLowerCase();
+    return CONNECTION_FRAGMENTS.some((fragment) => lower.includes(fragment));
+  };
+
+  if (error instanceof Error) {
+    return matches(error.message);
+  }
+
+  // Plain strings (some runtimes throw strings directly)
+  if (typeof error === 'string') {
+    return matches(error);
+  }
+
+  // DOMException and DOMException-like objects ({ name, message })
+  if (typeof error === 'object' && error !== null) {
+    const obj = error as Record<string, unknown>;
+    if (typeof obj['message'] === 'string' && matches(obj['message'])) {
+      return true;
+    }
+    if (typeof obj['name'] === 'string' && matches(obj['name'])) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export class RpcEndpointPool {

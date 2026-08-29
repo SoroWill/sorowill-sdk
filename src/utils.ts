@@ -87,6 +87,11 @@ export function isCheckinDue(will: Will): boolean {
  * (see `fn distribute` — integer division with remainder assigned to the
  * last beneficiary). Keep this implementation in sync with any changes to
  * that contract function.
+ *
+ * `beneficiary.percentage` is the SDK's 0-100 value. The contract works in
+ * basis points (`percentage * 100`) and divides by 10,000, which is
+ * arithmetically identical to dividing by 100 here, so the split matches
+ * on-chain distribution exactly.
  */
 export function calculateShares(
   balance: string,
@@ -136,9 +141,12 @@ export const MAX_GUARDIANS = 3;
 
 /**
  * Validates that a beneficiary list is well-formed: non-empty, at most
- * {@link MAX_BENEFICIARIES} entries, every `address` is a syntactically
- * valid Stellar public key, every percentage is a positive integer, and
- * percentages sum to exactly 100.
+ * {@link MAX_BENEFICIARIES} entries, every percentage is a positive
+ * integer, and percentages sum to exactly 100.
+ *
+ * Percentages are on the SDK's 0-100 scale. `SoroWillClient` scales them to
+ * the contract's basis points (summing to 10,000) when it submits a
+ * transaction.
  */
 export function validateBeneficiaries(beneficiaries: Beneficiary[]): boolean {
   if (beneficiaries.length === 0 || beneficiaries.length > MAX_BENEFICIARIES) {
@@ -184,11 +192,33 @@ export interface NextActionableState {
  * check in; triggering and releasing are permissionless once their
  * on-chain preconditions are met; and guardians may vote for an early
  * release at any point before the will is released or cancelled.
+ *
+ * PendingConfirmation: the will exists but is not yet active, so no
+ * owner actions are available until it transitions to Active.
+ *
+ * Settled: the will is fully closed; no further actions are possible.
  */
 export function getNextActionableState(
   will: Will,
   connectedAddress: string,
 ): NextActionableState {
+  // Terminal / pre-active states with no available actions
+  if (
+    will.status === WillStatus.PendingConfirmation ||
+    will.status === WillStatus.Released ||
+    will.status === WillStatus.Cancelled ||
+    will.status === WillStatus.Settled
+  ) {
+    return {
+      canCheckIn: false,
+      canTrigger: false,
+      canEmergencyCheckIn: false,
+      canRelease: false,
+      canCancel: false,
+      canGuardianVote: false,
+    };
+  }
+
   const isOwner = will.owner === connectedAddress;
   const isWillGuardian = isGuardian(will, connectedAddress);
 
