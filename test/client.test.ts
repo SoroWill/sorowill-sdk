@@ -5,6 +5,7 @@ import { ReadCache } from '../src/cache';
 import { RpcEndpointPool } from '../src/rpc';
 import { buildSep7TxUri, parseSep7Callback } from '../src/sep7';
 import { assertPreparedTransactionMatchesIntendedOperation } from '../src/txValidation';
+import { unsubscribeFromWillEvents } from '../src/events';
 import {
   MAX_BENEFICIARIES,
   MAX_GUARDIANS,
@@ -338,6 +339,26 @@ describe('HookManager', () => {
     const ctx: AfterInvokeContext = { method: 'test', args: { a: 1 }, timestamp: '', txHash: 'abc', error: null, durationMs: 42 };
     await hm.runAfterInvoke(ctx);
     expect(captured).toBe(ctx);
+  });
+});
+
+describe('unsubscribeFromWillEvents', () => {
+  it('accepts function subscriptions', () => {
+    let calls = 0;
+    unsubscribeFromWillEvents(() => {
+      calls += 1;
+    });
+    expect(calls).toBe(1);
+  });
+
+  it('accepts object subscriptions', () => {
+    let calls = 0;
+    unsubscribeFromWillEvents({
+      unsubscribe() {
+        calls += 1;
+      },
+    });
+    expect(calls).toBe(1);
   });
 });
 
