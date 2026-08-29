@@ -35,6 +35,13 @@ export abstract class InjectedWalletAdapter implements WalletAdapter {
     if (this.provider.isConnected) {
       return this.provider.isConnected();
     }
+    if (this.connection && this.provider.getPublicKey) {
+      try {
+        await this.provider.getPublicKey();
+      } catch {
+        this.connection = null;
+      }
+    }
     return this.connection !== null;
   }
 
@@ -59,4 +66,3 @@ export abstract class InjectedWalletAdapter implements WalletAdapter {
     return typeof result === 'string' ? result : result.signedTxXdr;
   }
 }
-
