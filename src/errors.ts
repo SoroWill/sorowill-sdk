@@ -516,6 +516,32 @@ export class InvalidCursorError extends SoroWillError {
   }
 }
 
+export class InvalidPaginationOptionsError extends SoroWillError {
+  readonly option: string;
+  readonly value: number | undefined;
+
+  constructor(option: string, value: number | undefined, options?: ErrorOptions) {
+    super(`${option} must be a positive integer`, options);
+    this.option = option;
+    this.value = value;
+  }
+}
+
+export class InvalidDayCountError extends SoroWillError {
+  readonly paramName: string;
+  readonly value: number;
+
+  constructor(paramName: string, value: number, options?: ErrorOptions) {
+    super(
+      `"${paramName}" must be a positive integer (received ${value}). ` +
+        `Fractional or non-positive day counts are not supported.`,
+      options,
+    );
+    this.paramName = paramName;
+    this.value = value;
+  }
+}
+
 /**
  * Raised when a Soroban simulation returns a "restore required" result,
  * indicating that archived/expired ledger entries must be restored via a

@@ -42,8 +42,10 @@ import {
 import {
   AccountNotFundedError,
   BeneficiaryValidationError,
+  InvalidDayCountError,
   InvalidContractIdError,
   InvalidCursorError,
+  InvalidPaginationOptionsError,
   InvokeFailedError,
   mapContractError,
   SimulationError,
@@ -471,7 +473,7 @@ function normalizePositiveInteger(value: number | undefined, label: string): num
     return null;
   }
   if (!Number.isInteger(value) || value <= 0) {
-    throw new Error(`${label} must be a positive integer`);
+    throw new InvalidPaginationOptionsError(label, value);
   }
   return value;
 }
@@ -510,10 +512,7 @@ function validateAmount(amount: string): bigint {
  */
 function validateDays(value: number, paramName: string): bigint {
   if (!Number.isInteger(value) || value <= 0) {
-    throw new SoroWillError(
-      `"${paramName}" must be a positive integer (received ${value}). ` +
-        `Fractional or non-positive day counts are not supported.`,
-    );
+    throw new InvalidDayCountError(paramName, value);
   }
   return BigInt(value);
 }
