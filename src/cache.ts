@@ -246,17 +246,13 @@ export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdap
       return [];
     }
 
-    const keys = JSON.parse(keysJson) as string[];
-    const entries: PersistedCacheEntry[] = [];
-
-    for (const key of keys) {
-      const entryJson = this.storage.getItem(`${this.storageKey}:${key}`);
-      if (entryJson) {
-        entries.push(JSON.parse(entryJson));
-      }
+    try {
+      const parsed = JSON.parse(raw) as PersistedCacheEntry[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      this.storage.removeItem(this.storageKey);
+      return [];
     }
-
-    return entries;
   }
 
   async write(entry: PersistedCacheEntry): Promise<void> {
