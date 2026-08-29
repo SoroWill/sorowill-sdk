@@ -110,6 +110,19 @@ export function calculateShares(
   });
 }
 
+/**
+ * Tags each beneficiary with its index in the on-chain order. Callers who
+ * want to sort or filter beneficiaries for display (e.g. alphabetically)
+ * can sort the tagged copy and still recover the original on-chain order
+ * (by sorting on `onChainIndex`) before passing beneficiaries to
+ * {@link calculateShares}, so the rounding remainder is attributed correctly.
+ */
+export function tagOnChainOrder(
+  beneficiaries: Beneficiary[],
+): Array<Beneficiary & { onChainIndex: number }> {
+  return beneficiaries.map((beneficiary, onChainIndex) => ({ ...beneficiary, onChainIndex }));
+}
+
 /** Formats a `Date` as a human-readable string, e.g. `"Jan 5, 2027, 3:45 PM"`. */
 export function formatDeadline(date: Date): string {
   return new Intl.DateTimeFormat('en-US', {
@@ -201,6 +214,7 @@ export interface NextActionableState {
 export function getNextActionableState(
   will: Will,
   connectedAddress: string,
+  now: Date = new Date(),
 ): NextActionableState {
   // Terminal / pre-active states with no available actions
   if (
@@ -224,7 +238,7 @@ export function getNextActionableState(
 
   const graceDeadlineMs =
     (will.triggerTime?.getTime() ?? 0) + will.gracePeriodDays * 86_400 * 1000;
-  const isGracePeriodExpired = will.triggerTime !== null && Date.now() >= graceDeadlineMs;
+  const isGracePeriodExpired = will.triggerTime !== null && now.getTime() >= graceDeadlineMs;
 
   return {
     canCheckIn: isOwner && will.status === WillStatus.Active,
