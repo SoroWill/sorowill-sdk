@@ -421,6 +421,14 @@ describe('SEP-7 helpers', () => {
       message: undefined,
     });
   });
+
+  it('parses SEP-7 callbacks from raw query strings too', () => {
+    const result = parseSep7Callback('?xdr=SIGNED456&signer=GDEF');
+    expect(result).toEqual({
+      transactionXdr: 'SIGNED456',
+      signerAddress: 'GDEF',
+    });
+  });
 });
 
 describe('pre-sign XDR validation', () => {

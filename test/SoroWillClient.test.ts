@@ -377,6 +377,49 @@ describe('SoroWillClient', () => {
     expect(seen.map((event) => event.id)).toEqual(['evt-1']);
   });
 
+  it('maps event records using the topic alias and fallback contract id', async () => {
+    const seen: SoroWillEvent[] = [];
+    let subscription: EventSubscription | undefined;
+
+    const fetchMock = vi.fn(async () => ({
+      json: async () => ({
+        result: {
+          events: [
+            {
+              id: 'evt-2',
+              pagingToken: '2',
+              ledger: 456,
+              topic: ['guardian_triggered'],
+              value: { will_id: '2' },
+            },
+          ],
+          nextCursor: '2',
+        },
+      }),
+    }));
+
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CCONTRACT',
+      fetch: fetchMock as unknown as typeof fetch,
+      defaultPollIntervalMs: 1,
+    });
+
+    subscription = await client.subscribeToEvents(
+      (event) => {
+        seen.push(event);
+        subscription?.close();
+      },
+      { transport: 'polling', pollIntervalMs: 1 },
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(seen[0]?.topics).toEqual(['guardian_triggered']);
+    expect(seen[0]?.contractId).toBe('CCONTRACT');
+  });
+
   it('skips WASM fetch when specJson is provided', async () => {
     const client = new SoroWillClient({
       network: 'testnet',
@@ -542,4 +585,3 @@ describe('SoroWillClient', () => {
     }
   });
 });
-
