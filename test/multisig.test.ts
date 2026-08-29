@@ -108,6 +108,7 @@ describe('MultisigCollector', () => {
     expect(restored.signatureCount).toBe(1);
     expect(restored.signatures[0]?.signerPublicKey).toBe('GABC');
     expect(restored.threshold).toBe(2);
+    expect(restored.toJSON()).toEqual(json);
   });
 
   it('returns read-only signatures array', () => {

@@ -1269,14 +1269,7 @@ export class SoroWillClient {
       const scArgs = spec.funcArgsToScVals(method, args);
       const operation = this.contract.call(method, ...scArgs);
 
-      const account = new Account(NULL_ACCOUNT, '0');
-      const tx = new TransactionBuilder(account, {
-        fee: BASE_FEE,
-        networkPassphrase: this.networkPassphrase,
-      })
-        .addOperation(operation)
-        .setTimeout(this.transactionTimeoutSeconds)
-        .build();
+      const tx = this.buildInvocationEnvelope([operation], new Account(NULL_ACCOUNT, '0'));
 
       const simulation = await this.rpc(
         () => this.rpcPool.withFailover((server) => server.simulateTransaction(tx)),
@@ -1550,14 +1543,7 @@ export class SoroWillClient {
       const scArgs = spec.funcArgsToScVals(method, args);
       const operation = this.contract.call(method, ...scArgs);
 
-      const account = new Account(NULL_ACCOUNT, '0');
-      const tx = new TransactionBuilder(account, {
-        fee: BASE_FEE,
-        networkPassphrase: this.networkPassphrase,
-      })
-        .addOperation(operation)
-        .setTimeout(this.transactionTimeoutSeconds)
-        .build();
+      const tx = this.buildInvocationEnvelope([operation], new Account(NULL_ACCOUNT, '0'));
 
       const simulation = await this.withRetry(() =>
         this.rpc(
@@ -1980,13 +1966,23 @@ export class SoroWillClient {
 
     const publicKey = sourcePublicKey ?? (await this.getWalletPublicKey());
     const account = await this.rpcPool.withFailover((server) => server.getAccount(publicKey));
-    return new TransactionBuilder(account, {
-      fee: BASE_FEE,
+    return this.buildInvocationEnvelope([operation], account);
+  }
+
+  private buildInvocationEnvelope(
+    operations: readonly xdr.Operation[],
+    account: Account,
+  ): Transaction {
+    const builder = new TransactionBuilder(account, {
+      fee: (BigInt(BASE_FEE) * BigInt(operations.length)).toString(),
       networkPassphrase: this.networkPassphrase,
-    })
-      .addOperation(operation)
-      .setTimeout(this.transactionTimeoutSeconds)
-      .build();
+    });
+
+    for (const operation of operations) {
+      builder.addOperation(operation);
+    }
+
+    return builder.setTimeout(this.transactionTimeoutSeconds).build();
   }
 
   private async prepareInvocation(
