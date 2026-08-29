@@ -232,7 +232,13 @@ export class WalletConnectAdapter implements WalletAdapter {
 
   async reconnect(): Promise<WalletConnection> {
     if (this.session && this.connection) {
-      return this.connection;
+      const freshSession = await this.client.getSession(this.session.topic);
+      if (freshSession) {
+        return this.useSession(freshSession);
+      }
+      this.session = null;
+      this.connection = null;
+      await this.sessionStore.clearSessionTopic();
     }
 
     const topic = await this.sessionStore.getSessionTopic();
