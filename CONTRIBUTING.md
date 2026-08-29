@@ -163,6 +163,31 @@ it('encodes create_will args to the expected ScVal shape', () => {
 Run `npx vitest run --update-snapshots` once to write the initial snapshot,
 then commit it. All subsequent runs will assert against that baseline.
 
+## Soroban sandbox integration tests
+
+`test/soroban-sandbox-integration.test.ts` exercises the full will lifecycle
+against a real deployed Soroban contract rather than a mock. It is skipped
+automatically — not run in CI — unless all three of its required environment
+variables are set:
+
+```bash
+export SOROBAN_SANDBOX_RPC_URL=http://localhost:8000  # optional, defaults to this
+export SOROBAN_CONTRACT_ID=C...       # a deployed SoroWill contract instance
+export SOROBAN_OWNER_ACCOUNT=G...     # funded account used as the will owner
+export SOROBAN_BENEFICIARY_ACCOUNT=G...  # funded account used as a beneficiary
+
+npx vitest run test/soroban-sandbox-integration.test.ts
+```
+
+To run it locally, deploy the SoroWill contract to a local `soroban-cli`
+sandbox (or Futurenet/testnet) using two funded accounts for the owner and
+beneficiary roles, then set the variables above to that deployment before
+running the command. CI does not set these variables, so this suite is
+expected to show as skipped there — see the "Warn if Soroban sandbox
+integration tests are skipped" step in
+[`.github/workflows/test.yml`](./.github/workflows/test.yml) for the
+annotation that surfaces this in each run.
+
 ## Local setup
 
 See the [README](./README.md#installation) for installation and how to run the test suite.

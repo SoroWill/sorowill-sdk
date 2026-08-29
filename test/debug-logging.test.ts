@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { SoroWillClient } from '../src/SoroWillClient';
+import { DebugLogger } from '../src/debugLogger';
 
-describe('Debug Logging - Issue #50: Opt-in structured debug logging', () => {
+describe('DebugLogger', () => {
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -12,32 +12,28 @@ describe('Debug Logging - Issue #50: Opt-in structured debug logging', () => {
     consoleLogSpy.mockRestore();
   });
 
-  it('should not log when debug is false (default)', () => {
-    const client = new SoroWillClient({
-      network: 'testnet',
-      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
-      debug: false,
-    });
-
-    expect(client).toBeDefined();
+  it('does not log when disabled', () => {
+    const logger = new DebugLogger(false);
+    logger.logOperationBuild('create_will', '1');
+    expect(consoleLogSpy).not.toHaveBeenCalled();
   });
 
-  it('should enable structured debug logging when debug option is true', () => {
-    const client = new SoroWillClient({
-      network: 'testnet',
-      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
-      debug: true,
-    });
+  it('logs structured simulation entries when enabled', () => {
+    const logger = new DebugLogger(true);
+    logger.logSimulation('check_in', '7', '1500', { attempt: 1 });
 
-    expect(client).toBeDefined();
+    expect(consoleLogSpy).toHaveBeenCalledTimes(1);
+    expect(consoleLogSpy.mock.calls[0]?.[0]).toContain('"level":"simulation"');
+    expect(consoleLogSpy.mock.calls[0]?.[0]).toContain('"method":"check_in"');
+    expect(consoleLogSpy.mock.calls[0]?.[0]).toContain('"willId":"7"');
   });
 
-  it('should default to debug false for backwards compatibility', () => {
-    const client = new SoroWillClient({
-      network: 'testnet',
-      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
-    });
+  it('logs submission entries with tx hashes', () => {
+    const logger = new DebugLogger(true);
+    logger.logSubmission('trigger_will', '9', 'abc123');
 
-    expect(client).toBeDefined();
+    expect(consoleLogSpy).toHaveBeenCalledTimes(1);
+    expect(consoleLogSpy.mock.calls[0]?.[0]).toContain('"level":"submission"');
+    expect(consoleLogSpy.mock.calls[0]?.[0]).toContain('"txHash":"abc123"');
   });
 });

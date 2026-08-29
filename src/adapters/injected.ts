@@ -35,6 +35,13 @@ export abstract class InjectedWalletAdapter implements WalletAdapter {
     if (this.provider.isConnected) {
       return this.provider.isConnected();
     }
+    if (this.connection && this.provider.getPublicKey) {
+      try {
+        await this.provider.getPublicKey();
+      } catch {
+        this.connection = null;
+      }
+    }
     return this.connection !== null;
   }
 
@@ -52,8 +59,10 @@ export abstract class InjectedWalletAdapter implements WalletAdapter {
     transactionXdr: string,
     options: SignTransactionOptions,
   ): Promise<string> {
+    if (!this.connection) {
+      throw new Error(`${this.name} is not connected. Call connect() first.`);
+    }
     const result = await this.provider.signTransaction(transactionXdr, options);
     return typeof result === 'string' ? result : result.signedTxXdr;
   }
 }
-

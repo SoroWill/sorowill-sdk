@@ -16,6 +16,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
  * - SOROBAN_CONTRACT_ID: Deployed contract ID
  * - SOROBAN_OWNER_ACCOUNT: Test owner account address
  * - SOROBAN_BENEFICIARY_ACCOUNT: Test beneficiary account address
+ *
+ * This suite is not run in CI — see "Soroban sandbox integration tests" in
+ * CONTRIBUTING.md for how to deploy a sandbox and run it locally.
  */
 
 // Sandbox configuration

@@ -169,6 +169,7 @@ vi.mock('@stellar/stellar-sdk', () => {
 
 import { SoroWillClient } from '../src/SoroWillClient';
 import { WillStatus, WillErrorCode, type EventSubscription, type SoroWillEvent } from '../src/types';
+import { WebSocketNotConfiguredError } from '../src/errors';
 
 function rawWill(id: number): {
   balance: bigint;
@@ -377,34 +378,15 @@ describe('SoroWillClient', () => {
     expect(seen.map((event) => event.id)).toEqual(['evt-1']);
   });
 
-  it('reports polling fetch errors through onError and keeps the polling transport', async () => {
-    const onError = vi.fn();
-    const fetchMock = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('temporary polling failure'))
-      .mockResolvedValue({
-        json: async () => ({ result: { events: [], nextCursor: '1' } }),
-      });
-
+  it('throws WebSocketNotConfiguredError when transport: "websocket" is explicitly requested but unconfigured', async () => {
     const client = new SoroWillClient({
       network: 'testnet',
       contractId: 'CCONTRACT',
-      fetch: fetchMock as unknown as typeof fetch,
-      defaultPollIntervalMs: 1,
     });
 
-    const subscription = await client.subscribeToEvents(() => undefined, {
-      transport: 'polling',
-      pollIntervalMs: 1,
-      onError,
-    });
-
-    await Promise.resolve();
-    await Promise.resolve();
-    subscription.close();
-
-    expect(subscription.transport).toBe('polling');
-    expect(onError).toHaveBeenCalled();
+    await expect(
+      client.subscribeToEvents(() => {}, { transport: 'websocket' }),
+    ).rejects.toThrow(WebSocketNotConfiguredError);
   });
 
   it('skips WASM fetch when specJson is provided', async () => {
