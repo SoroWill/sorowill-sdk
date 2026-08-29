@@ -17,6 +17,8 @@ export interface LobstrWalletAdapterOptions {
   openDeepLink?: (deepLink: string) => void;
   /** LOBSTR's WalletConnect deep-link prefix. */
   deepLinkPrefix?: string;
+  /** Maximum time to wait for pairing approval before rejecting. */
+  approvalTimeoutMs?: number;
 }
 
 /**
@@ -30,9 +32,11 @@ export class LobstrWalletAdapter implements WalletAdapter {
   readonly name = 'LOBSTR';
 
   private readonly deepLinkPrefix: string;
+  private readonly approvalTimeoutMs: number;
 
   constructor(private readonly options: LobstrWalletAdapterOptions) {
     this.deepLinkPrefix = options.deepLinkPrefix ?? 'lobstr://wallet-connect?uri=';
+    this.approvalTimeoutMs = options.approvalTimeoutMs ?? 60_000;
   }
 
   async connect(): Promise<WalletConnection> {
@@ -44,7 +48,12 @@ export class LobstrWalletAdapter implements WalletAdapter {
         this.options.openDeepLink(deepLink);
       }
     }
-    return pairing.approval();
+    return Promise.race([
+      pairing.approval(),
+      new Promise<WalletConnection>((_, reject) => {
+        setTimeout(() => reject(new Error('LOBSTR pairing approval timed out')), this.approvalTimeoutMs);
+      }),
+    ]);
   }
 
   disconnect(): Promise<void> {

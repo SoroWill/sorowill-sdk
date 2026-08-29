@@ -69,7 +69,13 @@ const DEFAULT_REQUIRED_NAMESPACES: Record<string, WalletConnectSessionNamespace>
 const DEFAULT_DISCONNECT_REASON = { code: 6000, message: 'Disconnected by client' };
 
 function getFirstAccount(session: WalletConnectSession): string | undefined {
-  for (const namespace of Object.values(session.namespaces ?? {})) {
+  const namespaces = session.namespaces ?? {};
+  const stellarNamespace = namespaces['stellar'];
+  if (stellarNamespace?.accounts?.[0]) {
+    return stellarNamespace.accounts[0];
+  }
+
+  for (const namespace of Object.values(namespaces)) {
     const account = namespace.accounts?.[0];
     if (account) {
       return account;
@@ -226,7 +232,13 @@ export class WalletConnectAdapter implements WalletAdapter {
 
   async reconnect(): Promise<WalletConnection> {
     if (this.session && this.connection) {
-      return this.connection;
+      const freshSession = await this.client.getSession(this.session.topic);
+      if (freshSession) {
+        return this.useSession(freshSession);
+      }
+      this.session = null;
+      this.connection = null;
+      await this.sessionStore.clearSessionTopic();
     }
 
     const topic = await this.sessionStore.getSessionTopic();
@@ -272,9 +284,19 @@ export class WalletConnectAdapter implements WalletAdapter {
     transactionXdr: string,
     opts: { networkPassphrase: string },
   ): Promise<string> {
-    const session = this.session ?? (await this.reconnect(), this.session);
+    if (!this.session) {
+      await this.reconnect();
+    }
+    const session = this.session;
     if (!session) {
       throw new Error('WalletConnect session is not available');
+    }
+
+    const sessionNetwork = this.options.getNetworkFromSession?.(session) ?? getDefaultNetwork(session);
+    if (opts.networkPassphrase !== sessionNetwork.networkPassphrase) {
+      throw new Error(
+        `WalletConnect session is connected to ${sessionNetwork.network} (${sessionNetwork.networkPassphrase}) but transaction is for a different network (${opts.networkPassphrase})`,
+      );
     }
 
     const response = await this.client.request({

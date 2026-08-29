@@ -52,15 +52,18 @@ import {
   SoroWillRestoreRequiredError,
   TooManyGuardiansError,
   WalletNetworkMismatchError,
+  WebSocketNotConfiguredError,
 } from './errors';
 import { MAX_GUARDIANS, validateBeneficiaries } from './utils';
 import { RequestQueue } from './requestQueue';
+import { InFlightTracker } from './inFlightTracker';
 import { RpcEndpointPool } from './rpc';
 import { buildSep7TxUri, type BuildSep7TxUriOptions } from './sep7';
 import { HookManager } from './hooks';
 import type { BeforeInvokeContext, AfterInvokeContext } from './hooks';
 import { assertPreparedTransactionMatchesIntendedOperation } from './txValidation';
 import { DebugLogger } from './debugLogger';
+import { InFlightTracker } from './inFlightTracker';
 
 type ScVal = xdr.ScVal;
 
@@ -84,7 +87,7 @@ export type SoroWillNetwork = 'testnet' | 'mainnet';
  * explicitly to the `SoroWillClient` constructor rather than relying on this
  * default.
  *
- * @see https://github.com/SoroWill/contracts/tree/main/deployments
+ * @see https://github.com/SoroWill/sorowill-contracts/tree/main/deployments
  */
 export const DEFAULT_CONTRACT_IDS: Record<SoroWillNetwork, string> = {
   testnet: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
@@ -320,6 +323,15 @@ interface RawWill {
 
 const DEFAULT_POLL_ATTEMPTS = 30;
 
+/**
+ * How long `subscribeToEvents` waits for a WebSocket to fire `onopen` before
+ * giving up and falling back to HTTP polling. Guards against a server that
+ * accepts the TCP/TLS connection but never completes the WebSocket handshake
+ * (and never fires `onopen`, `onerror`, or `onclose`), which would otherwise
+ * leave the returned promise pending forever.
+ */
+const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS = 10_000;
+
 const DEFAULT_RETRY_OPTIONS: RpcRetryOptions = {
   maxAttempts: 1,
   initialDelayMs: 200,
@@ -365,13 +377,13 @@ function mapWill(raw: unknown): Will {
     owner: raw.owner,
     token: raw.token,
     balance: raw.balance.toString(),
-    beneficiaries: raw.beneficiaries,
+    beneficiaries: [...raw.beneficiaries],
     checkinPeriodDays: Number(raw.checkin_period_days),
     gracePeriodDays: Number(raw.grace_period_days),
     lastCheckin: new Date(Number(raw.last_checkin) * 1000),
     triggerTime: raw.trigger_time === undefined ? null : new Date(Number(raw.trigger_time) * 1000),
     status: raw.status,
-    guardians: raw.guardians,
+    guardians: [...raw.guardians],
     guardianVotes: raw.guardian_votes,
   };
 }
@@ -384,6 +396,28 @@ function mapWillList(raw: unknown): Will[] {
     );
   }
   return raw.map(mapWill);
+}
+
+// === Beneficiary scale conversion
+
+/**
+ * The SDK's public `Beneficiary.percentage` is on a 0-100 scale, but the
+ * deployed contract's `Beneficiary` struct stores `basis_points` (0-10,000,
+ * where 1 bp = 0.01%) and its `distribute()` divides each share by 10,000.
+ * Multiplying by this factor converts an SDK percentage into the contract's
+ * basis-point representation, so a 30% share binds on-chain as
+ * `basis_points = 3000` rather than `30`.
+ */
+const PERCENT_TO_BASIS_POINTS = 100;
+
+/** Maps SDK beneficiaries (0-100 `percentage`) to the contract's `{ address, basis_points }` shape. */
+function toContractBeneficiaries(
+  beneficiaries: Beneficiary[],
+): Array<{ address: string; basis_points: number }> {
+  return beneficiaries.map((beneficiary) => ({
+    address: beneficiary.address,
+    basis_points: beneficiary.percentage * PERCENT_TO_BASIS_POINTS,
+  }));
 }
 
 /**
@@ -515,6 +549,7 @@ export class SoroWillClient {
   private readonly webSocketFactory: ((url: string) => WebSocketLike) | undefined;
   private readonly fetchImpl: FetchImplementation;
   private readonly queue: RequestQueue;
+  private readonly inFlightTracker: InFlightTracker;
   private readonly timeoutMs: number;
   private readonly readCache: ReadCache | undefined;
   private readonly retryOptions: RpcRetryOptions;
@@ -523,6 +558,7 @@ export class SoroWillClient {
   private readonly debugLogger: DebugLogger;
   private readonly autoFeeBumpOnTimeout: boolean;
   private readonly transactionTimeoutSeconds: number;
+  private readonly inFlightTracker = new InFlightTracker();
 
   constructor(options: SoroWillClientOptions) {
     const config = NETWORK_CONFIG[options.network];
@@ -569,6 +605,7 @@ export class SoroWillClient {
         ? {}
         : { requestsPerSecond: options.requestsPerSecond }),
     });
+    this.inFlightTracker = new InFlightTracker();
     this.readCache = options.readCache === false ? undefined : new ReadCache(options.readCache);
     this.retryOptions = { ...DEFAULT_RETRY_OPTIONS, ...options.retry };
     this.debug = options.debug ?? false;
@@ -654,7 +691,7 @@ export class SoroWillClient {
    * `overrides` until a new SDK version is published with the updated
    * address. Track redeployments in the contracts repo's
    * `deployments/` directory:
-   * https://github.com/SoroWill/contracts/tree/main/deployments
+   * https://github.com/SoroWill/sorowill-contracts/tree/main/deployments
    *
    * @param network - The target Stellar network (`'testnet'` or `'mainnet'`).
    * @param overrides - Any `SoroWillClientOptions` to merge on top of the
@@ -719,7 +756,7 @@ export class SoroWillClient {
         owner,
         token: params.token,
         amount: validateAmount(params.amount),
-        beneficiaries: params.beneficiaries,
+        beneficiaries: toContractBeneficiaries(params.beneficiaries),
         checkin_period_days: validateDays(params.checkinPeriodDays, 'checkinPeriodDays'),
         grace_period_days: validateDays(params.gracePeriodDays, 'gracePeriodDays'),
         guardians: params.guardians,
@@ -856,7 +893,7 @@ export class SoroWillClient {
     const owner = await this.getWalletPublicKey();
     const { txHash } = await this.invoke(
       'update_beneficiaries',
-      { will_id: BigInt(params.willId), owner, beneficiaries: params.beneficiaries },
+      { will_id: BigInt(params.willId), owner, beneficiaries: toContractBeneficiaries(params.beneficiaries) },
       options,
     );
     return { txHash };
@@ -920,6 +957,32 @@ export class SoroWillClient {
       returnValue: txResponse.returnValue,
     };
   }
+
+  /**
+   * Proactively check whether the configured RPC endpoint is reachable.
+   * Useful for showing a 'network unavailable' banner before attempting a real call.
+   * Never throws — network failures resolve to `false` rather than propagating an exception.
+   *
+   * @returns `true` if the RPC server is healthy and responding, `false` otherwise.
+   */
+  async isHealthy(): Promise<boolean> {
+    try {
+      // The underlying rpc.Server has a getHealth() method that calls the server's
+      // JSON-RPC getHealth endpoint. We cast to any because our SoroWillRpcServer
+      // interface doesn't include it, but it's available on rpc.Server instances.
+      const server = this.server as unknown as { getHealth(): Promise<unknown> };
+      if (typeof server.getHealth === 'function') {
+        await server.getHealth();
+        return true;
+      }
+      // If getHealth is not available (e.g., custom server implementation), assume healthy
+      return true;
+    } catch {
+      // Network failures, timeouts, or any other errors mean the server is not healthy
+      return false;
+    }
+  }
+
   async getWill(willId: string, options?: RequestOptions): Promise<Will> {
     const cacheKey = createReadCacheKey('get_will', { willId });
     if (this.readCache) {
@@ -1068,44 +1131,78 @@ export class SoroWillClient {
     if (operations.length === 0) {
       throw new RangeError('A batch must contain at least one operation');
     }
-    const spec = await this.getSpec(options);
-    const contractOperations = operations.map(({ method, args }) =>
-      this.contract.call(method, ...spec.funcArgsToScVals(method, args)),
-    );
-
-    // Build a multi-operation transaction manually (batch has its own path
-    // since buildTransaction handles single operations)
-    const publicKey = await this.getWalletPublicKey();
-    const account = await this.rpc(
-      () => this.rpcPool.withFailover((server) => server.getAccount(publicKey)),
-      options,
-    );
-    const builder = new TransactionBuilder(account, {
-      fee: (BigInt(BASE_FEE) * BigInt(contractOperations.length)).toString(),
-      networkPassphrase: this.networkPassphrase,
-    });
-    for (const op of contractOperations) {
-      builder.addOperation(op);
+    const hookContexts = operations.map(({ method, args }) => ({
+      before: {
+        method,
+        args,
+        timestamp: new Date().toISOString(),
+      } satisfies BeforeInvokeContext,
+      startTime: Date.now(),
+    }));
+    for (const { before } of hookContexts) {
+      const proceed = await this.hooks.runBeforeInvoke(before);
+      if (!proceed) {
+        throw new SoroWillError(`SoroWill invocation aborted by beforeInvoke hook for ${before.method}`);
+      }
     }
-    const builtTx = builder.setTimeout(this.transactionTimeoutSeconds).build();
 
-    const prepared = await this.rpc(
-      () => this.rpcPool.withFailover((server) => server.prepareTransaction(builtTx)),
-      options,
-    );
+    let txHash: string | null = null;
+    let error: string | null = null;
+    try {
+      const spec = await this.getSpec(options);
+      const contractOperations = operations.map(({ method, args }) =>
+        this.contract.call(method, ...spec.funcArgsToScVals(method, args)),
+      );
 
-    assertPreparedTransactionMatchesIntendedOperation({
-      intendedTransactionXdr: builtTx.toXDR(),
-      preparedTransactionXdr: prepared.toXDR(),
-      networkPassphrase: this.networkPassphrase,
-      context: 'batch',
-    });
+      // Build a multi-operation transaction manually (batch has its own path
+      // since buildTransaction handles single operations)
+      const publicKey = await this.getWalletPublicKey();
+      const account = await this.rpc(
+        () => this.rpcPool.withFailover((server) => server.getAccount(publicKey)),
+        options,
+      );
+      const builder = new TransactionBuilder(account, {
+        fee: (BigInt(BASE_FEE) * BigInt(contractOperations.length)).toString(),
+        networkPassphrase: this.networkPassphrase,
+      });
+      for (const op of contractOperations) {
+        builder.addOperation(op);
+      }
+      const builtTx = builder.setTimeout(this.transactionTimeoutSeconds).build();
 
-    const signedTxXdr = await this.wallet.signTransaction(prepared.toXDR(), {
-      networkPassphrase: this.networkPassphrase,
-    });
-    const result = await this.submitSignedTransaction(signedTxXdr, options);
-    return { txHash: result.txHash, createdAt: result.createdAt };
+      const prepared = await this.rpc(
+        () => this.rpcPool.withFailover((server) => server.prepareTransaction(builtTx)),
+        options,
+      );
+
+      assertPreparedTransactionMatchesIntendedOperation({
+        intendedTransactionXdr: builtTx.toXDR(),
+        preparedTransactionXdr: prepared.toXDR(),
+        networkPassphrase: this.networkPassphrase,
+        context: 'batch',
+      });
+
+      const signedTxXdr = await this.wallet.signTransaction(prepared.toXDR(), {
+        networkPassphrase: this.networkPassphrase,
+      });
+      const result = await this.submitSignedTransaction(signedTxXdr, options);
+      txHash = result.txHash;
+      return { txHash: result.txHash, createdAt: result.createdAt };
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+      throw err;
+    } finally {
+      for (const { before, startTime } of hookContexts) {
+        await this.hooks.runAfterInvoke({
+          method: before.method,
+          args: before.args,
+          timestamp: new Date().toISOString(),
+          txHash,
+          error,
+          durationMs: Date.now() - startTime,
+        });
+      }
+    }
   }
 
   /**
@@ -1121,7 +1218,14 @@ export class SoroWillClient {
     sourcePublicKey: string,
     options: BuildSep7TxUriOptions,
   ): Promise<string> {
-    const prepared = await this.prepareInvocation(method, args, undefined, sourcePublicKey);
+    const builtTx = await this.buildInvocationTransaction(method, args, sourcePublicKey);
+    const prepared = await this.prepareInvocation(method, args, builtTx, sourcePublicKey);
+    assertPreparedTransactionMatchesIntendedOperation({
+      intendedTransactionXdr: builtTx.toXDR(),
+      preparedTransactionXdr: prepared.toXDR(),
+      networkPassphrase: this.networkPassphrase,
+      context: `buildSep7SigningUri(${method})`,
+    });
     return buildSep7TxUri(prepared.toXDR(), {
       ...options,
       networkPassphrase: options.networkPassphrase ?? this.networkPassphrase,
@@ -1171,7 +1275,10 @@ export class SoroWillClient {
    * `webSocketFactory` and `eventStreamUrl`) when both are configured,
    * automatically falling back to HTTP polling (via `fetch` and
    * `eventRpcUrl`) if the WebSocket connection fails to open. Pass
-   * `{ transport: 'polling' }` to skip WebSocket entirely.
+   * `{ transport: 'polling' }` to skip WebSocket entirely, or
+   * `{ transport: 'websocket' }` to require it — this throws
+   * {@link WebSocketNotConfiguredError} instead of silently falling back to
+   * polling if `webSocketFactory`/`eventStreamUrl` aren't configured.
    *
    * @returns A handle that can be used to close the subscription.
    */
@@ -1183,6 +1290,9 @@ export class SoroWillClient {
     const canUseWebSocket = wantsWebSocket && !!this.webSocketFactory && !!this.eventStreamUrl;
 
     if (!canUseWebSocket) {
+      if (options.transport === 'websocket') {
+        throw new WebSocketNotConfiguredError();
+      }
       return this.startPollingSubscription(listener, options);
     }
 
@@ -1190,6 +1300,33 @@ export class SoroWillClient {
       const socket = this.webSocketFactory!(this.eventStreamUrl!);
       let settled = false;
       let closed = false;
+
+      const connectTimeoutMs =
+        options.websocketConnectTimeoutMs ?? DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS;
+      let connectTimer: ReturnType<typeof setTimeout> | undefined;
+      const clearConnectTimer = (): void => {
+        if (connectTimer !== undefined) {
+          clearTimeout(connectTimer);
+          connectTimer = undefined;
+        }
+      };
+      if (Number.isFinite(connectTimeoutMs) && connectTimeoutMs > 0) {
+        connectTimer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          try {
+            socket.close();
+          } catch {
+            // Best-effort close on a socket that never finished connecting.
+          }
+          options.onError?.(
+            new Error(
+              `SoroWill event WebSocket did not open within ${connectTimeoutMs}ms; falling back to polling.`,
+            ),
+          );
+          resolve(this.startPollingSubscription(listener, options));
+        }, connectTimeoutMs);
+      }
 
       const subscription: EventSubscription = {
         transport: 'websocket',
@@ -1199,6 +1336,7 @@ export class SoroWillClient {
         close: () => {
           if (closed) return;
           closed = true;
+          clearConnectTimer();
           try {
             socket.close();
           } catch {
@@ -1210,6 +1348,7 @@ export class SoroWillClient {
       socket.onopen = () => {
         if (settled) return;
         settled = true;
+        clearConnectTimer();
         socket.send(
           JSON.stringify({
             type: 'subscribe',
@@ -1238,6 +1377,7 @@ export class SoroWillClient {
           return;
         }
         settled = true;
+        clearConnectTimer();
         try {
           socket.close();
         } catch {
@@ -1248,6 +1388,10 @@ export class SoroWillClient {
 
       socket.onclose = () => {
         closed = true;
+        if (settled) return;
+        settled = true;
+        clearConnectTimer();
+        resolve(this.startPollingSubscription(listener, options));
       };
     });
   }
@@ -1313,11 +1457,15 @@ export class SoroWillClient {
     return subscription;
   }
 
-  /** Unsubscribes from any configured event source. */
+  /** Tears down the client: unsubscribes from any event source, aborts all
+   * in-flight tracked operations, and rejects every queued-but-not-yet-started
+   * request so nothing continues running in the background after teardown. */
   destroy(): void {
     if (this.eventSubscription) {
       unsubscribeFromWillEvents(this.eventSubscription);
     }
+    this.inFlightTracker.clear();
+    this.queue.rejectAll(new Error('SoroWillClient destroyed'));
   }
 
   /**
@@ -1427,6 +1575,13 @@ export class SoroWillClient {
     args: Record<string, unknown>,
     options?: RequestOptions,
   ): Promise<{ txHash: string; createdAt: number; returnValue: ScVal | undefined; events?: Array<{ topics: string[]; data: unknown }> }> {
+    const willId = args.will_id === undefined ? undefined : String(args.will_id);
+    const run = async (): Promise<{
+      txHash: string;
+      createdAt: number;
+      returnValue: ScVal | undefined;
+      events?: Array<{ topics: string[]; data: unknown }>;
+    }> => {
     // Run beforeInvoke hooks
     const beforeCtx: BeforeInvokeContext = {
       method,
@@ -1444,7 +1599,7 @@ export class SoroWillClient {
 
     try {
       const spec = await this.getSpec(options);
-      this.debugLogger.logOperationBuild(method, String(args.will_id ?? ''));
+      this.debugLogger.logOperationBuild(method, willId);
 
       const operation = this.contract.call(method, ...spec.funcArgsToScVals(method, args));
       const result = await this.submit([operation], method, options);
@@ -1453,7 +1608,7 @@ export class SoroWillClient {
 
       this.debugLogger.logSuccess(
         method,
-        String(args.will_id ?? ''),
+        willId,
         txHash,
         Date.now() - startTime,
       );
@@ -1471,7 +1626,7 @@ export class SoroWillClient {
       return result;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
-      this.debugLogger.logError(method, String(args.will_id ?? ''), err instanceof Error ? err : String(err));
+      this.debugLogger.logError(method, willId, err instanceof Error ? err : String(err));
       throw err;
     } finally {
       if (error) {
@@ -1486,6 +1641,16 @@ export class SoroWillClient {
         await this.hooks.runAfterInvoke(afterCtx);
       }
     }
+    };
+
+    return willId === undefined
+      ? run()
+      : this.inFlightTracker.track(willId, method, run) as Promise<{
+          txHash: string;
+          createdAt: number;
+          returnValue: ScVal | undefined;
+          events?: Array<{ topics: string[]; data: unknown }>;
+        }>;
   }
 
   /** Builds, signs, submits, and polls a set of operations as one transaction. */
@@ -1523,7 +1688,7 @@ export class SoroWillClient {
       // prepareTransaction simulates and assembles Soroban data for the whole transaction.
       options?.signal?.throwIfAborted();
       const prepared = await this.rpc(() => this.server.prepareTransaction(builtTx), options);
-      this.debugLogger.logSimulation(label);
+      this.debugLogger.logSimulation(label, undefined, prepared.minResourceFee);
 
       const signedTxXdr = await this.wallet.signTransaction(prepared.toXDR(), {
         networkPassphrase: this.networkPassphrase,
@@ -1540,7 +1705,7 @@ export class SoroWillClient {
 
       options?.signal?.throwIfAborted();
       const sendResponse = await this.rpc(() => this.server.sendTransaction(signedTx), options);
-      this.debugLogger.logSubmission(label, '', sendResponse.hash);
+      this.debugLogger.logSubmission(label, undefined, sendResponse.hash);
 
       // Handle distinct sendTransaction statuses per the Soroban RPC spec.
       if (sendResponse.status === 'ERROR') {
@@ -1573,7 +1738,7 @@ export class SoroWillClient {
       } catch (pollError) {
         // If poll times out and auto fee-bump is enabled, retry with higher fee
         if (this.autoFeeBumpOnTimeout) {
-          this.debugLogger.logPoll(label, '');
+          this.debugLogger.logPoll(label);
 
           const feeBumpFee = (BigInt(BASE_FEE) * BigInt(operations.length) * BigInt(2)).toString();
           const feeBumpBuilder = new TransactionBuilder(account, {
@@ -1616,7 +1781,7 @@ export class SoroWillClient {
             });
           }
 
-          this.debugLogger.logSubmission(label, '', feeBumpResponse.hash);
+          this.debugLogger.logSubmission(label, undefined, feeBumpResponse.hash);
 
           txResponse = await this.waitForTransaction(feeBumpResponse.hash, options);
         } else {
@@ -1651,7 +1816,7 @@ export class SoroWillClient {
     args: Record<string, unknown>,
     sourcePublicKey?: string,
   ): Promise<Transaction> {
-    return this.buildInvocationTransaction(method, args, sourcePublicKey);
+    return this.prepareInvocation(method, args, undefined, sourcePublicKey);
   }
 
   async submitSignedTransaction(

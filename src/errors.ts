@@ -226,6 +226,131 @@ export const TooManyBeneficiariesError = defineContractError(
   'TooManyBeneficiaries',
   'Too many beneficiaries or guardians were supplied',
 );
+export const WillNotSettledError = defineContractError(
+  13,
+  'WillNotSettled',
+  'The will must be released or cancelled for this action',
+);
+export const WillNotBothActiveError = defineContractError(
+  14,
+  'WillNotBothActive',
+  'Both wills must be active to merge them',
+);
+export const SameWillIdError = defineContractError(
+  15,
+  'SameWillId',
+  'The same will id was provided for both sides of the merge',
+);
+export const MergeWouldExceedLimitsError = defineContractError(
+  16,
+  'MergeWouldExceedLimits',
+  'Merging would exceed the beneficiary or guardian limits',
+);
+export const OwnerCannotBeGuardianError = defineContractError(
+  17,
+  'OwnerCannotBeGuardian',
+  'The owner cannot be a guardian of their own will',
+);
+export const BeneficiaryNotFoundError = defineContractError(
+  18,
+  'BeneficiaryNotFound',
+  'The beneficiary was not found in the will',
+);
+export const KeeperBountyExceedsMaxError = defineContractError(
+  19,
+  'KeeperBountyExceedsMax',
+  'The keeper bounty exceeds the maximum allowed (100 bps / 1%)',
+);
+export const InvalidGuardianThresholdError = defineContractError(
+  20,
+  'InvalidGuardianThreshold',
+  'The guardian threshold must be between 1 and the number of guardians',
+);
+export const FixedAmountExceedsBalanceError = defineContractError(
+  21,
+  'FixedAmountExceedsBalance',
+  "The fixed-amount allocations exceed the will's balance",
+);
+export const InvalidPercentageError = defineContractError(
+  22,
+  'InvalidPercentage',
+  'A beneficiary percentage is outside the valid range',
+);
+export const WillNotReleasedError = defineContractError(
+  23,
+  'WillNotReleased',
+  'The will must be released for this action',
+);
+export const NotSameOwnerError = defineContractError(
+  24,
+  'NotSameOwner',
+  'Both wills must be owned by the same address to merge them',
+);
+export const InvalidPeriodError = defineContractError(
+  25,
+  'InvalidPeriod',
+  'The check-in or grace period is zero or too large',
+);
+export const DuplicateGuardianError = defineContractError(
+  26,
+  'DuplicateGuardian',
+  'The same guardian address was supplied more than once',
+);
+export const GuardianCooldownActiveError = defineContractError(
+  27,
+  'GuardianCooldownActive',
+  'The guardian-list cooldown has not yet elapsed',
+);
+export const InvalidTokenError = defineContractError(
+  28,
+  'InvalidToken',
+  'The supplied token is not a valid SEP-41 token',
+);
+export const DuplicateBeneficiaryError = defineContractError(
+  29,
+  'DuplicateBeneficiary',
+  'The same beneficiary address was supplied more than once',
+);
+export const WillNotConfirmedError = defineContractError(
+  30,
+  'WillNotConfirmed',
+  'The will is not awaiting confirmation',
+);
+export const ConfirmationWindowExpiredError = defineContractError(
+  31,
+  'ConfirmationWindowExpired',
+  'The confirmation window has expired',
+);
+export const TooManyIdsError = defineContractError(
+  32,
+  'TooManyIds',
+  'Too many will ids were supplied',
+);
+export const InsufficientBalanceError = defineContractError(
+  33,
+  'InsufficientBalance',
+  "The requested split exceeds the will's current balance",
+);
+export const InvalidSplitError = defineContractError(
+  34,
+  'InvalidSplit',
+  'The split beneficiary list is empty or otherwise invalid',
+);
+export const InvalidPreimageError = defineContractError(
+  35,
+  'InvalidPreimage',
+  'The revealed pre-image does not match any stored commitment',
+);
+export const AlreadyClaimedError = defineContractError(
+  36,
+  'AlreadyClaimed',
+  'This hashed beneficiary slot has already been claimed',
+);
+export const TooManyWillsError = defineContractError(
+  37,
+  'TooManyWills',
+  'An owner or beneficiary index is already at its will-count limit',
+);
 
 const CONTRACT_ERRORS: Readonly<Record<number, ContractErrorConstructor>> = {
   1: WillNotFoundError,
@@ -240,6 +365,31 @@ const CONTRACT_ERRORS: Readonly<Record<number, ContractErrorConstructor>> = {
   10: CheckinNotDueError,
   11: ZeroAmountError,
   12: TooManyBeneficiariesError,
+  13: WillNotSettledError,
+  14: WillNotBothActiveError,
+  15: SameWillIdError,
+  16: MergeWouldExceedLimitsError,
+  17: OwnerCannotBeGuardianError,
+  18: BeneficiaryNotFoundError,
+  19: KeeperBountyExceedsMaxError,
+  20: InvalidGuardianThresholdError,
+  21: FixedAmountExceedsBalanceError,
+  22: InvalidPercentageError,
+  23: WillNotReleasedError,
+  24: NotSameOwnerError,
+  25: InvalidPeriodError,
+  26: DuplicateGuardianError,
+  27: GuardianCooldownActiveError,
+  28: InvalidTokenError,
+  29: DuplicateBeneficiaryError,
+  30: WillNotConfirmedError,
+  31: ConfirmationWindowExpiredError,
+  32: TooManyIdsError,
+  33: InsufficientBalanceError,
+  34: InvalidSplitError,
+  35: InvalidPreimageError,
+  36: AlreadyClaimedError,
+  37: TooManyWillsError,
 };
 
 function errorText(error: unknown): string {
@@ -384,6 +534,24 @@ export class SoroWillRestoreRequiredError extends SoroWillError {
   constructor(message: string, simulation: unknown, options?: ErrorOptions) {
     super(message, options);
     this.simulation = simulation;
+  }
+}
+
+/**
+ * Raised when {@link SoroWillClient.subscribeToEvents} is called with
+ * `{ transport: 'websocket' }` but the client was not constructed with both
+ * `webSocketFactory` and `eventStreamUrl`. Thrown instead of silently
+ * downgrading to polling, since an explicit `'websocket'` request implies the
+ * caller relies on WebSocket-specific behavior (e.g. push latency).
+ */
+export class WebSocketNotConfiguredError extends SoroWillError {
+  constructor(options?: ErrorOptions) {
+    super(
+      'transport: "websocket" was requested but this client was not configured with ' +
+        'both webSocketFactory and eventStreamUrl. Configure both, or use transport: "auto" ' +
+        'to allow falling back to polling.',
+      options,
+    );
   }
 }
 

@@ -50,6 +50,13 @@ export function createAlbedoAdapter(): WalletAdapter {
     },
 
     async reconnect(): Promise<WalletConnection> {
+      if (connected && cachedPublicKey) {
+        return {
+          publicKey: cachedPublicKey,
+          network: 'public',
+          networkPassphrase: Networks.PUBLIC,
+        };
+      }
       const { pubkey } = await albedo.publicKey({});
       cachedPublicKey = pubkey;
       connected = true;
@@ -62,6 +69,9 @@ export function createAlbedoAdapter(): WalletAdapter {
     },
 
     async getPublicKey(): Promise<string> {
+      if (connected && cachedPublicKey) {
+        return cachedPublicKey;
+      }
       const { pubkey } = await albedo.publicKey({});
       cachedPublicKey = pubkey;
       connected = true;
