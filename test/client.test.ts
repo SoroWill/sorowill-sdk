@@ -41,6 +41,10 @@ describe('formatUSDC', () => {
   it('handles zero', () => {
     expect(formatUSDC(0n)).toBe('0.00');
   });
+
+  it('supports custom decimal precision when formatting', () => {
+    expect(formatUSDC(123_450n, 4)).toBe('12.34');
+  });
 });
 
 describe('toStroops', () => {
@@ -71,6 +75,10 @@ describe('toStroops', () => {
   it('throws on invalid input', () => {
     expect(() => toStroops('not-a-number')).toThrow();
     expect(() => toStroops('')).toThrow();
+  });
+
+  it('supports custom decimal precision when parsing', () => {
+    expect(toStroops('12.34', 4)).toBe(123_400n);
   });
 });
 

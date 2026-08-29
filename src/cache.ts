@@ -272,6 +272,7 @@ export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter
 
     return await new Promise<IDBDatabase>((resolve, reject) => {
       request.onerror = () => reject(request.error ?? new Error('IndexedDB open failed'));
+      request.onblocked = () => reject(new Error('IndexedDB open blocked by another connection'));
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains(this.storeName)) {

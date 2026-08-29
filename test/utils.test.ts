@@ -86,6 +86,13 @@ describe('getNextActionableState', () => {
     expect(getNextActionableState(will, 'GBEN').canGuardianVote).toBe(false);
   });
 
+  it('can reflect that the guardian already voted', () => {
+    const will = makeWill({ status: WillStatus.Active, guardians: ['GGUARD'] });
+    expect(
+      getNextActionableState(will, 'GGUARD', { guardianAlreadyVoted: true }).canGuardianVote,
+    ).toBe(false);
+  });
+
   it('lets the owner emergency-check-in during the grace period, but not after it expires', () => {
     const triggerTime = new Date(Date.now() - 3 * 86_400 * 1000);
     const withinGrace = makeWill({
