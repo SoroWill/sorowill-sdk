@@ -41,6 +41,13 @@ export class RpcEndpointPool {
       throw new Error('At least one RPC URL must be configured');
     }
 
+    for (const rpcUrl of normalizedRpcUrls) {
+      const parsed = new URL(rpcUrl);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error(`Invalid RPC URL: ${rpcUrl}`);
+      }
+    }
+
     this.rpcUrls = normalizedRpcUrls;
     this.servers = serverOverride
       ? normalizedRpcUrls.map(() => serverOverride)
