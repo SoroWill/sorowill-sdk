@@ -32,8 +32,15 @@ import {
   toStroops,
 } from '@sorowill/sdk';
 
-// Connect the user's Freighter wallet.
-const wallet = await connectWallet();
+let wallet;
+try {
+  // Connect the user's Freighter wallet.
+  wallet = await connectWallet();
+} catch (error) {
+  // Handle wallet connection failures: Freighter not installed, locked, or connection rejected
+  console.error('Failed to connect wallet:', error);
+  process.exit(1);
+}
 
 // Quickest way to get started — uses the maintainer-managed default testnet
 // contract address (see DEFAULT_CONTRACT_IDS for the value):
@@ -63,17 +70,26 @@ const client = SoroWillClient.forNetwork('testnet', {
 
 // Create a will locking 1,000 USDC, split 60/40 between two beneficiaries,
 // with a 90-day check-in period and a 7-day grace period.
-const { willId, txHash } = await client.createWill({
-  token: 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA', // testnet USDC SAC
-  amount: toStroops('1000').toString(),
-  beneficiaries: [
-    { address: 'GBEN...AAAA', percentage: 60 },
-    { address: 'GBEN...BBBB', percentage: 40 },
-  ],
-  checkinPeriodDays: 90,
-  gracePeriodDays: 7,
-  guardians: [],
-});
+let willId: string, txHash: string;
+try {
+  const result = await client.createWill({
+    token: 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA', // testnet USDC SAC
+    amount: toStroops('1000').toString(),
+    beneficiaries: [
+      { address: 'GBEN...AAAA', percentage: 60 },
+      { address: 'GBEN...BBBB', percentage: 40 },
+    ],
+    checkinPeriodDays: 90,
+    gracePeriodDays: 7,
+    guardians: [],
+  });
+  willId = result.willId;
+  txHash = result.txHash;
+} catch (error) {
+  // Handle transaction failures: simulation failure, insufficient balance, signing rejection, RPC timeout, submission failure
+  console.error('Failed to create will:', error);
+  process.exit(1);
+}
 
 console.log(`Created will #${willId} in tx ${txHash}`);
 

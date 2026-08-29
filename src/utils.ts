@@ -1,3 +1,5 @@
+import { StrKey } from '@stellar/stellar-sdk';
+
 import type { Beneficiary, Will } from './types';
 import { WillStatus } from './types';
 
@@ -44,7 +46,12 @@ export function toStroops(usdc: string): bigint {
   const negative = cleaned.startsWith('-');
   const unsigned = negative ? cleaned.slice(1) : cleaned;
   const [wholePart = '', fractionPart = ''] = unsigned.split('.');
-  const paddedFraction = (fractionPart + '0'.repeat(USDC_DECIMALS)).slice(0, USDC_DECIMALS);
+  if (fractionPart.length > USDC_DECIMALS) {
+    throw new Error(
+      `Invalid USDC amount: "${usdc}" has more than ${USDC_DECIMALS} fractional digits, which would silently lose precision.`,
+    );
+  }
+  const paddedFraction = fractionPart.padEnd(USDC_DECIMALS, '0');
 
   const whole = BigInt(wholePart === '' ? '0' : wholePart);
   const fraction = BigInt(paddedFraction === '' ? '0' : paddedFraction);
@@ -81,18 +88,10 @@ export function isCheckinDue(will: Will): boolean {
  * last beneficiary). Keep this implementation in sync with any changes to
  * that contract function.
  *
- * **IMPORTANT — order matters:** because the rounding remainder always goes
- * to the *last* element of `beneficiaries`, the array must be passed in
- * exactly the same order the contract stored the beneficiaries on-chain
- * (i.e. `will.beneficiaries` as returned by the client, unmodified). Sorting,
- * filtering, or otherwise reordering the array before calling this function
- * — for example to display beneficiaries alphabetically in a UI — will
- * change which beneficiary the preview attributes the remainder to, and the
- * preview will no longer match the real on-chain payout. If you need a
- * reordered copy for display, sort a copy for rendering only and keep
- * calling `calculateShares` with the original, unmodified array (see
- * {@link tagOnChainOrder} for a way to sort a display copy while still being
- * able to recover the original on-chain order).
+ * `beneficiary.percentage` is the SDK's 0-100 value. The contract works in
+ * basis points (`percentage * 100`) and divides by 10,000, which is
+ * arithmetically identical to dividing by 100 here, so the split matches
+ * on-chain distribution exactly.
  */
 export function calculateShares(
   balance: string,
@@ -157,9 +156,16 @@ export const MAX_GUARDIANS = 3;
  * Validates that a beneficiary list is well-formed: non-empty, at most
  * {@link MAX_BENEFICIARIES} entries, every percentage is a positive
  * integer, and percentages sum to exactly 100.
+ *
+ * Percentages are on the SDK's 0-100 scale. `SoroWillClient` scales them to
+ * the contract's basis points (summing to 10,000) when it submits a
+ * transaction.
  */
 export function validateBeneficiaries(beneficiaries: Beneficiary[]): boolean {
   if (beneficiaries.length === 0 || beneficiaries.length > MAX_BENEFICIARIES) {
+    return false;
+  }
+  if (!beneficiaries.every((b) => StrKey.isValidEd25519PublicKey(b.address))) {
     return false;
   }
   if (!beneficiaries.every((b) => Number.isInteger(b.percentage) && b.percentage > 0)) {
@@ -200,18 +206,33 @@ export interface NextActionableState {
  * on-chain preconditions are met; and guardians may vote for an early
  * release at any point before the will is released or cancelled.
  *
- * @param now - The current time, used to evaluate whether the grace period
- * has expired. Defaults to the local wall clock (`new Date()`), but callers
- * that don't trust the local clock (the same client-clock-trust concern
- * tracked for `getTimeUntilCheckin`/`isCheckinDue`) can pass a trusted time
- * source instead, e.g. one derived from the RPC server's latest ledger
- * close time.
+ * PendingConfirmation: the will exists but is not yet active, so no
+ * owner actions are available until it transitions to Active.
+ *
+ * Settled: the will is fully closed; no further actions are possible.
  */
 export function getNextActionableState(
   will: Will,
   connectedAddress: string,
   now: Date = new Date(),
 ): NextActionableState {
+  // Terminal / pre-active states with no available actions
+  if (
+    will.status === WillStatus.PendingConfirmation ||
+    will.status === WillStatus.Released ||
+    will.status === WillStatus.Cancelled ||
+    will.status === WillStatus.Settled
+  ) {
+    return {
+      canCheckIn: false,
+      canTrigger: false,
+      canEmergencyCheckIn: false,
+      canRelease: false,
+      canCancel: false,
+      canGuardianVote: false,
+    };
+  }
+
   const isOwner = will.owner === connectedAddress;
   const isWillGuardian = isGuardian(will, connectedAddress);
 
@@ -232,8 +253,9 @@ export function getNextActionableState(
 }
 /**
  * Validates a guardian list: empty list is valid (guardians are optional),
- * at most {@link MAX_GUARDIANS} entries, no duplicate addresses, and no
- * owner address in the list.
+ * at most {@link MAX_GUARDIANS} entries, every address (including the
+ * optional `ownerAddress`) is a syntactically valid Stellar public key, no
+ * duplicate addresses, and no owner address in the list.
  *
  * @param guardians - The list of guardian addresses to validate.
  * @param ownerAddress - Optional owner address; when supplied, the function
@@ -241,6 +263,12 @@ export function getNextActionableState(
  */
 export function validateGuardians(guardians: string[], ownerAddress?: string): boolean {
   if (guardians.length > MAX_GUARDIANS) {
+    return false;
+  }
+  if (!guardians.every((address) => StrKey.isValidEd25519PublicKey(address))) {
+    return false;
+  }
+  if (ownerAddress !== undefined && !StrKey.isValidEd25519PublicKey(ownerAddress)) {
     return false;
   }
   const unique = new Set(guardians);

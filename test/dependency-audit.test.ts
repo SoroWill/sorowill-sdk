@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { spawnSync } from 'child_process';
 
 /**
  * Tests for dependency and supply-chain audit workflow.
@@ -27,14 +28,16 @@ describe('Dependency/Supply-Chain Audit Workflow', () => {
 
     it('npm audit should be part of CI workflow', () => {
       const githubWorkflowsPath = path.join(projectRoot, '.github', 'workflows');
+      const workflowFiles = fs
+        .readdirSync(githubWorkflowsPath)
+        .filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
 
-      // Check if workflows directory exists
-      if (fs.existsSync(githubWorkflowsPath)) {
-        const workflowFiles = fs.readdirSync(githubWorkflowsPath).filter(f => f.endsWith('.yml') || f.endsWith('.yaml'));
+      const runsNpmAudit = workflowFiles.some((file) => {
+        const content = fs.readFileSync(path.join(githubWorkflowsPath, file), 'utf-8');
+        return /npm audit/.test(content);
+      });
 
-        // Verify at least one workflow file exists
-        expect(workflowFiles.length).toBeGreaterThan(0);
-      }
+      expect(runsNpmAudit).toBe(true);
     });
   });
 
@@ -71,37 +74,17 @@ describe('Dependency/Supply-Chain Audit Workflow', () => {
   });
 
   describe('dependency audit policies', () => {
-    it('package.json should not have known vulnerable dependencies', () => {
-      // This is a documentation test - in real scenarios, npm audit would be run
-      const packageJsonPath = path.join(projectRoot, 'package.json');
-      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
-
-      // Check that critical dependencies are pinned
-      const dependenciesToCheck = ['@stellar/stellar-sdk'];
-      const allDeps = {
-        ...packageJson.dependencies,
-        ...packageJson.devDependencies,
-      };
-
-      dependenciesToCheck.forEach(dep => {
-        if (allDeps[dep]) {
-          expect(allDeps[dep]).toBeDefined();
-        }
+    it('production dependencies have no known high/critical vulnerabilities', () => {
+      const result = spawnSync('npm', ['audit', '--omit=dev', '--audit-level=high', '--json'], {
+        cwd: projectRoot,
+        encoding: 'utf-8',
       });
-    });
 
-    it('security-sensitive dependencies should be explicitly specified', () => {
-      const packageJsonPath = path.join(projectRoot, 'package.json');
-      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+      const report = JSON.parse(result.stdout || '{}');
+      const highOrCriticalCount =
+        (report.metadata?.vulnerabilities?.high ?? 0) + (report.metadata?.vulnerabilities?.critical ?? 0);
 
-      const allDeps = {
-        ...packageJson.dependencies,
-        ...packageJson.devDependencies,
-      };
-
-      // Verify that cryptographic and security libraries are present
-      // Given this is a financial SDK dealing with transactions
-      expect(Object.keys(allDeps).length).toBeGreaterThan(0);
+      expect(highOrCriticalCount).toBe(0);
     });
   });
 
@@ -137,16 +120,29 @@ describe('Dependency/Supply-Chain Audit Workflow', () => {
       expect(hasDocumentation).toBe(true);
     });
 
-    it('audit failure policy should be defined', () => {
-      // This test documents that audit failures should block CI
-      // This is typically configured in the workflow file
-      const workflowsPath = path.join(projectRoot, '.github', 'workflows');
+    it('the npm audit CI step is not configured to ignore failures', () => {
+      const githubWorkflowsPath = path.join(projectRoot, '.github', 'workflows');
+      const workflowFiles = fs
+        .readdirSync(githubWorkflowsPath)
+        .filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
 
-      if (fs.existsSync(workflowsPath)) {
-        const files = fs.readdirSync(workflowsPath);
-        // At least one workflow should exist for audit checks
-        expect(files.length).toBeGreaterThan(0);
-      }
+      const auditStepIgnoresFailure = workflowFiles.some((file) => {
+        const lines = fs.readFileSync(path.join(githubWorkflowsPath, file), 'utf-8').split('\n');
+        const isStepBoundary = (line: string): boolean => /^\s*-\s/.test(line);
+
+        return lines.some((line, i) => {
+          if (!/npm audit/.test(line)) {
+            return false;
+          }
+          let end = i + 1;
+          while (end < lines.length && !isStepBoundary(lines[end]!)) {
+            end += 1;
+          }
+          return lines.slice(i, end).some((stepLine) => /continue-on-error:\s*true/.test(stepLine));
+        });
+      });
+
+      expect(auditStepIgnoresFailure).toBe(false);
     });
   });
 

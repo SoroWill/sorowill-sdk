@@ -20,6 +20,7 @@ vi.mock('../src/wallet', () => ({
 
 import { SoroWillClient } from '../src/SoroWillClient';
 import { mapContractError, NotOwnerError, RequestTimeoutError } from '../src/errors';
+import { HookManager } from '../src/hooks';
 import { RequestQueue } from '../src/requestQueue';
 
 describe('RequestQueue', () => {
@@ -96,6 +97,49 @@ describe('batch transactions', () => {
       ]),
     ).resolves.toEqual({ txHash: 'batch-hash', createdAt: 1_700_000_000 });
     expect(preparedOperationCount).toBe(2);
+  });
+
+  it('runs invoke hooks for each operation', async () => {
+    const fakeSpec = {
+      funcArgsToScVals: () => [] as xdr.ScVal[],
+    };
+    const fakeServer = {
+      getAccount: async (publicKey: string) => new Account(publicKey, '0'),
+      prepareTransaction: async (transaction: Transaction) => transaction,
+      sendTransaction: async () => ({ status: 'PENDING', hash: 'batch-hash' }),
+      pollTransaction: async () => ({
+        status: 'SUCCESS',
+        createdAt: 1_700_000_000,
+        returnValue: xdr.ScVal.scvVoid(),
+      }),
+    };
+    const hooks = new HookManager();
+    const beforeMethods: string[] = [];
+    const afterResults: Array<{ method: string; txHash: string | null; error: string | null }> = [];
+    hooks.onBeforeInvoke(({ method }) => {
+      beforeMethods.push(method);
+    });
+    hooks.onAfterInvoke(({ method, txHash, error }) => {
+      afterResults.push({ method, txHash, error });
+    });
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+      hooks,
+      rpcServer: fakeServer as never,
+    });
+    Object.defineProperty(client, 'specPromise', { value: Promise.resolve(fakeSpec) });
+
+    await client.batch([
+      { method: 'first_operation', args: { value: 1 } },
+      { method: 'second_operation', args: { value: 2 } },
+    ]);
+
+    expect(beforeMethods).toEqual(['first_operation', 'second_operation']);
+    expect(afterResults).toEqual([
+      { method: 'first_operation', txHash: 'batch-hash', error: null },
+      { method: 'second_operation', txHash: 'batch-hash', error: null },
+    ]);
   });
 });
 

@@ -72,6 +72,15 @@ describe('toStroops', () => {
     expect(() => toStroops('not-a-number')).toThrow();
     expect(() => toStroops('')).toThrow();
   });
+
+  it('throws instead of silently truncating more than 7 fractional digits', () => {
+    expect(() => toStroops('100.123456789')).toThrow(/precision/i);
+    expect(() => toStroops('1.00000001')).toThrow(/precision/i);
+  });
+
+  it('still accepts exactly 7 fractional digits', () => {
+    expect(toStroops('1.1234567')).toBe(11_234_567n);
+  });
 });
 
 function makeWill(overrides: Partial<Will> = {}): Will {
