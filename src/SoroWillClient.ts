@@ -1216,7 +1216,14 @@ export class SoroWillClient {
     sourcePublicKey: string,
     options: BuildSep7TxUriOptions,
   ): Promise<string> {
-    const prepared = await this.prepareInvocation(method, args, undefined, sourcePublicKey);
+    const builtTx = await this.buildInvocationTransaction(method, args, sourcePublicKey);
+    const prepared = await this.prepareInvocation(method, args, builtTx, sourcePublicKey);
+    assertPreparedTransactionMatchesIntendedOperation({
+      intendedTransactionXdr: builtTx.toXDR(),
+      preparedTransactionXdr: prepared.toXDR(),
+      networkPassphrase: this.networkPassphrase,
+      context: `buildSep7SigningUri(${method})`,
+    });
     return buildSep7TxUri(prepared.toXDR(), {
       ...options,
       networkPassphrase: options.networkPassphrase ?? this.networkPassphrase,
@@ -1790,7 +1797,7 @@ export class SoroWillClient {
     args: Record<string, unknown>,
     sourcePublicKey?: string,
   ): Promise<Transaction> {
-    return this.buildInvocationTransaction(method, args, sourcePublicKey);
+    return this.prepareInvocation(method, args, undefined, sourcePublicKey);
   }
 
   async submitSignedTransaction(
