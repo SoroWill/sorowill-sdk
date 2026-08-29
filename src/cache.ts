@@ -111,6 +111,11 @@ export class ReadCache {
   }
 
   set(key: string, value: unknown, willIds: Iterable<string> = []): void {
+    if (this.ttlMs === 0) {
+      void this.persistence?.delete(key);
+      return;
+    }
+
     const entry: CacheEntry = {
       key,
       value,

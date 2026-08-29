@@ -1072,6 +1072,7 @@ export class SoroWillClient {
     const contractOperations = operations.map(({ method, args }) =>
       this.contract.call(method, ...spec.funcArgsToScVals(method, args)),
     );
+    this.debugLogger.logOperationBuild('batch', undefined, { operationCount: operations.length });
 
     // Build a multi-operation transaction manually (batch has its own path
     // since buildTransaction handles single operations)
@@ -1093,6 +1094,9 @@ export class SoroWillClient {
       () => this.rpcPool.withFailover((server) => server.prepareTransaction(builtTx)),
       options,
     );
+    this.debugLogger.logSimulation('batch', undefined, undefined, {
+      operationCount: operations.length,
+    });
 
     assertPreparedTransactionMatchesIntendedOperation({
       intendedTransactionXdr: builtTx.toXDR(),
@@ -1121,7 +1125,14 @@ export class SoroWillClient {
     sourcePublicKey: string,
     options: BuildSep7TxUriOptions,
   ): Promise<string> {
-    const prepared = await this.prepareInvocation(method, args, undefined, sourcePublicKey);
+    const builtTx = await this.buildInvocationTransaction(method, args, sourcePublicKey);
+    const prepared = await this.prepareInvocation(method, args, builtTx, sourcePublicKey);
+    assertPreparedTransactionMatchesIntendedOperation({
+      intendedTransactionXdr: builtTx.toXDR(),
+      preparedTransactionXdr: prepared.toXDR(),
+      networkPassphrase: this.networkPassphrase,
+      context: `buildSep7SigningUri(${method})`,
+    });
     return buildSep7TxUri(prepared.toXDR(), {
       ...options,
       networkPassphrase: options.networkPassphrase ?? this.networkPassphrase,
@@ -1651,7 +1662,7 @@ export class SoroWillClient {
     args: Record<string, unknown>,
     sourcePublicKey?: string,
   ): Promise<Transaction> {
-    return this.buildInvocationTransaction(method, args, sourcePublicKey);
+    return this.prepareInvocation(method, args, undefined, sourcePublicKey);
   }
 
   async submitSignedTransaction(
