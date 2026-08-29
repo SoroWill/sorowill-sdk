@@ -26,7 +26,7 @@ export class InFlightTracker {
   track<T>(
     willId: string | bigint,
     method: string,
-    operation: () => PromiseLike<T>,
+    operation: (signal: AbortSignal) => PromiseLike<T>,
   ): PromiseLike<T> {
     const key = this.getKey(willId, method);
 
@@ -35,7 +35,7 @@ export class InFlightTracker {
     }
 
     const controller = new AbortController();
-    const promise = Promise.resolve(operation()).finally(() => {
+    const promise = Promise.resolve(operation(controller.signal)).finally(() => {
       this.inFlight.delete(key);
     });
 

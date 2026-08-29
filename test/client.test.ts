@@ -1,8 +1,8 @@
 import { Account, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ReadCache } from '../src/cache';
-import { RpcEndpointPool } from '../src/rpc';
+import { isRetryableRpcConnectionError, RpcEndpointPool } from '../src/rpc';
 import { buildSep7TxUri, parseSep7Callback } from '../src/sep7';
 import { assertPreparedTransactionMatchesIntendedOperation } from '../src/txValidation';
 import {
@@ -71,6 +71,15 @@ describe('toStroops', () => {
   it('throws on invalid input', () => {
     expect(() => toStroops('not-a-number')).toThrow();
     expect(() => toStroops('')).toThrow();
+  });
+
+  it('throws instead of silently truncating more than 7 fractional digits', () => {
+    expect(() => toStroops('100.123456789')).toThrow(/precision/i);
+    expect(() => toStroops('1.00000001')).toThrow(/precision/i);
+  });
+
+  it('still accepts exactly 7 fractional digits', () => {
+    expect(toStroops('1.1234567')).toBe(11_234_567n);
   });
 });
 
@@ -342,6 +351,12 @@ describe('HookManager', () => {
 });
 
 describe('ReadCache', () => {
+  it('builds stable cache keys regardless of argument order', () => {
+    expect(
+      createReadCacheKey('get_will', { owner: 'GOWNER', willId: '1' }),
+    ).toBe(createReadCacheKey('get_will', { willId: '1', owner: 'GOWNER' }));
+  });
+
   it('returns cached values before expiry', () => {
     let now = 1_000;
     const cache = new ReadCache({ ttlMs: 500, now: () => now });
@@ -363,6 +378,19 @@ describe('ReadCache', () => {
     now = 1_501;
 
     expect(cache.get<string[]>('owner:GABC')).toBeUndefined();
+  });
+});
+
+describe('isRetryableRpcConnectionError', () => {
+  it('classifies genuine network/connection failures as retryable', () => {
+    expect(isRetryableRpcConnectionError(new Error('fetch failed'))).toBe(true);
+    expect(isRetryableRpcConnectionError(new Error('ECONNREFUSED'))).toBe(true);
+    expect(isRetryableRpcConnectionError(new Error('could not connect to host'))).toBe(true);
+  });
+
+  it('does not classify an unrelated application error containing "connect" as retryable', () => {
+    expect(isRetryableRpcConnectionError(new Error('wallet not connected'))).toBe(false);
+    expect(isRetryableRpcConnectionError(new Error('signer disconnected mid-flow'))).toBe(false);
   });
 });
 
@@ -392,6 +420,48 @@ describe('RpcEndpointPool', () => {
         throw new Error('contract execution failed');
       }),
     ).rejects.toThrow('contract execution failed');
+  });
+
+  it('re-promotes the primary endpoint after the cooldown elapses, once it recovers', async () => {
+    vi.useFakeTimers();
+    try {
+      const cooldownMs = 30_000;
+      const pool = new RpcEndpointPool(
+        ['https://rpc-a.example', 'https://rpc-b.example'],
+        undefined,
+        cooldownMs,
+      );
+
+      // Primary fails, pool fails over to the backup.
+      await pool.withFailover(async (_server, rpcUrl) => {
+        if (rpcUrl.endsWith('rpc-a.example')) {
+          throw new Error('fetch failed');
+        }
+        return 'ok';
+      });
+      expect(pool.getActiveRpcUrl()).toBe('https://rpc-b.example');
+
+      // Before the cooldown elapses, the pool keeps using the backup.
+      vi.advanceTimersByTime(cooldownMs - 1);
+      const attemptsBeforeCooldown: string[] = [];
+      await pool.withFailover(async (_server, rpcUrl) => {
+        attemptsBeforeCooldown.push(rpcUrl);
+        return 'ok';
+      });
+      expect(attemptsBeforeCooldown).toEqual(['https://rpc-b.example']);
+
+      // Once the cooldown elapses, the pool retries the recovered primary.
+      vi.advanceTimersByTime(1);
+      const attemptsAfterCooldown: string[] = [];
+      await pool.withFailover(async (_server, rpcUrl) => {
+        attemptsAfterCooldown.push(rpcUrl);
+        return 'ok';
+      });
+      expect(attemptsAfterCooldown).toEqual(['https://rpc-a.example']);
+      expect(pool.getActiveRpcUrl()).toBe('https://rpc-a.example');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

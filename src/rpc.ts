@@ -2,12 +2,7 @@ import { rpc } from '@stellar/stellar-sdk';
 import type { SoroWillRpcServer } from './SoroWillClient';
 
 export function isRetryableRpcConnectionError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  return [
+  const CONNECTION_FRAGMENTS = [
     'fetch failed',
     'network error',
     'failed to fetch',
@@ -18,21 +13,65 @@ export function isRetryableRpcConnectionError(error: unknown): boolean {
     'enotfound',
     'econnreset',
     'connect',
-  ].some((fragment) => message.includes(fragment));
+  ];
+
+  const matches = (text: string): boolean => {
+    const lower = text.toLowerCase();
+    return CONNECTION_FRAGMENTS.some((fragment) => lower.includes(fragment));
+  };
+
+  if (error instanceof Error) {
+    return matches(error.message);
+  }
+
+  // Plain strings (some runtimes throw strings directly)
+  if (typeof error === 'string') {
+    return matches(error);
+  }
+
+  // DOMException and DOMException-like objects ({ name, message })
+  if (typeof error === 'object' && error !== null) {
+    const obj = error as Record<string, unknown>;
+    if (typeof obj['message'] === 'string' && matches(obj['message'])) {
+      return true;
+    }
+    if (typeof obj['name'] === 'string' && matches(obj['name'])) {
+      return true;
+    }
+  }
+
+  return false;
 }
+
+/**
+ * Milliseconds to wait after a failover before opportunistically retrying
+ * the originally preferred (first-listed) RPC endpoint again. Without this,
+ * a single transient blip on the primary endpoint would pin the pool to
+ * whichever backup it failed over to for the rest of the process's lifetime.
+ */
+const DEFAULT_FAILOVER_COOLDOWN_MS = 60_000;
 
 export class RpcEndpointPool {
   private readonly servers: SoroWillRpcServer[];
   private readonly rpcUrls: string[];
+  private readonly failoverCooldownMs: number;
   private activeIndex = 0;
+  private lastFailoverAt: number | null = null;
 
   /**
    * @param serverOverride - When provided (e.g. `SoroWillClientOptions.rpcServer`
    * in tests), every endpoint in the pool uses this server instead of
    * constructing a real `rpc.Server` per URL. Without this, `withFailover`
    * would silently bypass an injected test double and hit the real network.
+   * @param failoverCooldownMs - How long to keep using a backup endpoint
+   * after a failover before opportunistically retrying the primary
+   * (first-listed) endpoint again. Defaults to {@link DEFAULT_FAILOVER_COOLDOWN_MS}.
    */
-  constructor(rpcUrls: readonly string[], serverOverride?: SoroWillRpcServer) {
+  constructor(
+    rpcUrls: readonly string[],
+    serverOverride?: SoroWillRpcServer,
+    failoverCooldownMs: number = DEFAULT_FAILOVER_COOLDOWN_MS,
+  ) {
     const normalizedRpcUrls = rpcUrls
       .map((rpcUrl) => rpcUrl.trim())
       .filter((rpcUrl) => rpcUrl.length > 0);
@@ -41,7 +80,15 @@ export class RpcEndpointPool {
       throw new Error('At least one RPC URL must be configured');
     }
 
+    for (const rpcUrl of normalizedRpcUrls) {
+      const parsed = new URL(rpcUrl);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error(`Invalid RPC URL: ${rpcUrl}`);
+      }
+    }
+
     this.rpcUrls = normalizedRpcUrls;
+    this.failoverCooldownMs = failoverCooldownMs;
     this.servers = serverOverride
       ? normalizedRpcUrls.map(() => serverOverride)
       : normalizedRpcUrls.map(
@@ -49,7 +96,24 @@ export class RpcEndpointPool {
         );
   }
 
+  /**
+   * Re-promotes the primary (first-listed) endpoint once the cooldown since
+   * the last failover has elapsed, giving it a chance to be retried after a
+   * transient outage recovers instead of being abandoned permanently.
+   */
+  private maybeRepromotePrimaryEndpoint(): void {
+    if (
+      this.activeIndex !== 0 &&
+      this.lastFailoverAt !== null &&
+      Date.now() - this.lastFailoverAt >= this.failoverCooldownMs
+    ) {
+      this.activeIndex = 0;
+      this.lastFailoverAt = null;
+    }
+  }
+
   async withFailover<T>(operation: (server: SoroWillRpcServer, rpcUrl: string) => Promise<T>): Promise<T> {
+    this.maybeRepromotePrimaryEndpoint();
     let lastError: unknown;
 
     for (let attempt = 0; attempt < this.servers.length; attempt += 1) {
@@ -67,6 +131,7 @@ export class RpcEndpointPool {
         if (!isRetryableRpcConnectionError(error) || attempt === this.servers.length - 1) {
           throw error;
         }
+        this.lastFailoverAt = Date.now();
         this.activeIndex = (this.activeIndex + 1) % this.servers.length;
       }
     }
