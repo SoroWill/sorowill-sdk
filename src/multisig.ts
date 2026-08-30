@@ -9,6 +9,8 @@ import {
   xdr,
 } from '@stellar/stellar-sdk';
 
+import { InvalidSecretKeyError } from './errors';
+
 /** A single collected signature from one signer. */
 export interface CollectedSignature {
   /** The public key of the signer who signed. */
@@ -236,13 +238,20 @@ export async function buildMultisigTransactionXdr(options: {
  * Sign a transaction XDR with a specific secret key and return the
  * decorated signature as a base64 string suitable for
  * {@link MultisigCollector.addSignature}.
+ * @throws {InvalidSecretKeyError} if the secret key is malformed.
  */
 export function signWithSecretKey(
   transactionXdr: string,
   secretKey: string,
   networkPassphrase: string,
 ): string {
-  const keypair = Keypair.fromSecret(secretKey);
+  let keypair: Keypair;
+  try {
+    keypair = Keypair.fromSecret(secretKey);
+  } catch (error) {
+    throw new InvalidSecretKeyError('signWithSecretKey');
+  }
+
   const tx = TransactionBuilder.fromXDR(transactionXdr, networkPassphrase) as Transaction;
 
   const hashed = tx.hash();

@@ -114,6 +114,7 @@ export {
   InvalidPercentagesError,
   InvalidPeriodError,
   InvalidPreimageError,
+  InvalidSecretKeyError,
   InvalidSplitError,
   InvalidTokenError,
   InvokeFailedError,
