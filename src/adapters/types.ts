@@ -24,5 +24,13 @@ export interface WalletAdapter {
   isConnected(): Promise<boolean>;
   getPublicKey(): Promise<string>;
   signTransaction(transactionXdr: string, options: SignTransactionOptions): Promise<string>;
+  /**
+   * Optional method to retrieve the wallet's currently connected network.
+   * Used by the SDK to validate that the connected network matches the
+   * client's configured network before signing transactions.
+   *
+   * @returns The current network details, or undefined if the wallet does not support network detection.
+   */
+  getNetwork?(): Promise<{ network: string; networkPassphrase: string }>;
 }
 

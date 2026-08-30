@@ -38,6 +38,9 @@ export function createAlbedoAdapter(): WalletAdapter {
   let connected = false;
 
   return {
+    id: 'albedo',
+    name: 'Albedo',
+
     async isConnected(): Promise<boolean> {
       return connected;
     },
@@ -88,6 +91,10 @@ export function createAlbedoAdapter(): WalletAdapter {
         ...(cachedPublicKey === undefined ? {} : { pubkey: cachedPublicKey }),
       });
       return signedTxXdr;
+    },
+
+    async getNetwork(): Promise<{ network: string; networkPassphrase: string }> {
+      return { network: 'public', networkPassphrase: Networks.PUBLIC };
     },
   };
 }

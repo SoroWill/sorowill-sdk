@@ -7,6 +7,7 @@ export interface LobstrSessionClient {
   isConnected(): Promise<boolean>;
   getPublicKey(): Promise<string>;
   signTransaction(transactionXdr: string, options: SignTransactionOptions): Promise<string>;
+  getNetwork?(): Promise<{ network: string; networkPassphrase: string }>;
 }
 
 export interface LobstrWalletAdapterOptions {
@@ -73,5 +74,12 @@ export class LobstrWalletAdapter implements WalletAdapter {
     options: SignTransactionOptions,
   ): Promise<string> {
     return this.options.client.signTransaction(transactionXdr, options);
+  }
+
+  async getNetwork(): Promise<{ network: string; networkPassphrase: string }> {
+    if (this.options.client.getNetwork) {
+      return this.options.client.getNetwork();
+    }
+    throw new Error('LOBSTR session client does not support network detection');
   }
 }
