@@ -84,7 +84,7 @@ export class RequestQueue {
     }
   }
 
-  private removeAbortListener(request: { signal?: AbortSignal; abortListener?: () => void }): void {
+  private removeAbortListener(request: { signal: AbortSignal | undefined; abortListener: (() => void) | undefined }): void {
     if (request.signal && request.abortListener) {
       request.signal.removeEventListener('abort', request.abortListener);
     }
