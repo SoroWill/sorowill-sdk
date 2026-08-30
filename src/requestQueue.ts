@@ -84,7 +84,7 @@ export class RequestQueue {
     }
   }
 
-  private removeAbortListener(request: PendingRequest<unknown>): void {
+  private removeAbortListener(request: { signal?: AbortSignal; abortListener?: () => void }): void {
     if (request.signal && request.abortListener) {
       request.signal.removeEventListener('abort', request.abortListener);
     }
