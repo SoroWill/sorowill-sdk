@@ -38,9 +38,6 @@ export function createAlbedoAdapter(): WalletAdapter {
   let connected = false;
 
   return {
-    id: 'albedo',
-    name: 'Albedo',
-
     async isConnected(): Promise<boolean> {
       return connected;
     },
