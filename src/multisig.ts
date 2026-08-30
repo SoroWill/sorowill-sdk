@@ -3,6 +3,7 @@ import {
   BASE_FEE,
   Contract,
   Keypair,
+  StrKey,
   Transaction,
   TransactionBuilder,
   rpc,
@@ -99,8 +100,15 @@ export class MultisigCollector {
   /**
    * Add a signature from a signer.
    * @throws if the signer has already signed.
+   * @throws if signerPublicKey is not a valid Stellar Ed25519 public key.
    */
   addSignature(signerPublicKey: string, signature: string): void {
+    if (!StrKey.isValidEd25519PublicKey(signerPublicKey)) {
+      throw new Error(
+        `"${signerPublicKey}" is not a valid Stellar public key. ` +
+          'A Stellar Ed25519 public key must be a 56-character StrKey starting with "G".',
+      );
+    }
     if (this._signatures.some((s) => s.signerPublicKey === signerPublicKey)) {
       throw new Error(`Signer ${signerPublicKey} has already signed`);
     }
