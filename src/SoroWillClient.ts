@@ -568,8 +568,8 @@ export class SoroWillClient {
     // decoding failure.
     try {
       this.contract = new Contract(options.contractId);
-    } catch {
-      throw new InvalidContractIdError(options.contractId ?? '');
+    } catch (originalError) {
+      throw new InvalidContractIdError(options.contractId ?? '', { cause: originalError });
     }
 
     this.server =
