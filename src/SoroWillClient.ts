@@ -1654,7 +1654,17 @@ export class SoroWillClient {
           error,
           durationMs: Date.now() - startTime,
         };
-        await this.hooks.runAfterInvoke(afterCtx);
+        try {
+          await this.hooks.runAfterInvoke(afterCtx);
+        } catch (hookError) {
+          this.debugLogger.logError(
+            method,
+            willId,
+            hookError instanceof Error
+              ? `afterInvoke hook threw: ${hookError.message}`
+              : `afterInvoke hook threw: ${String(hookError)}`,
+          );
+        }
       }
     }
     };
