@@ -1926,7 +1926,7 @@ export class SoroWillClient {
   /** Sends every RPC through the shared FIFO queue with the selected timeout. */
   private rpc<T>(request: () => Promise<T>, options?: RequestOptions): Promise<T> {
     options?.signal?.throwIfAborted();
-    return this.queue.enqueue(request, options?.timeoutMs ?? this.timeoutMs);
+    return this.queue.enqueue(request, options?.timeoutMs ?? this.timeoutMs, options?.signal);
   }
 
   /**

@@ -13,6 +13,8 @@ interface PendingRequest<T> {
   resolve: (value: T) => void;
   reject: (reason: unknown) => void;
   timeoutMs: number | undefined;
+  signal: AbortSignal | undefined;
+  abortListener: (() => void) | undefined;
 }
 
 /** FIFO queue that applies concurrency, rate, and timeout limits to asynchronous requests. */
@@ -35,12 +37,28 @@ export class RequestQueue {
     }
   }
 
-  enqueue<T>(run: () => Promise<T>, timeoutMs?: number): Promise<T> {
+  enqueue<T>(run: () => Promise<T>, timeoutMs?: number, signal?: AbortSignal): Promise<T> {
     if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
       return Promise.reject(new RangeError('timeoutMs must be greater than zero'));
     }
+    if (signal?.aborted) {
+      return Promise.reject(signal.reason);
+    }
     return new Promise<T>((resolve, reject) => {
-      const request: PendingRequest<T> = { run, resolve, reject, timeoutMs };
+      let abortListener: (() => void) | undefined;
+      if (signal) {
+        abortListener = () => {
+          reject(signal.reason);
+          removeAbortListener();
+        };
+        signal.addEventListener('abort', abortListener);
+      }
+      const removeAbortListener = () => {
+        if (signal && abortListener) {
+          signal.removeEventListener('abort', abortListener);
+        }
+      };
+      const request: PendingRequest<T> = { run, resolve, reject, timeoutMs, signal, abortListener };
       this.pending.push(request as PendingRequest<unknown>);
       this.drain();
     });
@@ -61,7 +79,14 @@ export class RequestQueue {
     }
     const drained = this.pending.splice(0);
     for (const request of drained) {
+      this.removeAbortListener(request);
       request.reject(reason);
+    }
+  }
+
+  private removeAbortListener(request: PendingRequest<unknown>): void {
+    if (request.signal && request.abortListener) {
+      request.signal.removeEventListener('abort', request.abortListener);
     }
   }
 
@@ -83,6 +108,7 @@ export class RequestQueue {
       if (request === undefined) break;
       this.active += 1;
       this.starts.push(Date.now());
+      this.removeAbortListener(request);
       void this.execute(request);
     }
     if (
@@ -115,6 +141,7 @@ export class RequestQueue {
       request.reject(error);
     } finally {
       if (timer !== undefined) clearTimeout(timer);
+      this.removeAbortListener(request);
       this.active -= 1;
       this.drain();
     }
