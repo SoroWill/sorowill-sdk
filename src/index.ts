@@ -117,6 +117,7 @@ export {
   InvalidSecretKeyError,
   InvalidSplitError,
   InvalidTokenError,
+  InvalidTransactionXdrError,
   InvokeFailedError,
   KeeperBountyExceedsMaxError,
   MergeWouldExceedLimitsError,

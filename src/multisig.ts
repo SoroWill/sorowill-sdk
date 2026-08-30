@@ -9,7 +9,7 @@ import {
   xdr,
 } from '@stellar/stellar-sdk';
 
-import { InvalidSecretKeyError } from './errors';
+import { InvalidSecretKeyError, InvalidTransactionXdrError } from './errors';
 
 /** A single collected signature from one signer. */
 export interface CollectedSignature {
@@ -27,6 +27,24 @@ export interface MultisigCollectorOptions {
   networkPassphrase: string;
   /** The number of signatures required before the transaction can be submitted. */
   threshold: number;
+}
+
+/**
+ * Validates that a transaction XDR is well-formed and can be decoded.
+ * @throws {InvalidTransactionXdrError} if the XDR is malformed.
+ */
+function validateTransactionXdr(transactionXdr: string): void {
+  try {
+    const envelope = xdr.TransactionEnvelope.fromXDR(transactionXdr, 'base64');
+    if (
+      envelope.switch() !== xdr.EnvelopeType.envelopeTypeTx() &&
+      envelope.switch() !== xdr.EnvelopeType.envelopeTypeTxFeeBump()
+    ) {
+      throw new Error('Unsupported transaction envelope type');
+    }
+  } catch (error) {
+    throw new InvalidTransactionXdrError();
+  }
 }
 
 /**
@@ -63,6 +81,7 @@ export class MultisigCollector {
     if (options.threshold < 1) {
       throw new Error('Threshold must be at least 1');
     }
+    validateTransactionXdr(options.transactionXdr);
     this._transactionXdr = options.transactionXdr;
     this._networkPassphrase = options.networkPassphrase;
     this._threshold = options.threshold;
@@ -169,7 +188,9 @@ export class MultisigCollector {
     };
   }
 
-  /** Reconstitute a collector from a serialised state. */
+  /** Reconstitute a collector from a serialised state.
+   * @throws {InvalidTransactionXdrError} if the transaction XDR is malformed.
+   */
   static fromJSON(data: {
     transactionXdr: string;
     networkPassphrase: string;

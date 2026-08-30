@@ -110,6 +110,25 @@ export class InvalidSecretKeyError extends SoroWillError {
 }
 
 /**
+ * Raised when the transaction XDR passed to {@link MultisigCollector} constructor
+ * or {@link MultisigCollector.fromJSON} is not a syntactically valid Stellar
+ * transaction envelope XDR. This includes malformed base64 or unsupported
+ * envelope types.
+ *
+ * Validation happens synchronously at construction time, before the collector
+ * is distributed to signers, saving a full multi-party signing round-trip.
+ */
+export class InvalidTransactionXdrError extends SoroWillError {
+  constructor(options?: ErrorOptions) {
+    super(
+      'The transaction XDR is not a valid Stellar transaction envelope. ' +
+        'Ensure the XDR is base64-encoded and represents a valid TransactionEnvelope (v1 or fee-bump).',
+      options,
+    );
+  }
+}
+
+/**
  * Raised when the wallet's `signTransaction` call does not resolve within the
  * configured timeout. This can happen when the Freighter popup is dismissed in
  * a way that leaves the underlying promise pending, or when the extension hangs.
