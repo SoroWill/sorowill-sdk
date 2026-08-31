@@ -985,6 +985,23 @@ export class SoroWillClient {
     }
   }
 
+  /**
+   * Returns the currently active RPC endpoint URL.
+   *
+   * When multiple RPC endpoints are configured via `rpcUrls`, the pool tracks
+   * which endpoint is actively in use. This is useful for debugging regional
+   * outages, comparing endpoint reliability, or understanding which backup
+   * endpoint the client failed over to.
+   *
+   * @throws {Error} if no RPC endpoints are configured (which is prevented by
+   * the RpcEndpointPool constructor, so this should not occur in practice)
+   *
+   * @returns the currently active RPC endpoint URL
+   */
+  getActiveRpcUrl(): string {
+    return this.rpcPool.getActiveRpcUrl();
+  }
+
   async getWill(willId: string, options?: RequestOptions): Promise<Will> {
     const cacheKey = createReadCacheKey('get_will', { willId });
     if (this.readCache) {

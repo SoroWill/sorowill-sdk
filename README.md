@@ -155,6 +155,70 @@ const result = await client.batch([
 
 The whole batch is simulated and assembled together, signed once, and submitted atomically.
 
+## Debugging and structured logging
+
+The SDK includes a built-in structured debug logger that emits JSON logs for every operation: builds, simulations, submissions, polls, successes, and errors. This is useful for diagnosing failing or slow contract calls, monitoring transaction lifecycle, and understanding RPC behavior under load.
+
+### Enabling debug logging
+
+Pass `debug: true` when constructing the client:
+
+```ts
+const client = new SoroWillClient({
+  network: 'testnet',
+  contractId: 'C...',
+  debug: true,  // Enable structured logging
+});
+```
+
+### Log output format
+
+The logger emits structured JSON to the console (via `console.log`) at each step of an operation. For example, you should expect to see logs like:
+
+```json
+{
+  "timestamp": "2024-01-15T10:30:45.123Z",
+  "phase": "build",
+  "operation": "check_in",
+  "details": {
+    "willId": "123",
+    "owner": "GABC..."
+  }
+}
+```
+
+```json
+{
+  "timestamp": "2024-01-15T10:30:46.456Z",
+  "phase": "simulate",
+  "operation": "check_in",
+  "details": {
+    "fee": "100000"
+  }
+}
+```
+
+```json
+{
+  "timestamp": "2024-01-15T10:30:47.789Z",
+  "phase": "submit",
+  "operation": "check_in",
+  "details": {
+    "txHash": "abcd1234..."
+  }
+}
+```
+
+### Privacy guarantee
+
+The DebugLogger is designed with a **no-secrets-logged guarantee**: it never logs private keys, secret seeds, or the private key material from any connected wallet. All logged data is either:
+
+- Operation parameters (amounts, addresses, flags)
+- RPC request/response metadata (fees, transaction hashes, XDR)
+- Timing and diagnostic information (phases, durations, error types)
+
+This makes it safe to forward debug logs to your own internal logging pipeline (e.g., a logging service, analytics tool, or error tracker) without worrying about leaking credentials.
+
 ## Typed errors
 
 Contract failures are exposed as subclasses of `WillContractError`, including
@@ -491,10 +555,55 @@ console.log('Created will', willId);
 
 ```ts
 interface WalletAdapter {
+  /**
+   * Reports whether the wallet is currently connected.
+   * Should return true only after a successful connect() call.
+   */
+  isConnected(): Promise<boolean>;
+
+  /**
+   * Initiates wallet connection and returns the connected account's details.
+   * Should be called once at app startup or when the user selects the wallet.
+   */
+  connect(): Promise<WalletConnection>;
+
+  /**
+   * Reconnects to a previously connected wallet without user interaction.
+   * Used for restoring state across page reloads or app restarts.
+   */
+  reconnect(): Promise<WalletConnection>;
+
+  /**
+   * Disconnects the wallet and clears all session state.
+   */
+  disconnect(): Promise<void>;
+
+  /**
+   * Returns the public key (Stellar address) of the connected account.
+   * Throws if called before connect() or after disconnect().
+   */
   getPublicKey(): Promise<string>;
-  signTransaction(transactionXdr: string, opts: { networkPassphrase: string }): Promise<string>;
-  // Optional: lets the client cross-check the wallet's active network (see below).
+
+  /**
+   * Signs a transaction with the connected account.
+   * The transaction XDR is modified in-place with the account's signature.
+   * Typically displays a user confirmation prompt (e.g., from a browser extension).
+   */
+  signTransaction(transactionXdr: string, opts: { networkPassphrase: string; timeoutMs?: number }): Promise<string>;
+
+  /**
+   * Optional: Reports the network this wallet is currently set to.
+   * If implemented, the client can cross-check the wallet's active network
+   * against the client's configured network and throw WalletNetworkMismatchError
+   * before building a transaction (see below).
+   */
   getNetwork?(): Promise<{ network: string; networkPassphrase: string }>;
+}
+
+interface WalletConnection {
+  publicKey: string;
+  network: string;
+  networkPassphrase: string;
 }
 ```
 
@@ -510,7 +619,7 @@ const client = new SoroWillClient({
 });
 ```
 
-Supporting another wallet (xBull, Rabet, Lobstr, …) is just a matter of implementing the two `WalletAdapter` methods and passing your object as `wallet`.
+Supporting another wallet (xBull, Rabet, Lobstr, …) requires implementing all six `WalletAdapter` methods and passing your object as the `wallet` option.
 
 ## Wallet adapters
 
