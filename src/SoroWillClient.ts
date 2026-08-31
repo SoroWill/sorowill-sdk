@@ -568,8 +568,8 @@ export class SoroWillClient {
     // decoding failure.
     try {
       this.contract = new Contract(options.contractId);
-    } catch {
-      throw new InvalidContractIdError(options.contractId ?? '');
+    } catch (originalError) {
+      throw new InvalidContractIdError(options.contractId ?? '', { cause: originalError });
     }
 
     this.server =
@@ -1654,7 +1654,17 @@ export class SoroWillClient {
           error,
           durationMs: Date.now() - startTime,
         };
-        await this.hooks.runAfterInvoke(afterCtx);
+        try {
+          await this.hooks.runAfterInvoke(afterCtx);
+        } catch (hookError) {
+          this.debugLogger.logError(
+            method,
+            willId,
+            hookError instanceof Error
+              ? `afterInvoke hook threw: ${hookError.message}`
+              : `afterInvoke hook threw: ${String(hookError)}`,
+          );
+        }
       }
     }
     };
@@ -1916,7 +1926,7 @@ export class SoroWillClient {
   /** Sends every RPC through the shared FIFO queue with the selected timeout. */
   private rpc<T>(request: () => Promise<T>, options?: RequestOptions): Promise<T> {
     options?.signal?.throwIfAborted();
-    return this.queue.enqueue(request, options?.timeoutMs ?? this.timeoutMs);
+    return this.queue.enqueue(request, options?.timeoutMs ?? this.timeoutMs, options?.signal);
   }
 
   /**
