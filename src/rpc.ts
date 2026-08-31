@@ -87,11 +87,13 @@ export class RpcEndpointPool {
       }
     }
 
-    this.rpcUrls = normalizedRpcUrls;
+    const uniqueRpcUrls = Array.from(new Set(normalizedRpcUrls));
+
+    this.rpcUrls = uniqueRpcUrls;
     this.failoverCooldownMs = failoverCooldownMs;
     this.servers = serverOverride
-      ? normalizedRpcUrls.map(() => serverOverride)
-      : normalizedRpcUrls.map(
+      ? uniqueRpcUrls.map(() => serverOverride)
+      : uniqueRpcUrls.map(
           (rpcUrl) => new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') }),
         );
   }

@@ -521,6 +521,49 @@ describe('RpcEndpointPool', () => {
       vi.useRealTimers();
     }
   });
+
+  it('deduplicates identical URLs in the endpoint list', async () => {
+    const pool = new RpcEndpointPool([
+      'https://rpc-a.example',
+      'https://rpc-b.example',
+      'https://rpc-a.example',
+      'https://rpc-c.example',
+      'https://rpc-b.example',
+    ]);
+    const attempts: string[] = [];
+
+    const result = await pool.withFailover(async (_server, rpcUrl) => {
+      attempts.push(rpcUrl);
+      if (attempts.length < 3) {
+        throw new Error('fetch failed');
+      }
+      return 'ok';
+    });
+
+    expect(result).toBe('ok');
+    expect(attempts).toEqual([
+      'https://rpc-a.example',
+      'https://rpc-b.example',
+      'https://rpc-c.example',
+    ]);
+  });
+
+  it('only attempts genuinely distinct endpoints on failover', async () => {
+    const attempts: string[] = [];
+    const pool = new RpcEndpointPool(
+      ['https://rpc-a.example', 'https://rpc-a.example', 'https://rpc-a.example'],
+      undefined,
+    );
+
+    await expect(
+      pool.withFailover(async (_server, rpcUrl) => {
+        attempts.push(rpcUrl);
+        throw new Error('fetch failed');
+      }),
+    ).rejects.toThrow('fetch failed');
+
+    expect(attempts).toEqual(['https://rpc-a.example']);
+  });
 });
 
 describe('SEP-7 helpers', () => {
