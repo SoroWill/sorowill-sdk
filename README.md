@@ -228,6 +228,18 @@ Every top-level export from `@sorowill/sdk` is listed below. When adding a new p
 | `SoroWillClient` | class | `SoroWillClient` | Main client for reading and writing to a deployed SoroWill contract |
 | `DEFAULT_CONTRACT_IDS` | const | `SoroWillClient` | Maintainer-managed default contract address per network; kept in sync with `deployments/` in the contracts repo |
 
+### Custom signing flow (advanced)
+
+For applications that need custom signing logic (e.g. multi-sig, custom key derivation), the following `SoroWillClient` instance methods support building and submitting transactions step-by-step:
+
+| Method | Description |
+|---|---|
+| `buildTransaction(method, args, sourcePublicKey?)` | Builds an **unsigned, unprepared** transaction for a contract invocation. Must be passed to `prepareTransaction()` (for simulation and fees) before signing. |
+| `prepareTransaction(unsignedTxXdr)` | Simulates an unsigned transaction and attaches the footprint and resource fee estimates required by Soroban. Must be called before signing. |
+| `submitSignedTransaction(signedTxXdr, options?)` | Submits a signed, prepared transaction and waits for it to reach a terminal status. Requires the transaction to have been prepared first (contains footprint and fees). |
+
+**Important:** Signing an unprepared transaction (directly from `buildTransaction()`) will fail. The workflow is: `buildTransaction()` → `prepareTransaction()` → sign → `submitSignedTransaction()`.
+
 ### Wallet helpers (Freighter)
 
 | Export | Kind | Source module | Description |
