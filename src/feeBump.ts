@@ -1,18 +1,12 @@
 import {
   Keypair,
-  Networks,
   Transaction,
   TransactionBuilder,
   rpc,
 } from '@stellar/stellar-sdk';
 
 import { InvalidSecretKeyError } from './errors';
-import type { SoroWillNetwork } from './SoroWillClient';
-
-interface NetworkConfig {
-  rpcUrl: string;
-  networkPassphrase: string;
-}
+import { NETWORK_CONFIG, type SoroWillNetwork } from './SoroWillClient';
 
 interface SendTransactionErrorResponse {
   status: string;
@@ -20,17 +14,6 @@ interface SendTransactionErrorResponse {
   diagnosticEventsXdr?: string;
   errorResultXdr?: string;
 }
-
-const NETWORK_CONFIG: Record<SoroWillNetwork, NetworkConfig> = {
-  testnet: {
-    rpcUrl: 'https://soroban-testnet.stellar.org',
-    networkPassphrase: Networks.TESTNET,
-  },
-  mainnet: {
-    rpcUrl: 'https://mainnet.sorobanrpc.com',
-    networkPassphrase: Networks.PUBLIC,
-  },
-};
 
 /** Options for building a fee-bump transaction. */
 export interface FeeBumpOptions {
@@ -116,8 +99,9 @@ export async function submitFeeBumpTransaction(
   options: SubmitFeeBumpOptions,
 ): Promise<{ txHash: string; createdAt: number }> {
   const config = NETWORK_CONFIG[options.network];
-  const server = new rpc.Server(config.rpcUrl, {
-    allowHttp: config.rpcUrl.startsWith('http://'),
+  const rpcUrl = config.rpcUrls[0];
+  const server = new rpc.Server(rpcUrl, {
+    allowHttp: rpcUrl.startsWith('http://'),
   });
 
   const feeBumpTx = TransactionBuilder.fromXDR(

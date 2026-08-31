@@ -99,12 +99,12 @@ export const DEFAULT_CONTRACT_IDS: Record<SoroWillNetwork, string> = {
   mainnet: '',
 };
 
-interface NetworkConfig {
+export interface NetworkConfig {
   rpcUrls: string[];
   networkPassphrase: string;
 }
 
-const NETWORK_CONFIG: Record<SoroWillNetwork, NetworkConfig> = {
+export const NETWORK_CONFIG: Record<SoroWillNetwork, NetworkConfig> = {
   testnet: {
     rpcUrls: ['https://soroban-testnet.stellar.org'],
     networkPassphrase: Networks.TESTNET,
