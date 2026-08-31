@@ -155,6 +155,70 @@ const result = await client.batch([
 
 The whole batch is simulated and assembled together, signed once, and submitted atomically.
 
+## Debugging and structured logging
+
+The SDK includes a built-in structured debug logger that emits JSON logs for every operation: builds, simulations, submissions, polls, successes, and errors. This is useful for diagnosing failing or slow contract calls, monitoring transaction lifecycle, and understanding RPC behavior under load.
+
+### Enabling debug logging
+
+Pass `debug: true` when constructing the client:
+
+```ts
+const client = new SoroWillClient({
+  network: 'testnet',
+  contractId: 'C...',
+  debug: true,  // Enable structured logging
+});
+```
+
+### Log output format
+
+The logger emits structured JSON to the console (via `console.log`) at each step of an operation. For example, you should expect to see logs like:
+
+```json
+{
+  "timestamp": "2024-01-15T10:30:45.123Z",
+  "phase": "build",
+  "operation": "check_in",
+  "details": {
+    "willId": "123",
+    "owner": "GABC..."
+  }
+}
+```
+
+```json
+{
+  "timestamp": "2024-01-15T10:30:46.456Z",
+  "phase": "simulate",
+  "operation": "check_in",
+  "details": {
+    "fee": "100000"
+  }
+}
+```
+
+```json
+{
+  "timestamp": "2024-01-15T10:30:47.789Z",
+  "phase": "submit",
+  "operation": "check_in",
+  "details": {
+    "txHash": "abcd1234..."
+  }
+}
+```
+
+### Privacy guarantee
+
+The DebugLogger is designed with a **no-secrets-logged guarantee**: it never logs private keys, secret seeds, or the private key material from any connected wallet. All logged data is either:
+
+- Operation parameters (amounts, addresses, flags)
+- RPC request/response metadata (fees, transaction hashes, XDR)
+- Timing and diagnostic information (phases, durations, error types)
+
+This makes it safe to forward debug logs to your own internal logging pipeline (e.g., a logging service, analytics tool, or error tracker) without worrying about leaking credentials.
+
 ## Typed errors
 
 Contract failures are exposed as subclasses of `WillContractError`, including
