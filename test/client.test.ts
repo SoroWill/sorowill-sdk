@@ -335,6 +335,39 @@ describe('HookManager', () => {
     expect(hm.afterInvokeCount).toBe(1);
   });
 
+  it('offBeforeInvoke removes all occurrences of a duplicate hook', async () => {
+    const hm = new HookManager();
+    const calls: string[] = [];
+    const hook = async () => { calls.push('x'); };
+    hm.onBeforeInvoke(hook);
+    hm.onBeforeInvoke(async () => { calls.push('y'); });
+    hm.onBeforeInvoke(hook);
+    hm.onBeforeInvoke(async () => { calls.push('z'); });
+    hm.onBeforeInvoke(hook);
+    expect(hm.beforeInvokeCount).toBe(5);
+    hm.offBeforeInvoke(hook);
+    await hm.runBeforeInvoke({ method: 'test', args: {}, timestamp: '' });
+    expect(calls).toEqual(['y', 'z']);
+    expect(hm.beforeInvokeCount).toBe(2);
+  });
+
+  it('offAfterInvoke removes all occurrences of a duplicate hook', async () => {
+    const hm = new HookManager();
+    const calls: string[] = [];
+    const hook = async () => { calls.push('x'); };
+    hm.onAfterInvoke(hook);
+    hm.onAfterInvoke(async () => { calls.push('y'); });
+    hm.onAfterInvoke(hook);
+    hm.onAfterInvoke(async () => { calls.push('z'); });
+    hm.onAfterInvoke(hook);
+    expect(hm.afterInvokeCount).toBe(5);
+    hm.offAfterInvoke(hook);
+    const ctx: AfterInvokeContext = { method: 'test', args: { a: 1 }, timestamp: '', txHash: 'abc', error: null, durationMs: 42 };
+    await hm.runAfterInvoke(ctx);
+    expect(calls).toEqual(['y', 'z']);
+    expect(hm.afterInvokeCount).toBe(2);
+  });
+
   it('clear removes all hooks', () => {
     const hm = new HookManager();
     hm.onBeforeInvoke(() => {});
@@ -487,6 +520,49 @@ describe('RpcEndpointPool', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('deduplicates identical URLs in the endpoint list', async () => {
+    const pool = new RpcEndpointPool([
+      'https://rpc-a.example',
+      'https://rpc-b.example',
+      'https://rpc-a.example',
+      'https://rpc-c.example',
+      'https://rpc-b.example',
+    ]);
+    const attempts: string[] = [];
+
+    const result = await pool.withFailover(async (_server, rpcUrl) => {
+      attempts.push(rpcUrl);
+      if (attempts.length < 3) {
+        throw new Error('fetch failed');
+      }
+      return 'ok';
+    });
+
+    expect(result).toBe('ok');
+    expect(attempts).toEqual([
+      'https://rpc-a.example',
+      'https://rpc-b.example',
+      'https://rpc-c.example',
+    ]);
+  });
+
+  it('only attempts genuinely distinct endpoints on failover', async () => {
+    const attempts: string[] = [];
+    const pool = new RpcEndpointPool(
+      ['https://rpc-a.example', 'https://rpc-a.example', 'https://rpc-a.example'],
+      undefined,
+    );
+
+    await expect(
+      pool.withFailover(async (_server, rpcUrl) => {
+        attempts.push(rpcUrl);
+        throw new Error('fetch failed');
+      }),
+    ).rejects.toThrow('fetch failed');
+
+    expect(attempts).toEqual(['https://rpc-a.example']);
   });
 });
 

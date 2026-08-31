@@ -182,6 +182,29 @@ describe('LocalStorageCachePersistenceAdapter', () => {
     expect(removedKey).toBeDefined();
     expect(cache.get('test')).toBeUndefined();
   });
+
+  it('throws a clear error when Storage is null or undefined', () => {
+    expect(() => {
+      new LocalStorageCachePersistenceAdapter(null as unknown as Storage);
+    }).toThrow('LocalStorageCachePersistenceAdapter requires a valid Storage object');
+
+    expect(() => {
+      new LocalStorageCachePersistenceAdapter(undefined as unknown as Storage);
+    }).toThrow('LocalStorageCachePersistenceAdapter requires a valid Storage object');
+  });
+
+  it('provides helpful guidance for SSR environments', () => {
+    const error = new Error();
+    try {
+      new LocalStorageCachePersistenceAdapter(null as unknown as Storage);
+    } catch (e) {
+      if (e instanceof Error) {
+        expect(e.message).toContain('server-side rendering');
+        expect(e.message).toContain('SSR');
+        expect(e.message).toContain('MemoryCachePersistenceAdapter');
+      }
+    }
+  });
 });
 
 describe('MemoryCachePersistenceAdapter', () => {

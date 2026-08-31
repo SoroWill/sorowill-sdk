@@ -152,7 +152,7 @@ export {
   mapContractError,
 } from './errors';
 
-export { RequestQueue } from './requestQueue';
+export { RequestQueue, RequestPriority } from './requestQueue';
 export type { RequestQueueOptions } from './requestQueue';
 
 export { buildSep7TxUri, parseSep7Callback } from './sep7';
