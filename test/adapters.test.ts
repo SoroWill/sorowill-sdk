@@ -129,6 +129,48 @@ describe('SoroWillClient wallet injection', () => {
     });
     expect(client).toBeInstanceOf(SoroWillClient);
   });
+
+  it('accepts the exported wallet adapter implementations as wallet options', async () => {
+    const { SoroWillClient } = await import('../src/SoroWillClient');
+    const clientOptions = {
+      network: 'testnet' as const,
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
+    };
+
+    const wallets: WalletAdapter[] = [
+      new HanaWalletAdapter(injectedProvider()),
+      new HotWalletAdapter(injectedProvider()),
+      new LedgerWalletAdapter({
+        transport: {} as never,
+        network: 'testnet',
+        networkPassphrase: Networks.TESTNET,
+        app: {
+          getPublicKey: vi.fn().mockResolvedValue({ rawPublicKey: Buffer.alloc(32, 7) }),
+          signTransaction: vi.fn().mockResolvedValue({ signature: Buffer.alloc(64) }),
+        },
+      }),
+      new LobstrWalletAdapter({
+        client: {
+          connect: vi.fn().mockResolvedValue({
+            uri: 'wc:pairing@2?key=value',
+            approval: vi.fn().mockResolvedValue({
+              publicKey: 'GLOBSTR',
+              network: 'testnet',
+              networkPassphrase: Networks.TESTNET,
+            }),
+          }),
+          disconnect: vi.fn().mockResolvedValue(undefined),
+          isConnected: vi.fn().mockResolvedValue(true),
+          getPublicKey: vi.fn().mockResolvedValue('GLOBSTR'),
+          signTransaction: vi.fn().mockResolvedValue('signed-xdr'),
+        },
+      }),
+    ];
+
+    for (const wallet of wallets) {
+      expect(new SoroWillClient({ ...clientOptions, wallet })).toBeInstanceOf(SoroWillClient);
+    }
+  });
 });
 
 import {

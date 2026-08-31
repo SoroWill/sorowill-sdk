@@ -61,6 +61,10 @@ export class LedgerWalletAdapter implements WalletAdapter {
     };
   }
 
+  async reconnect(): Promise<WalletConnection> {
+    return this.connect();
+  }
+
   async disconnect(): Promise<void> {
     await this.options.transport.close?.();
     this.publicKey = null;

@@ -57,6 +57,10 @@ export class LobstrWalletAdapter implements WalletAdapter {
     ]);
   }
 
+  async reconnect(): Promise<WalletConnection> {
+    return this.connect();
+  }
+
   disconnect(): Promise<void> {
     return this.options.client.disconnect();
   }

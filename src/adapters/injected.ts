@@ -27,6 +27,10 @@ export abstract class InjectedWalletAdapter implements WalletAdapter {
     return this.connection;
   }
 
+  async reconnect(): Promise<WalletConnection> {
+    return this.connect();
+  }
+
   async disconnect(): Promise<void> {
     await this.provider.disconnect?.();
     this.connection = null;
