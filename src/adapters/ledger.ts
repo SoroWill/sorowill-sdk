@@ -109,4 +109,11 @@ export class LedgerWalletAdapter implements WalletAdapter {
       clearTimeout(timeoutHandle!);
     }
   }
+
+  async getNetwork(): Promise<{ network: string; networkPassphrase: string }> {
+    return {
+      network: this.options.network ?? 'custom',
+      networkPassphrase: this.options.networkPassphrase,
+    };
+  }
 }

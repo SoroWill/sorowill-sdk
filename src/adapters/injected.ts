@@ -10,6 +10,7 @@ export interface InjectedWalletProvider {
     transactionXdr: string,
     options: SignTransactionOptions,
   ): Promise<string | { signedTxXdr: string }>;
+  getNetwork?(): Promise<{ network: string; networkPassphrase: string }>;
 }
 
 /** Shared implementation for browser-injected wallet adapters. */
@@ -64,5 +65,18 @@ export abstract class InjectedWalletAdapter implements WalletAdapter {
     }
     const result = await this.provider.signTransaction(transactionXdr, options);
     return typeof result === 'string' ? result : result.signedTxXdr;
+  }
+
+  async getNetwork?(): Promise<{ network: string; networkPassphrase: string }> {
+    if (this.provider.getNetwork) {
+      return this.provider.getNetwork();
+    }
+    if (!this.connection) {
+      throw new Error(`${this.name} is not connected. Call connect() first.`);
+    }
+    return {
+      network: this.connection.network,
+      networkPassphrase: this.connection.networkPassphrase,
+    };
   }
 }

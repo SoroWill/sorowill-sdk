@@ -1,3 +1,4 @@
+import { SignTransactionTimeoutError } from './errors';
 import type { WalletAdapter, WalletConnection } from './wallet';
 
 export interface WalletConnectSessionNamespace {
@@ -52,6 +53,13 @@ export interface WalletConnectAdapterOptions {
   signTransactionMethod?: string;
   disconnectReason?: { code: number; message: string };
   sessionStore?: WalletConnectSessionStore;
+  /**
+   * Milliseconds to wait for the relay to return a signed transaction before
+   * rejecting with {@link SignTransactionTimeoutError}. Defaults to 120000.
+   * Used when the mobile wallet fails to respond — either backgrounded, inactive,
+   * or experiencing relay message loss.
+   */
+  timeoutMs?: number;
   onPairingUri?(uri: string): void | Promise<void>;
   getPublicKeyFromSession?(session: WalletConnectSession): string;
   getNetworkFromSession?(session: WalletConnectSession): { network: string; networkPassphrase: string };
@@ -67,6 +75,7 @@ const DEFAULT_REQUIRED_NAMESPACES: Record<string, WalletConnectSessionNamespace>
 };
 
 const DEFAULT_DISCONNECT_REASON = { code: 6000, message: 'Disconnected by client' };
+const DEFAULT_SIGN_TIMEOUT_MS = 120_000;
 
 function getFirstAccount(session: WalletConnectSession): string | undefined {
   const namespaces = session.namespaces ?? {};
@@ -299,19 +308,35 @@ export class WalletConnectAdapter implements WalletAdapter {
       );
     }
 
-    const response = await this.client.request({
-      topic: session.topic,
-      chainId: this.options.requestChainId ?? getDefaultChainId(session),
-      request: {
-        method: this.options.signTransactionMethod ?? 'stellar_signXdr',
-        params: {
-          transactionXdr,
-          networkPassphrase: opts.networkPassphrase,
-        },
-      },
+    const timeoutMs = this.options.timeoutMs ?? DEFAULT_SIGN_TIMEOUT_MS;
+    let timeoutHandle: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(
+        () => reject(new SignTransactionTimeoutError(timeoutMs)),
+        timeoutMs,
+      );
     });
 
-    return (this.options.getSignedTransactionXdr ?? getDefaultSignedTransactionXdr)(response);
+    try {
+      const response = await Promise.race([
+        this.client.request({
+          topic: session.topic,
+          chainId: this.options.requestChainId ?? getDefaultChainId(session),
+          request: {
+            method: this.options.signTransactionMethod ?? 'stellar_signXdr',
+            params: {
+              transactionXdr,
+              networkPassphrase: opts.networkPassphrase,
+            },
+          },
+        }),
+        timeoutPromise,
+      ]);
+
+      return (this.options.getSignedTransactionXdr ?? getDefaultSignedTransactionXdr)(response);
+    } finally {
+      clearTimeout(timeoutHandle!);
+    }
   }
 
   private async useSession(session: WalletConnectSession): Promise<WalletConnection> {

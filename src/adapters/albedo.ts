@@ -89,5 +89,9 @@ export function createAlbedoAdapter(): WalletAdapter {
       });
       return signedTxXdr;
     },
+
+    async getNetwork(): Promise<{ network: string; networkPassphrase: string }> {
+      return { network: 'public', networkPassphrase: Networks.PUBLIC };
+    },
   };
 }

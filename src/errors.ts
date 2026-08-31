@@ -93,6 +93,42 @@ export class TooManyGuardiansError extends SoroWillError {
 }
 
 /**
+ * Raised when a secret key passed to {@link signWithSecretKey} or
+ * {@link signFeeBumpXdr} is not a syntactically valid Stellar secret key.
+ * Checks include wrong length, wrong StrKey version byte, or invalid base32 encoding.
+ * Thrown synchronously before signing begins, giving callers a clear SDK-level
+ * error rather than a low-level StrKey-decoding message.
+ */
+export class InvalidSecretKeyError extends SoroWillError {
+  constructor(functionName: string, options?: ErrorOptions) {
+    super(
+      `The secret key passed to ${functionName}() is not a valid Stellar secret key. ` +
+        'A Stellar secret key must be a 56-character StrKey starting with "S" and containing valid base32 characters.',
+      options,
+    );
+  }
+}
+
+/**
+ * Raised when the transaction XDR passed to {@link MultisigCollector} constructor
+ * or {@link MultisigCollector.fromJSON} is not a syntactically valid Stellar
+ * transaction envelope XDR. This includes malformed base64 or unsupported
+ * envelope types.
+ *
+ * Validation happens synchronously at construction time, before the collector
+ * is distributed to signers, saving a full multi-party signing round-trip.
+ */
+export class InvalidTransactionXdrError extends SoroWillError {
+  constructor(options?: ErrorOptions) {
+    super(
+      'The transaction XDR is not a valid Stellar transaction envelope. ' +
+        'Ensure the XDR is base64-encoded and represents a valid TransactionEnvelope (v1 or fee-bump).',
+      options,
+    );
+  }
+}
+
+/**
  * Raised when the wallet's `signTransaction` call does not resolve within the
  * configured timeout. This can happen when the Freighter popup is dismissed in
  * a way that leaves the underlying promise pending, or when the extension hangs.

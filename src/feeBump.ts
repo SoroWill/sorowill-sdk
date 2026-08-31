@@ -6,6 +6,7 @@ import {
   rpc,
 } from '@stellar/stellar-sdk';
 
+import { InvalidSecretKeyError } from './errors';
 import type { SoroWillNetwork } from './SoroWillClient';
 
 interface NetworkConfig {
@@ -85,13 +86,20 @@ export async function buildFeeBumpXdr(options: FeeBumpOptions): Promise<string> 
 /**
  * Sign a fee-bump transaction with a secret key (the fee sponsor's key).
  * Returns the signed fee-bump transaction XDR.
+ * @throws {InvalidSecretKeyError} if the secret key is malformed.
  */
 export function signFeeBumpXdr(
   feeBumpXdr: string,
   secretKey: string,
   networkPassphrase: string,
 ): string {
-  const keypair = Keypair.fromSecret(secretKey);
+  let keypair: Keypair;
+  try {
+    keypair = Keypair.fromSecret(secretKey);
+  } catch (error) {
+    throw new InvalidSecretKeyError('signFeeBumpXdr');
+  }
+
   const feeBump = TransactionBuilder.fromXDR(feeBumpXdr, networkPassphrase);
 
   const hashed = feeBump.hash();
@@ -158,7 +166,12 @@ export async function submitFeeBump(options: {
   pollAttempts?: number;
 }): Promise<{ txHash: string; createdAt: number }> {
   const config = NETWORK_CONFIG[options.network];
-  const keypair = Keypair.fromSecret(options.feeSourceSecretKey);
+  let keypair: Keypair;
+  try {
+    keypair = Keypair.fromSecret(options.feeSourceSecretKey);
+  } catch (error) {
+    throw new InvalidSecretKeyError('submitFeeBump');
+  }
   const publicKey = keypair.publicKey();
 
   let fee = options.fee;
