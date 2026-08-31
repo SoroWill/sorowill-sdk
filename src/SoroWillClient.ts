@@ -65,7 +65,6 @@ import { HookManager } from './hooks';
 import type { BeforeInvokeContext, AfterInvokeContext } from './hooks';
 import { assertPreparedTransactionMatchesIntendedOperation } from './txValidation';
 import { DebugLogger } from './debugLogger';
-import { InFlightTracker } from './inFlightTracker';
 
 type ScVal = xdr.ScVal;
 
