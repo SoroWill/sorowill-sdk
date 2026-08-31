@@ -431,7 +431,7 @@ globalThis.fetch = fetch;
 
 Popular polyfill packages: [`node-fetch`](https://github.com/node-fetch/node-fetch) (v3+, ESM), [`cross-fetch`](https://github.com/lquixada/cross-fetch) (CJS and ESM).
 
-> **Note:** Node.js 18+ ships with a built-in global `fetch` (unflagged in 21+). If your `engines` field targets `>=18`, no polyfill is needed.
+> **Note:** The SDK currently targets Node.js 22+; this matches the active CI and the current `vitest`/`jsdom` runtime requirements, so no fetch polyfill is needed.
 
 ## Scripts, automation, and testing (KeypairSigner)
 
