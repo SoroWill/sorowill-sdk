@@ -57,14 +57,15 @@ function makeClient(overrides: Record<string, unknown> = {}) {
 describe('buildSep7SigningUri', () => {
   it('builds a SEP-7 signing URI with XDR, network passphrase, and callback URL', async () => {
     const { client } = makeClient();
+    const testAccount = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 
     const uri = await client.buildSep7SigningUri(
       'check_in',
       {
         will_id: BigInt(42),
-        owner: 'GTESTACCOUNT',
+        owner: testAccount,
       },
-      'GTESTACCOUNT',
+      testAccount,
       {
         callbackUrl: 'https://example.com/callback',
       },
@@ -79,22 +80,25 @@ describe('buildSep7SigningUri', () => {
 
   it('uses the client network passphrase as default when options.networkPassphrase is omitted', async () => {
     const { client } = makeClient({ networkPassphrase: Networks.TESTNET });
+    const testAccount = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 
     const uri = await client.buildSep7SigningUri(
       'check_in',
       {
         will_id: BigInt(42),
-        owner: 'GTESTACCOUNT',
+        owner: testAccount,
       },
-      'GTESTACCOUNT',
+      testAccount,
       {
         callbackUrl: 'https://example.com/callback',
       },
     );
 
     // The client's networkPassphrase should be encoded in the URI
-    const decodedUri = decodeURIComponent(uri);
-    expect(decodedUri).toContain(`network_passphrase=${Networks.TESTNET}`);
+    expect(uri).toContain('network_passphrase=');
+    // buildSep7TxUri uses application/x-www-form-urlencoded encoding (spaces as +)
+    const formEncodedPassphrase = Networks.TESTNET.replace(/ /g, '+').replace(/;/g, '%3B');
+    expect(uri).toContain(`network_passphrase=${formEncodedPassphrase}`);
   });
 
   it('uses the provided network passphrase when options.networkPassphrase is specified', async () => {
@@ -105,9 +109,9 @@ describe('buildSep7SigningUri', () => {
       'check_in',
       {
         will_id: BigInt(42),
-        owner: 'GTESTACCOUNT',
+        owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
       },
-      'GTESTACCOUNT',
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
       {
         callbackUrl: 'https://example.com/callback',
         networkPassphrase: customPassphrase,
@@ -115,8 +119,10 @@ describe('buildSep7SigningUri', () => {
     );
 
     // The custom networkPassphrase should be encoded in the URI
-    const decodedUri = decodeURIComponent(uri);
-    expect(decodedUri).toContain(`network_passphrase=${customPassphrase}`);
+    expect(uri).toContain('network_passphrase=');
+    // buildSep7TxUri uses application/x-www-form-urlencoded encoding (spaces as +)
+    const formEncodedPassphrase = customPassphrase.replace(/ /g, '+').replace(/;/g, '%3B');
+    expect(uri).toContain(`network_passphrase=${formEncodedPassphrase}`);
   });
 
   it('includes optional message parameter in the URI when provided', async () => {
@@ -126,9 +132,9 @@ describe('buildSep7SigningUri', () => {
       'check_in',
       {
         will_id: BigInt(42),
-        owner: 'GTESTACCOUNT',
+        owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
       },
-      'GTESTACCOUNT',
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
       {
         callbackUrl: 'https://example.com/callback',
         message: 'Sign to check in on your will',
@@ -146,9 +152,9 @@ describe('buildSep7SigningUri', () => {
       'check_in',
       {
         will_id: BigInt(42),
-        owner: 'GTESTACCOUNT',
+        owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
       },
-      'GTESTACCOUNT',
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
       {
         callbackUrl: 'https://example.com/callback',
         originDomain: 'example.com',
@@ -159,6 +165,7 @@ describe('buildSep7SigningUri', () => {
   });
 
   it('throws a clear error when prepareTransaction fails', async () => {
+    const testAccount = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
     const fakeServer = {
       getAccount: async (publicKey: string) => new Account(publicKey, '0'),
       prepareTransaction: async () => {
@@ -193,9 +200,9 @@ describe('buildSep7SigningUri', () => {
         'check_in',
         {
           will_id: BigInt(42),
-          owner: 'GTESTACCOUNT',
+          owner: testAccount,
         },
-        'GTESTACCOUNT',
+        testAccount,
         {
           callbackUrl: 'https://example.com/callback',
         },
@@ -207,6 +214,9 @@ describe('buildSep7SigningUri', () => {
     const fakeServer = {
       getAccount: async (publicKey: string) => new Account(publicKey, '0'),
       getContractWasmByContractId: async () => new Uint8Array(),
+      prepareTransaction: async () => {
+        throw new Error('Network error');
+      },
       simulateTransaction: async () => {
         throw new Error('Network error');
       },
@@ -234,9 +244,9 @@ describe('buildSep7SigningUri', () => {
       'check_in',
       {
         will_id: BigInt(42),
-        owner: 'GTESTACCOUNT',
+        owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
       },
-      'GTESTACCOUNT',
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
       {
         callbackUrl: 'https://example.com/callback',
       },
@@ -248,19 +258,20 @@ describe('buildSep7SigningUri', () => {
 
   it('accepts different contract methods and encodes their arguments correctly', async () => {
     const { client } = makeClient();
+    const testAccount = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 
     const uri = await client.buildSep7SigningUri(
       'create_will',
       {
-        owner: 'GOWNER',
-        token: 'GTOKEN',
+        owner: testAccount,
+        token: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB',
         amount: BigInt(1000000),
         beneficiaries: [],
         checkin_period_days: BigInt(90),
         grace_period_days: BigInt(7),
         guardians: [],
       },
-      'GOWNER',
+      testAccount,
       {
         callbackUrl: 'https://example.com/callback',
       },
