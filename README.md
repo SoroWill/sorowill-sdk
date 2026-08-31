@@ -127,6 +127,28 @@ shared FIFO queue configured by `maxConcurrentRequests` and `requestsPerSecond`,
 of reads or writes from overwhelming a public endpoint. A timeout rejects with
 `RequestTimeoutError`.
 
+## Client options
+
+Pass options to the `SoroWillClient` constructor (or to `forNetwork()`/`fromEnv()`) to configure behavior:
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `contractId` | string | Network-specific (see `DEFAULT_CONTRACT_IDS`) | Contract address on the target network |
+| `rpcUrl` | string | Mainnet or Testnet endpoint | Soroban RPC endpoint for transaction operations |
+| `networkPassphrase` | string | Networks.TESTNET or MAINNET | Network identifier (checked against the connected wallet) |
+| `timeoutMs` | number | `30000` | Milliseconds to wait for each RPC request before rejecting with `RequestTimeoutError` |
+| `maxConcurrentRequests` | number | `4` | Maximum number of simultaneous RPC requests |
+| `requestsPerSecond` | number | `10` | Rate limit: max requests started per rolling one-second window |
+| `pollAttempts` | number | `30` | Max attempts when polling for transaction finality; increase under mainnet congestion |
+| `autoFeeBumpOnTimeout` | boolean | `false` | **When `true`: if a transaction doesn't land within the poll window, the SDK automatically rebuilds and resubmits with a higher fee.** This means a second, higher-fee transaction may be submitted on your behalf without explicit re-signing. Defaults to `false` (disabled). Set to `true` only if you want this automatic retry behavior and are prepared for the cost implication (two transactions instead of one). See the fee-bump helpers section for manual fee-bump control. |
+| `transactionTimeoutSeconds` | number | `30` | Validity window (in seconds) for every built transaction; increase if your signing flow takes longer than 30 seconds (e.g. hardware wallets requiring user approval on-device) |
+| `debug` | boolean | `false` | Enable structured debug logging of operation builds, simulations, and submissions (no secrets logged) |
+| `readCache` | object | — | Read-cache configuration: `{ ttlMs: number, persistence?: CachePersistenceAdapter }` for in-memory or persistent caching across reloads |
+| `retry` | object | — | Transient-failure retry configuration: `{ maxAttempts: number, initialDelayMs: number }` with exponential backoff |
+| `wallet` | WalletAdapter | `freighterAdapter` | Wallet adapter for signing (Freighter, Ledger, WalletConnect, Hana, HOT, Albedo, LOBSTR, etc.) |
+| `spec` | ContractSpec | — | Advanced: pre-loaded contract spec to skip lazy WASM fetch on first call |
+| `specJson` | Uint8Array | — | Advanced: pre-loaded contract WASM bytes to skip lazy `getContractWasmByContractId` RPC call |
+
 ## Batch transactions
 
 `batch` combines native contract calls into one Stellar transaction and therefore one Freighter
@@ -292,6 +314,18 @@ Every top-level export from `@sorowill/sdk` is listed below. When adding a new p
 | `SoroWillClient` | class | `SoroWillClient` | Main client for reading and writing to a deployed SoroWill contract |
 | `DEFAULT_CONTRACT_IDS` | const | `SoroWillClient` | Maintainer-managed default contract address per network; kept in sync with `deployments/` in the contracts repo |
 
+### Custom signing flow (advanced)
+
+For applications that need custom signing logic (e.g. multi-sig, custom key derivation), the following `SoroWillClient` instance methods support building and submitting transactions step-by-step:
+
+| Method | Description |
+|---|---|
+| `buildTransaction(method, args, sourcePublicKey?)` | Builds an **unsigned, unprepared** transaction for a contract invocation. Must be passed to `prepareTransaction()` (for simulation and fees) before signing. |
+| `prepareTransaction(unsignedTxXdr)` | Simulates an unsigned transaction and attaches the footprint and resource fee estimates required by Soroban. Must be called before signing. |
+| `submitSignedTransaction(signedTxXdr, options?)` | Submits a signed, prepared transaction and waits for it to reach a terminal status. Requires the transaction to have been prepared first (contains footprint and fees). |
+
+**Important:** Signing an unprepared transaction (directly from `buildTransaction()`) will fail. The workflow is: `buildTransaction()` → `prepareTransaction()` → sign → `submitSignedTransaction()`.
+
 ### Wallet helpers (Freighter)
 
 | Export | Kind | Source module | Description |
@@ -304,7 +338,7 @@ Every top-level export from `@sorowill/sdk` is listed below. When adding a new p
 | `getDefaultWalletAdapter` | function | `wallet` | Returns `freighterAdapter`; exported for testing overrides |
 | `FreighterWalletAdapter` | class | `wallet` | Class form of the Freighter adapter |
 
-### Wallet adapters
+### Wallet adapter exports
 
 | Export | Kind | Source module | Description |
 |---|---|---|---|
@@ -621,7 +655,7 @@ const client = new SoroWillClient({
 
 Supporting another wallet (xBull, Rabet, Lobstr, …) requires implementing all six `WalletAdapter` methods and passing your object as the `wallet` option.
 
-## Wallet adapters
+## Using wallet adapters
 
 All adapters implement `WalletAdapter`, whose `connect`, `disconnect`,
 `isConnected`, `getPublicKey`, and `signTransaction` methods make it possible

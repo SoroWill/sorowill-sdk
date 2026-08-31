@@ -65,7 +65,6 @@ import { HookManager } from './hooks';
 import type { BeforeInvokeContext, AfterInvokeContext } from './hooks';
 import { assertPreparedTransactionMatchesIntendedOperation } from './txValidation';
 import { DebugLogger } from './debugLogger';
-import { InFlightTracker } from './inFlightTracker';
 
 type ScVal = xdr.ScVal;
 
@@ -1854,6 +1853,30 @@ export class SoroWillClient {
     }
   }
 
+  /**
+   * Builds an unsigned transaction for a contract invocation without simulating it.
+   *
+   * **IMPORTANT:** The returned transaction is **NOT prepared** (not simulated). It lacks the
+   * footprint and resource fee estimates that Soroban simulation adds. Signing and submitting
+   * this transaction directly will fail for any Soroban invocation that needs these estimates.
+   *
+   * To use this for a custom signing flow:
+   * 1. Call this method to build the unsigned transaction XDR
+   * 2. Convert to XDR with `.toXDR()` and pass to your signing mechanism
+   * 3. After signing, call `prepareTransaction()` on the signed XDR to simulate and add fees
+   * 4. Submit the prepared transaction with `submitSignedTransaction()`
+   *
+   * Alternatively, use the higher-level state-changing methods (e.g. `createWill()`) which
+   * handle building, simulating, signing, and submitting atomically.
+   *
+   * @param method - The contract method name (e.g. `'create_will'`, `'check_in'`)
+   * @param args - Arguments to the method as a record of name-value pairs
+   * @param sourcePublicKey - Optional source account public key; defaults to the connected wallet
+   * @returns An unsigned, unprepared transaction XDR
+   * @throws {SimulationError} If the method name or arguments are invalid (during XDR encoding)
+   * @throws {AccountNotFundedError} If the source account does not exist on the ledger
+   * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout
+   */
   async buildTransaction(
     method: string,
     args: Record<string, unknown>,
@@ -1862,6 +1885,23 @@ export class SoroWillClient {
     return this.prepareInvocation(method, args, undefined, sourcePublicKey);
   }
 
+  /**
+   * Submits a signed transaction and waits for it to reach a terminal status.
+   *
+   * For custom signing flows using `buildTransaction()`, the transaction must be prepared
+   * (simulated) BEFORE signing. The required workflow is:
+   * 1. `buildTransaction()` to build an unsigned, unprepared transaction
+   * 2. `prepareTransaction()` on the unsigned XDR to simulate and add fees
+   * 3. Sign the prepared XDR with your signing mechanism
+   * 4. Call this method with the signed XDR to submit and poll
+   *
+   * @param signedTxXdr - A signed, prepared transaction XDR string
+   * @param options - Optional per-call timeout and abort signal
+   * @returns An object with the transaction hash, ledger creation timestamp, and contract return value
+   * @throws {SoroWillError} If the XDR is a fee-bump envelope or if the transaction does not succeed
+   * @throws {SoroWillError} If RPC submission fails or the node is under backpressure
+   * @throws {RequestTimeoutError} If polling exceeds its configured timeout
+   */
   async submitSignedTransaction(
     signedTxXdr: string,
     options?: RequestOptions,
