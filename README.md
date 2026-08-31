@@ -491,10 +491,55 @@ console.log('Created will', willId);
 
 ```ts
 interface WalletAdapter {
+  /**
+   * Reports whether the wallet is currently connected.
+   * Should return true only after a successful connect() call.
+   */
+  isConnected(): Promise<boolean>;
+
+  /**
+   * Initiates wallet connection and returns the connected account's details.
+   * Should be called once at app startup or when the user selects the wallet.
+   */
+  connect(): Promise<WalletConnection>;
+
+  /**
+   * Reconnects to a previously connected wallet without user interaction.
+   * Used for restoring state across page reloads or app restarts.
+   */
+  reconnect(): Promise<WalletConnection>;
+
+  /**
+   * Disconnects the wallet and clears all session state.
+   */
+  disconnect(): Promise<void>;
+
+  /**
+   * Returns the public key (Stellar address) of the connected account.
+   * Throws if called before connect() or after disconnect().
+   */
   getPublicKey(): Promise<string>;
-  signTransaction(transactionXdr: string, opts: { networkPassphrase: string }): Promise<string>;
-  // Optional: lets the client cross-check the wallet's active network (see below).
+
+  /**
+   * Signs a transaction with the connected account.
+   * The transaction XDR is modified in-place with the account's signature.
+   * Typically displays a user confirmation prompt (e.g., from a browser extension).
+   */
+  signTransaction(transactionXdr: string, opts: { networkPassphrase: string; timeoutMs?: number }): Promise<string>;
+
+  /**
+   * Optional: Reports the network this wallet is currently set to.
+   * If implemented, the client can cross-check the wallet's active network
+   * against the client's configured network and throw WalletNetworkMismatchError
+   * before building a transaction (see below).
+   */
   getNetwork?(): Promise<{ network: string; networkPassphrase: string }>;
+}
+
+interface WalletConnection {
+  publicKey: string;
+  network: string;
+  networkPassphrase: string;
 }
 ```
 
@@ -510,7 +555,7 @@ const client = new SoroWillClient({
 });
 ```
 
-Supporting another wallet (xBull, Rabet, Lobstr, …) is just a matter of implementing the two `WalletAdapter` methods and passing your object as `wallet`.
+Supporting another wallet (xBull, Rabet, Lobstr, …) requires implementing all six `WalletAdapter` methods and passing your object as the `wallet` option.
 
 ## Wallet adapters
 
