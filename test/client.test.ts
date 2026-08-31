@@ -335,6 +335,39 @@ describe('HookManager', () => {
     expect(hm.afterInvokeCount).toBe(1);
   });
 
+  it('offBeforeInvoke removes all occurrences of a duplicate hook', async () => {
+    const hm = new HookManager();
+    const calls: string[] = [];
+    const hook = async () => { calls.push('x'); };
+    hm.onBeforeInvoke(hook);
+    hm.onBeforeInvoke(async () => { calls.push('y'); });
+    hm.onBeforeInvoke(hook);
+    hm.onBeforeInvoke(async () => { calls.push('z'); });
+    hm.onBeforeInvoke(hook);
+    expect(hm.beforeInvokeCount).toBe(5);
+    hm.offBeforeInvoke(hook);
+    await hm.runBeforeInvoke({ method: 'test', args: {}, timestamp: '' });
+    expect(calls).toEqual(['y', 'z']);
+    expect(hm.beforeInvokeCount).toBe(2);
+  });
+
+  it('offAfterInvoke removes all occurrences of a duplicate hook', async () => {
+    const hm = new HookManager();
+    const calls: string[] = [];
+    const hook = async () => { calls.push('x'); };
+    hm.onAfterInvoke(hook);
+    hm.onAfterInvoke(async () => { calls.push('y'); });
+    hm.onAfterInvoke(hook);
+    hm.onAfterInvoke(async () => { calls.push('z'); });
+    hm.onAfterInvoke(hook);
+    expect(hm.afterInvokeCount).toBe(5);
+    hm.offAfterInvoke(hook);
+    const ctx: AfterInvokeContext = { method: 'test', args: { a: 1 }, timestamp: '', txHash: 'abc', error: null, durationMs: 42 };
+    await hm.runAfterInvoke(ctx);
+    expect(calls).toEqual(['y', 'z']);
+    expect(hm.afterInvokeCount).toBe(2);
+  });
+
   it('clear removes all hooks', () => {
     const hm = new HookManager();
     hm.onBeforeInvoke(() => {});

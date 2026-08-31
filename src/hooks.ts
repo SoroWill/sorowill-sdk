@@ -83,16 +83,22 @@ export class HookManager {
     this.registry.afterInvoke.push(hook);
   }
 
-  /** Remove a previously registered beforeInvoke hook. */
+  /** Remove all occurrences of a previously registered beforeInvoke hook. */
   offBeforeInvoke(hook: BeforeInvokeHook): void {
-    const idx = this.registry.beforeInvoke.indexOf(hook);
-    if (idx !== -1) this.registry.beforeInvoke.splice(idx, 1);
+    let idx = this.registry.beforeInvoke.indexOf(hook);
+    while (idx !== -1) {
+      this.registry.beforeInvoke.splice(idx, 1);
+      idx = this.registry.beforeInvoke.indexOf(hook);
+    }
   }
 
-  /** Remove a previously registered afterInvoke hook. */
+  /** Remove all occurrences of a previously registered afterInvoke hook. */
   offAfterInvoke(hook: AfterInvokeHook): void {
-    const idx = this.registry.afterInvoke.indexOf(hook);
-    if (idx !== -1) this.registry.afterInvoke.splice(idx, 1);
+    let idx = this.registry.afterInvoke.indexOf(hook);
+    while (idx !== -1) {
+      this.registry.afterInvoke.splice(idx, 1);
+      idx = this.registry.afterInvoke.indexOf(hook);
+    }
   }
 
   /** Remove all registered hooks. */
