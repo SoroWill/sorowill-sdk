@@ -127,6 +127,28 @@ shared FIFO queue configured by `maxConcurrentRequests` and `requestsPerSecond`,
 of reads or writes from overwhelming a public endpoint. A timeout rejects with
 `RequestTimeoutError`.
 
+## Client options
+
+Pass options to the `SoroWillClient` constructor (or to `forNetwork()`/`fromEnv()`) to configure behavior:
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `contractId` | string | Network-specific (see `DEFAULT_CONTRACT_IDS`) | Contract address on the target network |
+| `rpcUrl` | string | Mainnet or Testnet endpoint | Soroban RPC endpoint for transaction operations |
+| `networkPassphrase` | string | Networks.TESTNET or MAINNET | Network identifier (checked against the connected wallet) |
+| `timeoutMs` | number | `30000` | Milliseconds to wait for each RPC request before rejecting with `RequestTimeoutError` |
+| `maxConcurrentRequests` | number | `4` | Maximum number of simultaneous RPC requests |
+| `requestsPerSecond` | number | `10` | Rate limit: max requests started per rolling one-second window |
+| `pollAttempts` | number | `30` | Max attempts when polling for transaction finality; increase under mainnet congestion |
+| `autoFeeBumpOnTimeout` | boolean | `false` | **When `true`: if a transaction doesn't land within the poll window, the SDK automatically rebuilds and resubmits with a higher fee.** This means a second, higher-fee transaction may be submitted on your behalf without explicit re-signing. Defaults to `false` (disabled). Set to `true` only if you want this automatic retry behavior and are prepared for the cost implication (two transactions instead of one). See the fee-bump helpers section for manual fee-bump control. |
+| `transactionTimeoutSeconds` | number | `30` | Validity window (in seconds) for every built transaction; increase if your signing flow takes longer than 30 seconds (e.g. hardware wallets requiring user approval on-device) |
+| `debug` | boolean | `false` | Enable structured debug logging of operation builds, simulations, and submissions (no secrets logged) |
+| `readCache` | object | — | Read-cache configuration: `{ ttlMs: number, persistence?: CachePersistenceAdapter }` for in-memory or persistent caching across reloads |
+| `retry` | object | — | Transient-failure retry configuration: `{ maxAttempts: number, initialDelayMs: number }` with exponential backoff |
+| `wallet` | WalletAdapter | `freighterAdapter` | Wallet adapter for signing (Freighter, Ledger, WalletConnect, Hana, HOT, Albedo, LOBSTR, etc.) |
+| `spec` | ContractSpec | — | Advanced: pre-loaded contract spec to skip lazy WASM fetch on first call |
+| `specJson` | Uint8Array | — | Advanced: pre-loaded contract WASM bytes to skip lazy `getContractWasmByContractId` RPC call |
+
 ## Batch transactions
 
 `batch` combines native contract calls into one Stellar transaction and therefore one Freighter
