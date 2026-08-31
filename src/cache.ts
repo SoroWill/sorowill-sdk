@@ -298,15 +298,25 @@ export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdap
   }
 }
 
+/**
+ * IndexedDB-backed cache persistence adapter.
+ *
+ * The IndexedDB connection is opened lazily on first access (readAll, write, delete, or clear),
+ * not in the constructor. This allows code to instantiate the adapter without side effects,
+ * such as while deciding between IndexedDB and LocalStorage fallback strategies.
+ *
+ * If the connection attempt fails, the error is thrown at first use and will not be retried;
+ * calling any method again on the same instance will attempt to open again, but since the
+ * failure state is not tracked, repeated failures are possible.
+ */
 export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter {
   private readonly dbName: string;
   private readonly storeName: string;
-  private readonly dbPromise: Promise<IDBDatabase>;
+  private dbPromise: Promise<IDBDatabase> | undefined;
 
   constructor(options: { dbName?: string; storeName?: string } = {}) {
     this.dbName = options.dbName ?? 'sorowill-sdk';
     this.storeName = options.storeName ?? 'read-cache';
-    this.dbPromise = this.open();
   }
 
   async readAll(): Promise<PersistedCacheEntry[]> {
@@ -329,6 +339,13 @@ export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter
     await this.request(store.clear());
   }
 
+  private getDbPromise(): Promise<IDBDatabase> {
+    if (!this.dbPromise) {
+      this.dbPromise = this.open();
+    }
+    return this.dbPromise;
+  }
+
   private async open(): Promise<IDBDatabase> {
     const request = indexedDB.open(this.dbName, 1);
 
@@ -346,7 +363,7 @@ export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter
   }
 
   private async getStore(mode: IDBTransactionMode): Promise<IDBObjectStore> {
-    const db = await this.dbPromise;
+    const db = await this.getDbPromise();
     const transaction = db.transaction(this.storeName, mode);
     return transaction.objectStore(this.storeName);
   }
