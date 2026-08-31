@@ -240,6 +240,14 @@ export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdap
   private readonly keysIndexKey: string;
 
   constructor(storage: Storage, options: { key?: string } = {}) {
+    if (!storage) {
+      throw new Error(
+        'LocalStorageCachePersistenceAdapter requires a valid Storage object. ' +
+        'In server-side rendering (SSR) environments, window.localStorage is unavailable at construction time. ' +
+        'Either provide the Storage object conditionally (e.g., only in browsers), ' +
+        'or use MemoryCachePersistenceAdapter for SSR environments.',
+      );
+    }
     this.storage = storage;
     this.storageKey = options.key ?? DEFAULT_CACHE_NAMESPACE;
     this.keysIndexKey = `${this.storageKey}:__keys__`;
