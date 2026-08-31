@@ -240,7 +240,7 @@ Every top-level export from `@sorowill/sdk` is listed below. When adding a new p
 | `getDefaultWalletAdapter` | function | `wallet` | Returns `freighterAdapter`; exported for testing overrides |
 | `FreighterWalletAdapter` | class | `wallet` | Class form of the Freighter adapter |
 
-### Wallet adapters
+### Wallet adapter exports
 
 | Export | Kind | Source module | Description |
 |---|---|---|---|
@@ -512,7 +512,7 @@ const client = new SoroWillClient({
 
 Supporting another wallet (xBull, Rabet, Lobstr, …) is just a matter of implementing the two `WalletAdapter` methods and passing your object as `wallet`.
 
-## Wallet adapters
+## Using wallet adapters
 
 All adapters implement `WalletAdapter`, whose `connect`, `disconnect`,
 `isConnected`, `getPublicKey`, and `signTransaction` methods make it possible
