@@ -24,6 +24,37 @@ export class SoroWillInvalidAmountError extends SoroWillError {
   }
 }
 
+/**
+ * Raised when a `willId` string passed to SoroWillClient methods is not a valid
+ * non-negative integer. This catches malformed URL route parameters before they
+ * reach `BigInt()` and produce an opaque SyntaxError.
+ */
+export class SoroWillInvalidIdError extends SoroWillError {
+  /** The invalid will id that was supplied. */
+  readonly willId: string;
+
+  constructor(willId: string, options?: ErrorOptions) {
+    super(
+      `Invalid will id "${willId}": must be a string representing a non-negative integer (e.g. "123").`,
+      options,
+    );
+    this.willId = willId;
+  }
+}
+
+/**
+ * Parses a `willId` string into a BigInt, validating that it is a decimal
+ * non-negative integer before calling `BigInt()`.
+ *
+ * @throws {SoroWillInvalidIdError} if `willId` is not a string of decimal digits.
+ */
+export function parseWillId(willId: string): bigint {
+  if (typeof willId !== 'string' || !/^[0-9]+$/.test(willId)) {
+    throw new SoroWillInvalidIdError(String(willId));
+  }
+  return BigInt(willId);
+}
+
 /** Raised when an RPC call exceeds its configured deadline. */
 export class RequestTimeoutError extends SoroWillError {
   readonly timeoutMs: number;
