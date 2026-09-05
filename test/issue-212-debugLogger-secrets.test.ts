@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DebugLogger } from '../src/debugLogger';
 
 describe('Issue #212: DebugLogger logs caller-supplied details verbatim without redaction', () => {

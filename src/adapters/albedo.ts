@@ -1,7 +1,22 @@
-import albedo from '@albedo-link/intent';
+import type Albedo from '@albedo-link/intent';
 import { Networks } from '@stellar/stellar-sdk';
 
 import type { WalletAdapter, WalletConnection } from '../wallet';
+
+/**
+ * `@albedo-link/intent` is an optional peer dependency — consumers who only
+ * use Freighter, Ledger, WalletConnect, or a custom {@link WalletAdapter} are
+ * not required to install it. Its UMD bundle also assumes a browser `window`
+ * global and throws immediately if evaluated outside one (e.g. in a test
+ * runner), so it must be imported lazily rather than at module load time.
+ */
+let albedoPromise: Promise<typeof Albedo> | undefined;
+function loadAlbedo(): Promise<typeof Albedo> {
+  if (!albedoPromise) {
+    albedoPromise = import('@albedo-link/intent').then((mod) => mod.default);
+  }
+  return albedoPromise;
+}
 
 /**
  * Maps a Stellar network passphrase to the network identifier Albedo expects
@@ -43,6 +58,7 @@ export function createAlbedoAdapter(): WalletAdapter {
     },
 
     async connect(): Promise<WalletConnection> {
+      const albedo = await loadAlbedo();
       const { pubkey } = await albedo.publicKey({});
       cachedPublicKey = pubkey;
       connected = true;
@@ -57,6 +73,7 @@ export function createAlbedoAdapter(): WalletAdapter {
           networkPassphrase: Networks.PUBLIC,
         };
       }
+      const albedo = await loadAlbedo();
       const { pubkey } = await albedo.publicKey({});
       cachedPublicKey = pubkey;
       connected = true;
@@ -72,6 +89,7 @@ export function createAlbedoAdapter(): WalletAdapter {
       if (connected && cachedPublicKey) {
         return cachedPublicKey;
       }
+      const albedo = await loadAlbedo();
       const { pubkey } = await albedo.publicKey({});
       cachedPublicKey = pubkey;
       connected = true;
@@ -82,6 +100,7 @@ export function createAlbedoAdapter(): WalletAdapter {
       transactionXdr: string,
       opts: { networkPassphrase: string },
     ): Promise<string> {
+      const albedo = await loadAlbedo();
       const { signed_envelope_xdr: signedTxXdr } = await albedo.tx({
         xdr: transactionXdr,
         network: toAlbedoNetwork(opts.networkPassphrase),

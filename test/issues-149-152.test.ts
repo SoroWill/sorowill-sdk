@@ -45,7 +45,11 @@ vi.mock('@stellar/freighter-api', () => ({
   },
 }));
 
-vi.mock('@stellar/stellar-sdk', () => {
+vi.mock('@stellar/stellar-sdk', async () => {
+  const { StrKey } = await vi.importActual<typeof import('@stellar/stellar-sdk')>(
+    '@stellar/stellar-sdk',
+  );
+
   class MockAccount {
     constructor(
       public readonly accountId: string,
@@ -102,6 +106,7 @@ vi.mock('@stellar/stellar-sdk', () => {
     Account: MockAccount,
     BASE_FEE: '100',
     Contract: MockContract,
+    StrKey,
     Networks: { PUBLIC: 'PUBLIC', TESTNET: 'Test SDF Network ; September 2015' },
     Transaction: MockTransaction,
     TransactionBuilder: MockTransactionBuilder,
@@ -175,7 +180,9 @@ function makeClient(overrides: { rpcServer?: unknown } = {}): SoroWillClient {
   });
 }
 
-const VALID_BENEFICIARIES = [{ address: 'GBENAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', percentage: 100 }];
+const VALID_BENEFICIARIES = [
+  { address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 },
+];
 
 // ---------------------------------------------------------------------------
 // #149 — createWill validates checkinPeriodDays / gracePeriodDays

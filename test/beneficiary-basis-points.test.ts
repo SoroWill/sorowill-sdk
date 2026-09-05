@@ -26,7 +26,11 @@ vi.mock('@stellar/freighter-api', () => ({
   default: freighterApiMock,
 }));
 
-vi.mock('@stellar/stellar-sdk', () => {
+vi.mock('@stellar/stellar-sdk', async () => {
+  const { StrKey } = await vi.importActual<typeof import('@stellar/stellar-sdk')>(
+    '@stellar/stellar-sdk',
+  );
+
   class MockAccount {
     constructor(
       public readonly accountId: string,
@@ -100,6 +104,7 @@ vi.mock('@stellar/stellar-sdk', () => {
     Account: MockAccount,
     BASE_FEE: '100',
     Contract: MockContract,
+    StrKey,
     Networks: { PUBLIC: 'PUBLIC', TESTNET: 'TESTNET' },
     Transaction: MockTransaction,
     TransactionBuilder: MockTransactionBuilder,
@@ -161,8 +166,8 @@ describe('beneficiary percentage -> contract basis points', () => {
       token: 'CTOKEN',
       amount: '1000000',
       beneficiaries: [
-        { address: 'GBENA', percentage: 30 },
-        { address: 'GBENB', percentage: 70 },
+        { address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', percentage: 30 },
+        { address: 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6', percentage: 70 },
       ],
       checkinPeriodDays: 90,
       gracePeriodDays: 7,
@@ -170,8 +175,8 @@ describe('beneficiary percentage -> contract basis points', () => {
     });
 
     expect(beneficiariesFor('create_will')).toEqual([
-      { address: 'GBENA', basis_points: 3000 },
-      { address: 'GBENB', basis_points: 7000 },
+      { address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', basis_points: 3000 },
+      { address: 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6', basis_points: 7000 },
     ]);
   });
 
@@ -185,17 +190,17 @@ describe('beneficiary percentage -> contract basis points', () => {
     await makeClient().updateBeneficiaries({
       willId: '1',
       beneficiaries: [
-        { address: 'GBENA', percentage: 33 },
-        { address: 'GBENB', percentage: 33 },
-        { address: 'GBENC', percentage: 34 },
+        { address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', percentage: 33 },
+        { address: 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6', percentage: 33 },
+        { address: 'GDPS7CHKGAWBCTWD4EWZ4MMFG56S4NCALGQOUBMX6DSCUIZFRQHHP3HB', percentage: 34 },
       ],
     });
 
     const bound = beneficiariesFor('update_beneficiaries');
     expect(bound).toEqual([
-      { address: 'GBENA', basis_points: 3300 },
-      { address: 'GBENB', basis_points: 3300 },
-      { address: 'GBENC', basis_points: 3400 },
+      { address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', basis_points: 3300 },
+      { address: 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6', basis_points: 3300 },
+      { address: 'GDPS7CHKGAWBCTWD4EWZ4MMFG56S4NCALGQOUBMX6DSCUIZFRQHHP3HB', basis_points: 3400 },
     ]);
     expect(bound.reduce((sum, b) => sum + b.basis_points, 0)).toBe(10_000);
   });

@@ -19,12 +19,24 @@ vi.mock('@stellar/freighter-api', () => ({
   default: freighterApiMock,
 }));
 
-vi.mock('@stellar/stellar-sdk', () => {
+vi.mock('@stellar/stellar-sdk', async () => {
+  const { StrKey } = await vi.importActual<typeof import('@stellar/stellar-sdk')>(
+    '@stellar/stellar-sdk',
+  );
+
   class MockAccount {
     constructor(
       public readonly accountId: string,
       public readonly sequence: string,
     ) {}
+  }
+
+  class MockContract {
+    constructor(private readonly id: string) {}
+
+    contractId(): string {
+      return this.id;
+    }
   }
 
   class MockServer {
@@ -36,6 +48,8 @@ vi.mock('@stellar/stellar-sdk', () => {
   return {
     Account: MockAccount,
     BASE_FEE: '100',
+    Contract: MockContract,
+    StrKey,
     Networks: { PUBLIC: 'PUBLIC', TESTNET: 'TESTNET' },
     rpc: { Server: MockServer },
     contract: {
@@ -169,7 +183,7 @@ describe('Issue #211: EventSubscriptionOptions.pageSize ignored by WebSocket tra
     client = new SoroWillClient({
       network: 'testnet',
       contractId: 'TESTCONTRACT',
-      fetchImpl: async (url, options) => {
+      fetch: async (url, options) => {
         const body = JSON.parse((options as any).body);
         capturedPageSize = body.params.pagination.limit;
 
@@ -217,7 +231,7 @@ describe('Issue #211: EventSubscriptionOptions.pageSize ignored by WebSocket tra
     client = new SoroWillClient({
       network: 'testnet',
       contractId: 'TESTCONTRACT',
-      fetchImpl: async (url, options) => {
+      fetch: async (url, options) => {
         const body = JSON.parse((options as any).body);
         pollingPageSize = body.params.pagination.limit;
         return new Response(

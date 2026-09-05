@@ -79,7 +79,7 @@ export function signFeeBumpXdr(
   let keypair: Keypair;
   try {
     keypair = Keypair.fromSecret(secretKey);
-  } catch (error) {
+  } catch {
     throw new InvalidSecretKeyError('signFeeBumpXdr');
   }
 
@@ -99,7 +99,7 @@ export async function submitFeeBumpTransaction(
   options: SubmitFeeBumpOptions,
 ): Promise<{ txHash: string; createdAt: number }> {
   const config = NETWORK_CONFIG[options.network];
-  const rpcUrl = config.rpcUrls[0];
+  const rpcUrl = config.rpcUrls[0]!;
   const server = new rpc.Server(rpcUrl, {
     allowHttp: rpcUrl.startsWith('http://'),
   });
@@ -153,7 +153,7 @@ export async function submitFeeBump(options: {
   let keypair: Keypair;
   try {
     keypair = Keypair.fromSecret(options.feeSourceSecretKey);
-  } catch (error) {
+  } catch {
     throw new InvalidSecretKeyError('submitFeeBump');
   }
   const publicKey = keypair.publicKey();

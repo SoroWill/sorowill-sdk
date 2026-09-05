@@ -1,60 +1,61 @@
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { LocalStorageCachePersistenceAdapter, MemoryCachePersistenceAdapter, PersistedCacheEntry, ReadCache, IndexedDbCachePersistenceAdapter } from '../src/cache';
+
+/**
+ * A real key-value-backed Storage mock. The adapter under test persists each
+ * entry under its own key plus a separate `<namespace>:__keys__` index (an
+ * O(1)-write scheme — see #205), so a mock that only simulates a single
+ * static key/value pair can't exercise it correctly.
+ */
+function createMockStorage(): Storage {
+  const map = new Map<string, string>();
+  return {
+    getItem: (key: string) => map.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      map.set(key, value);
+    },
+    removeItem: (key: string) => {
+      map.delete(key);
+    },
+    clear: () => {
+      map.clear();
+    },
+    key: (index: number) => Array.from(map.keys())[index] ?? null,
+    get length() {
+      return map.size;
+    },
+  };
+}
 
 describe('LocalStorageCachePersistenceAdapter', () => {
   let storage: Storage;
+  const namespace = 'test-namespace';
+  const keysIndexKey = `${namespace}:__keys__`;
 
   beforeEach(() => {
-    storage = {
-      getItem: (key: string) => null,
-      setItem: () => {},
-      removeItem: () => {},
-      clear: () => {},
-      key: () => null,
-      length: 0,
-    };
+    storage = createMockStorage();
   });
 
   it('readAll returns empty array when no storage key exists', async () => {
-    const adapter = new LocalStorageCachePersistenceAdapter(storage);
+    const adapter = new LocalStorageCachePersistenceAdapter(storage, { key: namespace });
     const result = await adapter.readAll();
     expect(result).toEqual([]);
   });
 
-  it('readAll returns empty array and clears storage when JSON is corrupted', async () => {
-    let storedValue: string | null = '{ invalid json }';
-    let removedKey: string | null = null;
+  it('readAll returns empty array and clears the keys index when JSON is corrupted', async () => {
+    storage.setItem(keysIndexKey, '{ invalid json }');
 
-    storage = {
-      getItem: (key: string) => storedValue,
-      setItem: () => {},
-      removeItem: (key: string) => {
-        removedKey = key;
-        storedValue = null;
-      },
-      clear: () => {},
-      key: () => null,
-      length: 0,
-    };
-
-    const adapter = new LocalStorageCachePersistenceAdapter(storage);
+    const adapter = new LocalStorageCachePersistenceAdapter(storage, { key: namespace });
     const result = await adapter.readAll();
 
     expect(result).toEqual([]);
-    expect(removedKey).toBeDefined();
+    expect(storage.getItem(keysIndexKey)).toBeNull();
   });
 
   it('readAll handles JSON that is not an array', async () => {
-    storage = {
-      getItem: (key: string) => '{"not": "an array"}',
-      setItem: () => {},
-      removeItem: () => {},
-      clear: () => {},
-      key: () => null,
-      length: 0,
-    };
+    storage.setItem(keysIndexKey, '{"not": "an array"}');
 
-    const adapter = new LocalStorageCachePersistenceAdapter(storage);
+    const adapter = new LocalStorageCachePersistenceAdapter(storage, { key: namespace });
     const result = await adapter.readAll();
 
     expect(result).toEqual([]);
@@ -70,36 +71,17 @@ describe('LocalStorageCachePersistenceAdapter', () => {
       },
     ];
 
-    storage = {
-      getItem: (key: string) => JSON.stringify(entries),
-      setItem: () => {},
-      removeItem: () => {},
-      clear: () => {},
-      key: () => null,
-      length: 0,
-    };
-
-    const adapter = new LocalStorageCachePersistenceAdapter(storage);
+    const adapter = new LocalStorageCachePersistenceAdapter(storage, { key: namespace });
+    for (const entry of entries) {
+      await adapter.write(entry);
+    }
     const result = await adapter.readAll();
 
     expect(result).toEqual(entries);
   });
 
   it('write stores entries in localStorage', async () => {
-    let lastSetValue: string = '';
-
-    storage = {
-      getItem: () => null,
-      setItem: (_key: string, value: string) => {
-        lastSetValue = value;
-      },
-      removeItem: () => {},
-      clear: () => {},
-      key: () => null,
-      length: 0,
-    };
-
-    const adapter = new LocalStorageCachePersistenceAdapter(storage);
+    const adapter = new LocalStorageCachePersistenceAdapter(storage, { key: namespace });
     const entry: PersistedCacheEntry = {
       key: 'test:key',
       value: '"test value"',
@@ -109,77 +91,44 @@ describe('LocalStorageCachePersistenceAdapter', () => {
 
     await adapter.write(entry);
 
-    const parsed = JSON.parse(lastSetValue) as PersistedCacheEntry[];
-    expect(parsed).toContainEqual(entry);
+    const stored = storage.getItem(`${namespace}:${entry.key}`);
+    expect(stored).not.toBeNull();
+    expect(JSON.parse(stored!)).toEqual(entry);
+    expect(JSON.parse(storage.getItem(keysIndexKey)!)).toContain(entry.key);
   });
 
   it('delete removes entry from localStorage', async () => {
-    const entries: PersistedCacheEntry[] = [
-      { key: 'key1', value: '"val1"', expiresAt: null, willIds: [] },
-      { key: 'key2', value: '"val2"', expiresAt: null, willIds: [] },
-    ];
+    const adapter = new LocalStorageCachePersistenceAdapter(storage, { key: namespace });
+    await adapter.write({ key: 'key1', value: '"val1"', expiresAt: null, willIds: [] });
+    await adapter.write({ key: 'key2', value: '"val2"', expiresAt: null, willIds: [] });
 
-    let lastSetValue: string = '';
-
-    storage = {
-      getItem: () => JSON.stringify(entries),
-      setItem: (_key: string, value: string) => {
-        lastSetValue = value;
-      },
-      removeItem: () => {},
-      clear: () => {},
-      key: () => null,
-      length: 0,
-    };
-
-    const adapter = new LocalStorageCachePersistenceAdapter(storage);
     await adapter.delete('key1');
 
-    const remaining = JSON.parse(lastSetValue) as PersistedCacheEntry[];
+    const remaining = await adapter.readAll();
     expect(remaining).toHaveLength(1);
-    expect(remaining[0].key).toBe('key2');
+    expect(remaining[0]!.key).toBe('key2');
+    expect(storage.getItem(`${namespace}:key1`)).toBeNull();
   });
 
   it('clear removes the storage key', async () => {
-    let removedKey: string | null = null;
+    const adapter = new LocalStorageCachePersistenceAdapter(storage, { key: namespace });
+    await adapter.write({ key: 'key1', value: '"val1"', expiresAt: null, willIds: [] });
 
-    storage = {
-      getItem: () => null,
-      setItem: () => {},
-      removeItem: (key: string) => {
-        removedKey = key;
-      },
-      clear: () => {},
-      key: () => null,
-      length: 0,
-    };
-
-    const adapter = new LocalStorageCachePersistenceAdapter(storage);
     await adapter.clear();
 
-    expect(removedKey).toBeDefined();
+    expect(storage.getItem(keysIndexKey)).toBeNull();
+    expect(storage.getItem(`${namespace}:key1`)).toBeNull();
   });
 
   it('ReadCache construction does not throw with corrupted LocalStorageCachePersistenceAdapter', async () => {
-    let removedKey: string | null = null;
+    storage.setItem(keysIndexKey, '{ invalid json }');
 
-    storage = {
-      getItem: () => '{ invalid json }',
-      setItem: () => {},
-      removeItem: (key: string) => {
-        removedKey = key;
-      },
-      clear: () => {},
-      key: () => null,
-      length: 0,
-    };
-
-    const adapter = new LocalStorageCachePersistenceAdapter(storage);
+    const adapter = new LocalStorageCachePersistenceAdapter(storage, { key: namespace });
     const cache = new ReadCache({ persistence: adapter });
 
     await cache.ready();
 
-    expect(removedKey).toBeDefined();
+    expect(storage.getItem(keysIndexKey)).toBeNull();
     expect(cache.get('test')).toBeUndefined();
   });
 
@@ -194,7 +143,6 @@ describe('LocalStorageCachePersistenceAdapter', () => {
   });
 
   it('provides helpful guidance for SSR environments', () => {
-    const error = new Error();
     try {
       new LocalStorageCachePersistenceAdapter(null as unknown as Storage);
     } catch (e) {
@@ -249,7 +197,7 @@ describe('MemoryCachePersistenceAdapter', () => {
     const result = await adapter.readAll();
 
     expect(result).toHaveLength(1);
-    expect(result[0].value).toBe('"value2"');
+    expect(result[0]!.value).toBe('"value2"');
   });
 
   it('delete removes entry', async () => {
@@ -334,7 +282,7 @@ describe.skipIf(!globalThis.indexedDB)('IndexedDbCachePersistenceAdapter', () =>
     const result = await adapter.readAll();
 
     expect(result).toHaveLength(1);
-    expect(result[0]).toEqual(entry);
+    expect(result[0]!).toEqual(entry);
   });
 
   it('write updates existing entry with same key', async () => {
@@ -356,7 +304,7 @@ describe.skipIf(!globalThis.indexedDB)('IndexedDbCachePersistenceAdapter', () =>
     const result = await adapter.readAll();
 
     expect(result).toHaveLength(1);
-    expect(result[0].value).toBe('"value2"');
+    expect(result[0]!.value).toBe('"value2"');
   });
 
   it('delete removes specific entry', async () => {
@@ -379,7 +327,7 @@ describe.skipIf(!globalThis.indexedDB)('IndexedDbCachePersistenceAdapter', () =>
     const result = await adapter.readAll();
 
     expect(result).toHaveLength(1);
-    expect(result[0].key).toBe('key2');
+    expect(result[0]!.key).toBe('key2');
   });
 
   it('clear removes all entries', async () => {

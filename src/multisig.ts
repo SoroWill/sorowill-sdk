@@ -43,7 +43,7 @@ function validateTransactionXdr(transactionXdr: string): void {
     ) {
       throw new Error('Unsupported transaction envelope type');
     }
-  } catch (error) {
+  } catch {
     throw new InvalidTransactionXdrError();
   }
 }
@@ -277,7 +277,7 @@ export function signWithSecretKey(
   let keypair: Keypair;
   try {
     keypair = Keypair.fromSecret(secretKey);
-  } catch (error) {
+  } catch {
     throw new InvalidSecretKeyError('signWithSecretKey');
   }
 

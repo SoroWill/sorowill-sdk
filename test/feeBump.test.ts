@@ -34,6 +34,14 @@ vi.mock('@stellar/stellar-sdk', () => {
       return new MockKeypair('GDEFAULTPUBLICKEY', secretKey);
     }
 
+    static random(): MockKeypair {
+      return new MockKeypair('GRANDOMPUBLICKEY', 'SRANDOMSECRETKEY');
+    }
+
+    secret(): string {
+      return this._secretKey || 'SDEFAULTSECRETKEY';
+    }
+
     signDecorated(_hash: Uint8Array): any {
       return { toXDR: () => 'MOCK_SIGNATURE' };
     }
@@ -105,6 +113,12 @@ vi.mock('@stellar/stellar-sdk', () => {
 
   const BASE_FEE = '100';
 
+  class MockSpec {
+    static fromWasm(): MockSpec {
+      return new MockSpec();
+    }
+  }
+
   return {
     BASE_FEE,
     Keypair: MockKeypair,
@@ -124,14 +138,33 @@ vi.mock('@stellar/stellar-sdk', () => {
         },
       },
     },
+    contract: {
+      Spec: MockSpec,
+    },
   };
 });
 
+import { Keypair, Networks, TransactionBuilder } from '@stellar/stellar-sdk';
+
 import {
   buildFeeBumpXdr,
+  signFeeBumpXdr,
   submitFeeBumpTransaction,
   submitFeeBump,
 } from '../src/feeBump';
+
+/** Builds a placeholder inner-transaction XDR for the mocked stellar-sdk above. */
+function makeInnerTxXdr(_networkPassphrase: string): string {
+  return 'INNER_TX_XDR';
+}
+
+/** Builds an unsigned fee-bump transaction XDR wrapping `innerXdr`, for the mocked stellar-sdk above. */
+function makeFeeBumpXdr(innerXdr: string, feeSource: Keypair, networkPassphrase: string): string {
+  const innerTx = TransactionBuilder.fromXDR(innerXdr, networkPassphrase);
+  return (TransactionBuilder as any)
+    .buildFeeBumpTransaction(feeSource, '5000', innerTx, networkPassphrase)
+    .toXDR();
+}
 
 describe('feeBump', () => {
   beforeEach(() => {

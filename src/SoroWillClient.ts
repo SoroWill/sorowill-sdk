@@ -389,6 +389,16 @@ function mapWill(raw: unknown): Will {
   };
 }
 
+/**
+ * Shallow-clones a `Will`, including its `beneficiaries`/`guardians` arrays.
+ * Read-cache hits return the exact cached object, so a caller mutating the
+ * arrays on a returned `Will` would otherwise corrupt the cache for every
+ * subsequent read of the same will (#187).
+ */
+function cloneWill(will: Will): Will {
+  return { ...will, beneficiaries: [...will.beneficiaries], guardians: [...will.guardians] };
+}
+
 function mapWillList(raw: unknown): Will[] {
   if (!Array.isArray(raw)) {
     throw new SoroWillError(
@@ -571,7 +581,6 @@ export class SoroWillClient {
   private readonly debugLogger: DebugLogger;
   private readonly autoFeeBumpOnTimeout: boolean;
   private readonly transactionTimeoutSeconds: number;
-  private readonly inFlightTracker = new InFlightTracker();
 
   constructor(options: SoroWillClientOptions) {
     const config = NETWORK_CONFIG[options.network];
@@ -1022,12 +1031,12 @@ export class SoroWillClient {
       await this.readCache.ready();
       const cached = this.readCache.get<Will>(cacheKey);
       if (cached !== undefined) {
-        return cached;
+        return cloneWill(cached);
       }
     }
     const raw = await this.read<unknown>('get_will', { will_id: parseWillId(willId) }, options);
     const will = mapWill(raw);
-    this.readCache?.set(cacheKey, will, [willId]);
+    this.readCache?.set(cacheKey, cloneWill(will), [willId]);
     return will;
   }
 
@@ -1047,12 +1056,12 @@ export class SoroWillClient {
       await this.readCache.ready();
       const cached = this.readCache.get<Will[]>(cacheKey);
       if (cached !== undefined) {
-        return this.paginate(cached, options);
+        return this.paginate(cached.map(cloneWill), options);
       }
     }
     const raw = await this.read<unknown>('get_wills_by_owner', { owner }, options);
     const wills = mapWillList(raw);
-    this.readCache?.set(cacheKey, wills, wills.map((will) => will.id));
+    this.readCache?.set(cacheKey, wills.map(cloneWill), wills.map((will) => will.id));
     return this.paginate(wills, options);
   }
 
@@ -1075,7 +1084,7 @@ export class SoroWillClient {
       await this.readCache.ready();
       const cached = this.readCache.get<Will[]>(cacheKey);
       if (cached !== undefined) {
-        return this.paginate(cached, options);
+        return this.paginate(cached.map(cloneWill), options);
       }
     }
     const raw = await this.read<unknown>(
@@ -1084,7 +1093,7 @@ export class SoroWillClient {
       options,
     );
     const wills = mapWillList(raw);
-    this.readCache?.set(cacheKey, wills, wills.map((will) => will.id));
+    this.readCache?.set(cacheKey, wills.map(cloneWill), wills.map((will) => will.id));
     return this.paginate(wills, options);
   }
 
@@ -1419,6 +1428,16 @@ export class SoroWillClient {
 
       socket.onerror = () => {
         if (settled) {
+          // #210: a drop after the subscription already opened is not
+          // auto-recovered (falling back to polling here would silently
+          // change transport mid-stream) — surface the error and mark the
+          // subscription closed so callers know to react themselves.
+          closed = true;
+          try {
+            socket.close();
+          } catch {
+            // Best-effort close; the socket may already be gone.
+          }
           options.onError?.(new Error('SoroWill event WebSocket stream error'));
           return;
         }
@@ -1745,7 +1764,7 @@ export class SoroWillClient {
       // prepareTransaction simulates and assembles Soroban data for the whole transaction.
       options?.signal?.throwIfAborted();
       const prepared = await this.rpc(() => this.server.prepareTransaction(builtTx), options);
-      this.debugLogger.logSimulation(label, undefined, prepared.minResourceFee);
+      this.debugLogger.logSimulation(label, undefined, prepared.fee);
 
       const signedTxXdr = await this.wallet.signTransaction(prepared.toXDR(), {
         networkPassphrase: this.networkPassphrase,

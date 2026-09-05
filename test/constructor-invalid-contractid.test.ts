@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { SoroWillClient } from '../src/index';
 import { InvalidContractIdError } from '../src/errors';
 

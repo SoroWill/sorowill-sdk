@@ -7,7 +7,19 @@ import {
 } from '@stellar/stellar-sdk';
 import { MultisigCollector } from '../src/multisig';
 
-const SAMPLE_TX_XDR = 'AAAAAgAAAADAAAAAAAAAAQAAAAAAAAAYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB2UJH0AAAAAE5AUdAAAAAA';
+const SAMPLE_TX_XDR = new TransactionBuilder(
+  new Account(Keypair.random().publicKey(), '0'),
+  {
+    fee: '100',
+    networkPassphrase: Networks.TESTNET,
+  },
+)
+  .setTimeout(30)
+  .build()
+  .toXDR();
+
+const SIGNER_A = Keypair.random().publicKey();
+const SIGNER_B = Keypair.random().publicKey();
 
 describe('MultisigCollector', () => {
   it('initialises with correct defaults', () => {
@@ -36,11 +48,11 @@ describe('MultisigCollector', () => {
       networkPassphrase: 'Test Network',
       threshold: 2,
     });
-    c.addSignature('GABC', 'sig1');
+    c.addSignature(SIGNER_A, 'sig1');
     expect(c.signatureCount).toBe(1);
     expect(c.isReady).toBe(false);
 
-    c.addSignature('GDEF', 'sig2');
+    c.addSignature(SIGNER_B, 'sig2');
     expect(c.signatureCount).toBe(2);
     expect(c.isReady).toBe(true);
   });
@@ -51,8 +63,8 @@ describe('MultisigCollector', () => {
       networkPassphrase: 'Test Network',
       threshold: 2,
     });
-    c.addSignature('GABC', 'sig1');
-    expect(() => c.addSignature('GABC', 'sig2')).toThrow('already signed');
+    c.addSignature(SIGNER_A, 'sig1');
+    expect(() => c.addSignature(SIGNER_A, 'sig2')).toThrow('already signed');
   });
 
   it('clears signatures with reset()', () => {
@@ -61,8 +73,8 @@ describe('MultisigCollector', () => {
       networkPassphrase: 'Test Network',
       threshold: 3,
     });
-    c.addSignature('GABC', 'sig1');
-    c.addSignature('GDEF', 'sig2');
+    c.addSignature(SIGNER_A, 'sig1');
+    c.addSignature(SIGNER_B, 'sig2');
     c.reset();
     expect(c.signatureCount).toBe(0);
     expect(c.isReady).toBe(false);
@@ -75,7 +87,7 @@ describe('MultisigCollector', () => {
       threshold: 1,
     });
     expect(c.isReady).toBe(false);
-    c.addSignature('GABC', 'sig1');
+    c.addSignature(SIGNER_A, 'sig1');
     expect(c.isReady).toBe(true);
   });
 
@@ -85,8 +97,8 @@ describe('MultisigCollector', () => {
       networkPassphrase: 'Test Network',
       threshold: 1,
     });
-    c.addSignature('GABC', 'sig1');
-    c.addSignature('GDEF', 'sig2');
+    c.addSignature(SIGNER_A, 'sig1');
+    c.addSignature(SIGNER_B, 'sig2');
     expect(c.signatureCount).toBe(2);
     expect(c.isReady).toBe(true);
   });
@@ -97,16 +109,16 @@ describe('MultisigCollector', () => {
       networkPassphrase: 'Test Network',
       threshold: 2,
     });
-    c.addSignature('GABC', 'sig1');
+    c.addSignature(SIGNER_A, 'sig1');
 
     const json = c.toJSON();
     expect(json.transactionXdr).toBe(SAMPLE_TX_XDR);
     expect(json.threshold).toBe(2);
-    expect(json.signatures).toEqual([{ signerPublicKey: 'GABC', signature: 'sig1' }]);
+    expect(json.signatures).toEqual([{ signerPublicKey: SIGNER_A, signature: 'sig1' }]);
 
     const restored = MultisigCollector.fromJSON(json);
     expect(restored.signatureCount).toBe(1);
-    expect(restored.signatures[0]?.signerPublicKey).toBe('GABC');
+    expect(restored.signatures[0]?.signerPublicKey).toBe(SIGNER_A);
     expect(restored.threshold).toBe(2);
     expect(restored.toJSON()).toEqual(json);
   });
@@ -117,10 +129,10 @@ describe('MultisigCollector', () => {
       networkPassphrase: 'Test Network',
       threshold: 1,
     });
-    c.addSignature('GABC', 'sig1');
+    c.addSignature(SIGNER_A, 'sig1');
     const sigs = c.signatures;
     expect(sigs.length).toBe(1);
-    expect(sigs[0]).toEqual({ signerPublicKey: 'GABC', signature: 'sig1' });
+    expect(sigs[0]).toEqual({ signerPublicKey: SIGNER_A, signature: 'sig1' });
   });
 
   it('builds a fee-bump-wrapped transaction with collected signatures', () => {

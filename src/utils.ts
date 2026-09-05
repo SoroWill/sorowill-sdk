@@ -5,7 +5,6 @@ import { WillStatus } from './types';
 
 /** USDC (and most Soroban SEP-41 tokens) use 7 decimal places, matching classic Stellar asset precision. */
 const USDC_DECIMALS = 7;
-const USDC_BASE: bigint = 10n ** BigInt(USDC_DECIMALS);
 
 /**
  * Approximate Soroban ledger close time, in milliseconds. Matches the
@@ -241,8 +240,11 @@ export interface NextActionableStateOptions {
 export function getNextActionableState(
   will: Will,
   connectedAddress: string,
-  now: Date = new Date(),
+  nowOrOptions: Date | NextActionableStateOptions = new Date(),
 ): NextActionableState {
+  const now = nowOrOptions instanceof Date ? nowOrOptions : new Date();
+  const options: NextActionableStateOptions = nowOrOptions instanceof Date ? {} : nowOrOptions;
+
   // Terminal / pre-active states with no available actions
   if (
     will.status === WillStatus.PendingConfirmation ||

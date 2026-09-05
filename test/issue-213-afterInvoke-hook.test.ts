@@ -13,7 +13,11 @@ const { freighterApiMock, mockState } = vi.hoisted(() => ({
     createdServerUrls: [] as string[],
     getAccount: vi.fn(async (publicKey: string) => ({ accountId: publicKey, sequence: '1' })),
     getContractWasmByContractId: vi.fn(async () => new Uint8Array()),
-    pollTransaction: vi.fn(async () => ({ status: 'SUCCESS' })),
+    pollTransaction: vi.fn(async () => ({
+      status: 'SUCCESS',
+      createdAt: 1_700_000_000,
+      returnValue: 42n,
+    })),
     prepareTransaction: vi.fn(async (tx: { toXDR: () => string }) => ({ toXDR: tx.toXDR })),
     sendTransaction: vi.fn(async () => ({ hash: () => 'TX_HASH' })),
     simulateTransaction: vi.fn(async () => ({
@@ -29,7 +33,11 @@ vi.mock('@stellar/freighter-api', () => ({
   default: freighterApiMock,
 }));
 
-vi.mock('@stellar/stellar-sdk', () => {
+vi.mock('@stellar/stellar-sdk', async () => {
+  const { StrKey } = await vi.importActual<typeof import('@stellar/stellar-sdk')>(
+    '@stellar/stellar-sdk',
+  );
+
   class MockAccount {
     constructor(
       public readonly accountId: string,
@@ -116,6 +124,7 @@ vi.mock('@stellar/stellar-sdk', () => {
     Account: MockAccount,
     BASE_FEE: '100',
     Contract: MockContract,
+    StrKey,
     Networks: {
       PUBLIC: 'PUBLIC',
       TESTNET: 'TESTNET',
@@ -215,7 +224,7 @@ describe('Issue #213: Throwing afterInvoke hook on success path makes invoke() r
       result = await client.createWill({
         token: 'USDC_CONTRACT',
         amount: '1000000',
-        beneficiaries: [{ address: 'GBENEFICIARY', percentage: 100 }],
+        beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
         checkinPeriodDays: 30,
         gracePeriodDays: 7,
         guardians: [],
@@ -244,7 +253,7 @@ describe('Issue #213: Throwing afterInvoke hook on success path makes invoke() r
     await client.createWill({
       token: 'USDC_CONTRACT',
       amount: '1000000',
-      beneficiaries: [{ address: 'GBENEFICIARY', percentage: 100 }],
+      beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
       checkinPeriodDays: 30,
       gracePeriodDays: 7,
       guardians: [],
@@ -266,7 +275,7 @@ describe('Issue #213: Throwing afterInvoke hook on success path makes invoke() r
     await client.createWill({
       token: 'USDC_CONTRACT',
       amount: '1000000',
-      beneficiaries: [{ address: 'GBENEFICIARY', percentage: 100 }],
+      beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
       checkinPeriodDays: 30,
       gracePeriodDays: 7,
       guardians: [],
@@ -294,7 +303,7 @@ describe('Issue #213: Throwing afterInvoke hook on success path makes invoke() r
     const result = await client.createWill({
       token: 'USDC_CONTRACT',
       amount: '1000000',
-      beneficiaries: [{ address: 'GBENEFICIARY', percentage: 100 }],
+      beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
       checkinPeriodDays: 30,
       gracePeriodDays: 7,
       guardians: [],
@@ -321,7 +330,7 @@ describe('Issue #213: Throwing afterInvoke hook on success path makes invoke() r
     await client.createWill({
       token: 'USDC_CONTRACT',
       amount: '1000000',
-      beneficiaries: [{ address: 'GBENEFICIARY', percentage: 100 }],
+      beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
       checkinPeriodDays: 30,
       gracePeriodDays: 7,
       guardians: [],

@@ -1,4 +1,4 @@
-import { Account, Networks, Operation, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
+import { Account, Networks, xdr } from '@stellar/stellar-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../src/wallet', () => ({

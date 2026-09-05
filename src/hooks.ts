@@ -116,10 +116,20 @@ export class HookManager {
     return true;
   }
 
-  /** @internal Run all afterInvoke hooks. */
+  /**
+   * @internal Run all afterInvoke hooks. A throwing hook is swallowed rather
+   * than propagated — afterInvoke hooks are instrumentation/observability
+   * side effects, and a broken one must never convert an otherwise-successful
+   * (or already-failed) invocation into a different outcome for the caller.
+   * Every hook still runs exactly once, in order, even if an earlier one throws.
+   */
   async runAfterInvoke(ctx: AfterInvokeContext): Promise<void> {
     for (const hook of this.registry.afterInvoke) {
-      await hook(ctx);
+      try {
+        await hook(ctx);
+      } catch {
+        // Intentionally ignored — see method doc.
+      }
     }
   }
 

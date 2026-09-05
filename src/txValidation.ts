@@ -35,15 +35,15 @@ function operationsMatch(intended: xdr.Operation, prepared: xdr.Operation): bool
     }
 
     if (intendedHostFn.switch() === xdr.HostFunctionType.hostFunctionTypeInvokeContract()) {
-      const intendedArgs = intendedHostFn.invokeContract();
-      const preparedArgs = preparedHostFn.invokeContract();
+      const intendedArgs = intendedHostFn.invokeContract().args();
+      const preparedArgs = preparedHostFn.invokeContract().args();
 
       if (!intendedArgs || !preparedArgs || intendedArgs.length !== preparedArgs.length) {
         return false;
       }
 
       for (let i = 0; i < intendedArgs.length; i++) {
-        if (intendedArgs[i].toXDR('base64') !== preparedArgs[i].toXDR('base64')) {
+        if (intendedArgs[i]!.toXDR('base64') !== preparedArgs[i]!.toXDR('base64')) {
           return false;
         }
       }

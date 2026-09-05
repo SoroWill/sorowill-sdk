@@ -151,11 +151,11 @@ export class RequestQueue {
       return undefined;
     }
     let selectedIndex = 0;
-    let selectedPriority = this.pending[0].priority;
+    let selectedPriority = this.pending[0]!.priority;
     for (let i = 1; i < this.pending.length; i++) {
-      if (this.pending[i].priority > selectedPriority) {
+      if (this.pending[i]!.priority > selectedPriority) {
         selectedIndex = i;
-        selectedPriority = this.pending[i].priority;
+        selectedPriority = this.pending[i]!.priority;
       }
     }
     const [request] = this.pending.splice(selectedIndex, 1);

@@ -23,7 +23,11 @@ vi.mock('@stellar/freighter-api', () => ({
   default: freighterApiMock,
 }));
 
-vi.mock('@stellar/stellar-sdk', () => {
+vi.mock('@stellar/stellar-sdk', async () => {
+  const { StrKey } = await vi.importActual<typeof import('@stellar/stellar-sdk')>(
+    '@stellar/stellar-sdk',
+  );
+
   class MockAccount {
     constructor(
       public readonly accountId: string,
@@ -69,6 +73,7 @@ vi.mock('@stellar/stellar-sdk', () => {
     Account: MockAccount,
     BASE_FEE: '100',
     Contract: MockContract,
+    StrKey,
     Networks: { PUBLIC: 'PUBLIC', TESTNET: 'TESTNET' },
     Transaction: MockTransaction,
     TransactionBuilder: MockTransactionBuilder,
@@ -120,8 +125,8 @@ import { BeneficiaryValidationError, SoroWillError } from '../src/errors';
 import { FreighterWalletAdapter } from '../src/wallet';
 
 const VALID_BENEFICIARIES = [
-  { address: 'GBENA', percentage: 60 },
-  { address: 'GBENB', percentage: 40 },
+  { address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', percentage: 60 },
+  { address: 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6', percentage: 40 },
 ];
 
 const BASE_CREATE_WILL_PARAMS = {
@@ -171,8 +176,8 @@ describe('createWill — beneficiary validation fast-fail', () => {
       client.createWill({
         ...BASE_CREATE_WILL_PARAMS,
         beneficiaries: [
-          { address: 'GBENA', percentage: 50 },
-          { address: 'GBENB', percentage: 30 },
+          { address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', percentage: 50 },
+          { address: 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6', percentage: 30 },
         ],
       }),
     ).rejects.toThrow(BeneficiaryValidationError);
@@ -184,8 +189,8 @@ describe('createWill — beneficiary validation fast-fail', () => {
       client.createWill({
         ...BASE_CREATE_WILL_PARAMS,
         beneficiaries: [
-          { address: 'GBENA', percentage: 60 },
-          { address: 'GBENB', percentage: 60 },
+          { address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', percentage: 60 },
+          { address: 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6', percentage: 60 },
         ],
       }),
     ).rejects.toThrow(BeneficiaryValidationError);
@@ -197,8 +202,8 @@ describe('createWill — beneficiary validation fast-fail', () => {
       client.createWill({
         ...BASE_CREATE_WILL_PARAMS,
         beneficiaries: [
-          { address: 'GBENA', percentage: 0 },
-          { address: 'GBENB', percentage: 100 },
+          { address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', percentage: 0 },
+          { address: 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6', percentage: 100 },
         ],
       }),
     ).rejects.toThrow(BeneficiaryValidationError);
@@ -210,8 +215,8 @@ describe('createWill — beneficiary validation fast-fail', () => {
       client.createWill({
         ...BASE_CREATE_WILL_PARAMS,
         beneficiaries: [
-          { address: 'GBENA', percentage: 33.5 },
-          { address: 'GBENB', percentage: 66.5 },
+          { address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', percentage: 33.5 },
+          { address: 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6', percentage: 66.5 },
         ],
       }),
     ).rejects.toThrow(BeneficiaryValidationError);
@@ -266,7 +271,7 @@ describe('createWill — beneficiary validation fast-fail', () => {
     await expect(
       client.createWill({
         ...BASE_CREATE_WILL_PARAMS,
-        beneficiaries: [{ address: 'GBENA', percentage: 100 }],
+        beneficiaries: [{ address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', percentage: 100 }],
       }),
     ).resolves.toMatchObject({ willId: '1', txHash: 'TXHASH' });
   });
@@ -294,8 +299,8 @@ describe('updateBeneficiaries — beneficiary validation fast-fail', () => {
       client.updateBeneficiaries({
         willId: '1',
         beneficiaries: [
-          { address: 'GBENA', percentage: 40 },
-          { address: 'GBENB', percentage: 40 },
+          { address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', percentage: 40 },
+          { address: 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6', percentage: 40 },
         ],
       }),
     ).rejects.toThrow(BeneficiaryValidationError);
@@ -307,8 +312,8 @@ describe('updateBeneficiaries — beneficiary validation fast-fail', () => {
       client.updateBeneficiaries({
         willId: '1',
         beneficiaries: [
-          { address: 'GBENA', percentage: -10 },
-          { address: 'GBENB', percentage: 110 },
+          { address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', percentage: -10 },
+          { address: 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6', percentage: 110 },
         ],
       }),
     ).rejects.toThrow(BeneficiaryValidationError);

@@ -160,7 +160,12 @@ describe('Edge case: Cancelled will with zero balance', () => {
     });
 
     await expect(
-      client.updateBeneficiaries({ willId: '1', beneficiaries: [{ address: 'GNEWBEN', percentage: 100 }] })
+      client.updateBeneficiaries({
+        willId: '1',
+        beneficiaries: [
+          { address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 },
+        ],
+      })
     ).rejects.toThrow(WillNotActiveError);
   });
 });

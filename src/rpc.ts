@@ -12,12 +12,31 @@ export function isRetryableRpcConnectionError(error: unknown): boolean {
     'socket hang up',
     'enotfound',
     'econnreset',
-    'connect',
+    'too many requests',
+    'rate limit',
+    'bad gateway',
+    'service unavailable',
+    'gateway timeout',
   ];
+
+  // HTTP status codes for rate-limiting and server overload (429, 502, 503,
+  // 504) — matched as whole numbers so they don't fire on unrelated digits
+  // embedded in a larger number.
+  const RETRYABLE_STATUS_CODE = /\b(429|502|503|504)\b/;
+
+  // "connect" as a verb ("could not connect", "failed to connect") is a real
+  // connection failure, but the same substring also appears in unrelated
+  // application-level wallet state ("wallet not connected", "signer
+  // disconnected") — exclude those via the "disconnect"/"connected" forms.
+  const CONNECT_VERB = /(?<!dis)connect(?!ed)/i;
 
   const matches = (text: string): boolean => {
     const lower = text.toLowerCase();
-    return CONNECTION_FRAGMENTS.some((fragment) => lower.includes(fragment));
+    return (
+      CONNECTION_FRAGMENTS.some((fragment) => lower.includes(fragment)) ||
+      RETRYABLE_STATUS_CODE.test(text) ||
+      CONNECT_VERB.test(text)
+    );
   };
 
   if (error instanceof Error) {

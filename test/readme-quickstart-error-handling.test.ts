@@ -1,6 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SoroWillClient } from '../src/index';
-import { connectWallet } from '../src/index';
 
 describe('README Quick Start error handling (issue #189)', () => {
   it('demonstrates proper error handling for wallet connection failures', async () => {
@@ -11,7 +9,7 @@ describe('README Quick Start error handling (issue #189)', () => {
 
     try {
       // This simulates the pattern shown in the updated README
-      const wallet = await mockConnectWallet();
+      await mockConnectWallet();
       expect.fail('Should have thrown');
     } catch (error) {
       // Error should be caught and handled

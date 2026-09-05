@@ -1,7 +1,7 @@
-import { Account, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk';
+import { Account, Keypair, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ReadCache } from '../src/cache';
+import { createReadCacheKey, ReadCache } from '../src/cache';
 import { isRetryableRpcConnectionError, RpcEndpointPool } from '../src/rpc';
 import { buildSep7TxUri, parseSep7Callback } from '../src/sep7';
 import { assertPreparedTransactionMatchesIntendedOperation } from '../src/txValidation';
@@ -190,8 +190,8 @@ describe('validateBeneficiaries', () => {
   it('accepts percentages that sum to 100', () => {
     expect(
       validateBeneficiaries([
-        { address: 'GBEN_A', percentage: 60 },
-        { address: 'GBEN_B', percentage: 40 },
+        { address: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', percentage: 60 },
+        { address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 40 },
       ]),
     ).toBe(true);
   });
@@ -228,7 +228,7 @@ describe('validateBeneficiaries', () => {
 
   it('accepts exactly MAX_BENEFICIARIES', () => {
     const exactlyMax = Array.from({ length: MAX_BENEFICIARIES }, (_, i) => ({
-      address: `GBEN_${i}`,
+      address: Keypair.random().publicKey(),
       percentage: i < MAX_BENEFICIARIES - 1 ? 10 : 100 - (MAX_BENEFICIARIES - 1) * 10,
     }));
     expect(validateBeneficiaries(exactlyMax)).toBe(true);
@@ -241,7 +241,12 @@ describe('validateGuardians', () => {
   });
 
   it('accepts a valid guardian list', () => {
-    expect(validateGuardians(['GA', 'GB'])).toBe(true);
+    expect(
+      validateGuardians([
+        'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+        'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG',
+      ]),
+    ).toBe(true);
   });
 
   it('rejects too many guardians exceeding MAX_GUARDIANS', () => {
@@ -258,11 +263,24 @@ describe('validateGuardians', () => {
   });
 
   it('accepts guardian list when owner is not in the list', () => {
-    expect(validateGuardians(['GA', 'GB'], 'GOWNER')).toBe(true);
+    expect(
+      validateGuardians(
+        [
+          'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+          'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG',
+        ],
+        'GD6P6MZ5GY5ENDIDREGJGV7HPWYKAJVWLBG3NTK5PNSZENTLXWIRGHWB',
+      ),
+    ).toBe(true);
   });
 
   it('accepts guardian list when ownerAddress is not supplied', () => {
-    expect(validateGuardians(['GA', 'GB'])).toBe(true);
+    expect(
+      validateGuardians([
+        'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+        'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG',
+      ]),
+    ).toBe(true);
   });
 });
 

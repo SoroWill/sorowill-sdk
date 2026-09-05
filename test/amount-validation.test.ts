@@ -100,7 +100,9 @@ describe('createWill amount validation', () => {
 
   const baseParams = {
     token: 'CTOKEN',
-    beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+    beneficiaries: [
+      { address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 },
+    ],
     checkinPeriodDays: 90,
     gracePeriodDays: 7,
     guardians: [] as string[],

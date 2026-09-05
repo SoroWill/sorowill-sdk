@@ -104,8 +104,9 @@ export class DebugLogger {
   }
 
   private log(log: DebugLog): void {
-    // Use console.log for structured output
-    // Logs are JSON-serializable and contain no secrets
+    // Structured, JSON-serializable output covering multiple log levels
+    // (not just warn/error), so console.log is intentional here.
+    // eslint-disable-next-line no-console
     console.log(JSON.stringify(log));
   }
 }
