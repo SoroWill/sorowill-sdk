@@ -16,6 +16,28 @@ const USDC_BASE: bigint = 10n ** BigInt(USDC_DECIMALS);
 export const SOROBAN_LEDGER_CLOSE_TIME_MS = 5_000;
 
 /**
+ * Error thrown when a `willId` string cannot be parsed as a non-negative integer.
+ */
+export class SoroWillInvalidIdError extends Error {
+  constructor(willId: string) {
+    super(`Invalid willId: "${willId}" - expected a non-negative integer.`);
+    this.name = 'SoroWillInvalidIdError';
+  }
+}
+
+/**
+ * Parses a `willId` string into a `bigint`, validating that it is a non-negative integer.
+ *
+ * @throws {SoroWillInvalidIdError} If `willId` is not a non-negative integer.
+ */
+export function parseWillId(willId: string): bigint {
+  if (!/^\d+$/.test(willId)) {
+    throw new SoroWillInvalidIdError(willId);
+  }
+  return BigInt(willId);
+}
+
+/**
  * Formats a base-unit token amount (e.g. contract-side `i128` stroops) as a
  * human-readable decimal string with thousands separators, e.g.
  * `formatUSDC(12345000000n) === "1,234.50"`.

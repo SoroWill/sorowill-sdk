@@ -496,6 +496,21 @@ function validateAmount(amount: string): bigint {
   return value;
 }
 
+export class SoroWillInvalidIdError extends SoroWillError {
+  constructor(willId: unknown) {
+    super(`Invalid willId: '${String(willId)}'. Expected a non-negative integer string.`);
+    this.name = 'SoroWillInvalidIdError';
+  }
+}
+
+/** Validates a `willId` string and converts it to a `bigint`, throwing {@link SoroWillInvalidIdError} for malformed ids. */
+export function parseWillId(willId: string): bigint {
+  if (typeof willId !== 'string' || !/^\d+$/.test(willId)) {
+    throw new SoroWillInvalidIdError(willId);
+  }
+  return BigInt(willId);
+}
+
 /**
  * Validates that a day-count parameter (e.g. `checkinPeriodDays` or
  * `gracePeriodDays`) is a positive integer before it is converted to
@@ -791,7 +806,7 @@ export class SoroWillClient {
     const will = await this.getWill(willId, options);
     const { txHash, createdAt } = await this.invoke(
       'check_in',
-      { will_id: BigInt(willId), owner },
+      { will_id: parseWillId(willId), owner },
       options,
     );
     return {
@@ -811,7 +826,7 @@ export class SoroWillClient {
    * @throws {Error} If the wallet is not connected or fails to sign.
    */
   async triggerWill(willId: string, options?: RequestOptions): Promise<{ txHash: string }> {
-    const { txHash } = await this.invoke('trigger_will', { will_id: BigInt(willId) }, options);
+    const { txHash } = await this.invoke('trigger_will', { will_id: parseWillId(willId) }, options);
     return { txHash };
   }
 
@@ -827,7 +842,7 @@ export class SoroWillClient {
     const will = await this.getWill(willId, options);
     const { txHash, createdAt } = await this.invoke(
       'emergency_checkin',
-      { will_id: BigInt(willId), owner },
+      { will_id: parseWillId(willId), owner },
       options,
     );
     return {
@@ -853,7 +868,7 @@ export class SoroWillClient {
   ): Promise<{ txHash: string }> {
     const { txHash } = await this.invoke(
       'release_inheritance',
-      { will_id: BigInt(willId) },
+      { will_id: parseWillId(willId) },
       options,
     );
     return { txHash };
@@ -866,7 +881,7 @@ export class SoroWillClient {
   ): Promise<{ txHash: string; refundAmount: string }> {
     const owner = await this.getWalletPublicKey();
     const { txHash, returnValue } = await this.invoke('cancel_will', {
-      will_id: BigInt(willId),
+      will_id: parseWillId(willId),
       owner,
     }, options);
     // cancel_will returns the refunded balance on success. Decode it from the
@@ -894,7 +909,7 @@ export class SoroWillClient {
     const owner = await this.getWalletPublicKey();
     const { txHash } = await this.invoke(
       'update_beneficiaries',
-      { will_id: BigInt(params.willId), owner, beneficiaries: toContractBeneficiaries(params.beneficiaries) },
+      { will_id: parseWillId(params.willId), owner, beneficiaries: toContractBeneficiaries(params.beneficiaries) },
       options,
     );
     return { txHash };
@@ -908,7 +923,7 @@ export class SoroWillClient {
   ): Promise<{ txHash: string }> {
     const owner = await this.getWalletPublicKey();
     const { txHash } = await this.invoke('top_up', {
-      will_id: BigInt(willId),
+      will_id: parseWillId(willId),
       owner,
       amount: validateAmount(amount),
     }, options);
@@ -1010,7 +1025,7 @@ export class SoroWillClient {
         return cached;
       }
     }
-    const raw = await this.read<unknown>('get_will', { will_id: BigInt(willId) }, options);
+    const raw = await this.read<unknown>('get_will', { will_id: parseWillId(willId) }, options);
     const will = mapWill(raw);
     this.readCache?.set(cacheKey, will, [willId]);
     return will;
@@ -1109,7 +1124,7 @@ export class SoroWillClient {
   async guardianTrigger(willId: string, options?: RequestOptions): Promise<{ txHash: string }> {
     const guardian = await this.getWalletPublicKey();
     const { txHash, returnValue, events } = await this.invoke('guardian_trigger', {
-      will_id: BigInt(willId),
+      will_id: parseWillId(willId),
       guardian,
     }, options);
 
