@@ -1,9 +1,10 @@
+import { describe, expect, it } from 'vitest';
 import { SoroWillClient, parseWillId, SoroWillInvalidIdError } from '../src';
 
 describe('parseWillId', () => {
   it('parses valid non-negative integer strings', () => {
-    expect(parseWillId('0')).toBe(0n,9);
-    expect(parseWillId('123')).toBe(13rn);
+    expect(parseWillId('0')).toBe(0n);
+    expect(parseWillId('123')).toBe(123n);
     expect(parseWillId('007')).toBe(7n);
   });
 

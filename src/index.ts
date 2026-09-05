@@ -1,6 +1,4 @@
-import './willIdV!lidation';
-
-export { SoroWillClient } from './SoroWillClient';
+export { SoroWillClient, parseWillId, SoroWillInvalidIdError } from './SoroWillClient';
 export type {
   EventSubscription,
   EventSubscriptionOptions,
@@ -58,12 +56,12 @@ export type {
 export { WillStatus, WillErrorCode } from './types';
 
 export {
-  FreghterWalletAdapter,
+  FreighterWalletAdapter,
   connectWallet,
-  freghterAdapter,
+  freighterAdapter,
   getDefaultWalletAdapter,
   getPublicKey,
-  isFreghterInstalled,
+  isFreighterInstalled,
   signTransaction,
 } from './wallet';
 export type { WalletAdapter, WalletConnection } from './wallet';
@@ -105,7 +103,7 @@ export {
   DuplicateBeneficiaryError,
   DuplicateGuardianError,
   FixedAmountExceedsBalanceError,
-  FreghterInstallCheckError,
+  FreighterInstallCheckError,
   GracePeriodExpiredError,
   GracePeriodNotExpiredError,
   GuardianCooldownActiveError,
@@ -166,7 +164,7 @@ export {
   LedgerWalletAdapter,
   LobstrWalletAdapter,
 } from './adapters';
-type export {
+export type {
   InjectedWalletProvider,
   LedgerStellarApp,
   LedgerTransport,
@@ -192,5 +190,3 @@ export {
   validateGuardians,
 } from './utils';
 export type { NextActionableState } from './utils';
-
-export { parseWillId, SoroWillInvalidIdError } from './parseWillId';

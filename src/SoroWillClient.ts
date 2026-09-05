@@ -808,6 +808,7 @@ export class SoroWillClient {
     willId: string,
     options?: RequestOptions,
   ): Promise<{ txHash: string; nextDeadline: Date }> {
+    parseWillId(willId);
     const owner = await this.getWalletPublicKey();
     // checkin_period_days is a stored will property not returned by the
     // contract's check_in function, so a separate getWill() read is
@@ -844,6 +845,7 @@ export class SoroWillClient {
     willId: string,
     options?: RequestOptions,
   ): Promise<{ txHash: string; nextDeadline: Date }> {
+    parseWillId(willId);
     const owner = await this.getWalletPublicKey();
     // checkin_period_days is a stored will property not returned by the
     // contract's emergency_checkin function, so a separate getWill() read is
@@ -888,6 +890,7 @@ export class SoroWillClient {
     willId: string,
     options?: RequestOptions,
   ): Promise<{ txHash: string; refundAmount: string }> {
+    parseWillId(willId);
     const owner = await this.getWalletPublicKey();
     const { txHash, returnValue } = await this.invoke('cancel_will', {
       will_id: parseWillId(willId),
@@ -910,6 +913,7 @@ export class SoroWillClient {
     params: UpdateBeneficiariesParams,
     options?: RequestOptions,
   ): Promise<{ txHash: string }> {
+    parseWillId(params.willId);
     if (!validateBeneficiaries(params.beneficiaries)) {
       throw new BeneficiaryValidationError(
         'Invalid beneficiaries: list must be 1–10 entries, every percentage must be a positive integer, and percentages must sum to exactly 100.',
@@ -930,6 +934,7 @@ export class SoroWillClient {
     amount: string,
     options?: RequestOptions,
   ): Promise<{ txHash: string }> {
+    parseWillId(willId);
     const owner = await this.getWalletPublicKey();
     const { txHash } = await this.invoke('top_up', {
       will_id: parseWillId(willId),
@@ -1131,6 +1136,7 @@ export class SoroWillClient {
    * @throws {Error} If the wallet is not connected or fails to sign.
    */
   async guardianTrigger(willId: string, options?: RequestOptions): Promise<{ txHash: string }> {
+    parseWillId(willId);
     const guardian = await this.getWalletPublicKey();
     const { txHash, returnValue, events } = await this.invoke('guardian_trigger', {
       will_id: parseWillId(willId),
