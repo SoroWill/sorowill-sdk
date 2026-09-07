@@ -35,7 +35,7 @@
     "docs:api": "typedoc"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^16.0.1"
+    "@stellar/stellar-sdk": "^17.0.1"
   },
   "devDependencies": {
     "@albedo-link/intent": "^0.13.0",
