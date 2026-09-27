@@ -38,6 +38,25 @@ export interface SubmitFeeBumpOptions {
 }
 
 /**
+ * Estimate the total fee (in stroops) for a transaction that packs
+ * `invocationCount` contract invocations.
+ *
+ * Stellar charges the base fee per operation, so a batch transaction that
+ * packs multiple invocations must budget for every operation it contains.
+ * Estimating for a single invocation under-counts the fee and causes the
+ * transaction to fail with an insufficient-fee error.
+ *
+ * @param invocationCount - Number of invocations (operations) packed into the transaction.
+ * @param baseFee - Base fee per operation in stroops. Defaults to 100 (the network minimum).
+ * @returns The total estimated fee in stroops, as a string.
+ */
+export function estimateBatchFee(invocationCount: number, baseFee: number = 100): string {
+  const count = Number.isFinite(invocationCount) && invocationCount > 0 ? Math.floor(invocationCount) : 1;
+  const perOp = Number.isFinite(baseFee) && baseFee > 0 ? Math.floor(baseFee) : 100;
+  return String(count * perOp);
+}
+
+/**
  * Build a fee-bump transaction that wraps an inner transaction,
  * allowing a different account (the fee sponsor) to pay the network fee.
  *
@@ -192,6 +211,9 @@ export async function submitFeeBump(options: {
       options.innerTransactionXdr,
       config.networkPassphrase,
     ) as Transaction;
+    // The inner transaction's fee already accounts for every operation it
+    // packs (batch invocations included), so reuse it directly rather than
+    // assuming a single invocation.
     fee = innerTx.fee;
   }
 
