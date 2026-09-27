@@ -758,3 +758,6 @@ This repo participates in the **Stellar Wave Program** on [Drips](https://drips.
 
 <!-- handsoff-issue-413 -->
 - #413: getWillById does not handle the case where the contract returns a will but the response parsing fails due to unexpected field types, leaving the promise hanging
+
+<!-- handsoff-issue-415 -->
+- #415: batch() packs multiple operations into one transaction but Soroban allows only one contract invocation per transaction, causing all batched operations to fail
