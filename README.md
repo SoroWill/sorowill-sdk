@@ -755,3 +755,6 @@ This repo participates in the **Stellar Wave Program** on [Drips](https://drips.
 
 <!-- handsoff-issue-412 -->
 - #412: SoroWillClient does not validate that the provided contractId is actually a valid Stellar contract address, so passing an invalid ID silently fails during the first RPC cal
+
+<!-- handsoff-issue-413 -->
+- #413: getWillById does not handle the case where the contract returns a will but the response parsing fails due to unexpected field types, leaving the promise hanging
