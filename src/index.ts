@@ -84,7 +84,10 @@ export type {
 export { ReadCache } from './cache';
 export type { ReadCacheOptions } from './cache';
 
-export { unsubscribeFromWillEvents } from './events';
+export {
+  addEventListener,
+  unsubscribeFromWillEvents,
+} from './events';
 export type {
   WillEvent,
   WillEventListener,
@@ -102,6 +105,7 @@ export {
   ConfirmationWindowExpiredError,
   DuplicateBeneficiaryError,
   DuplicateGuardianError,
+  EventTypeError,
   FixedAmountExceedsBalanceError,
   FreighterInstallCheckError,
   GracePeriodExpiredError,
