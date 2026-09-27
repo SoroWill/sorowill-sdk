@@ -159,7 +159,12 @@ export {
 } from './errors';
 export type { ContractErrorFactory } from './errors';
 
-export { RequestQueue, RequestPriority } from './requestQueue';
+export {
+  RequestQueue,
+  RequestPriority,
+  getSharedRequestQueue,
+  releaseSharedRequestQueue,
+} from './requestQueue';
 export type { RequestQueueOptions } from './requestQueue';
 
 export { buildSep7TxUri, parseSep7Callback } from './sep7';
