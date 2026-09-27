@@ -18,6 +18,13 @@ export const SOROBAN_LEDGER_CLOSE_TIME_MS = 5_000;
  * Formats a base-unit token amount (e.g. contract-side `i128` stroops) as a
  * human-readable decimal string with thousands separators, e.g.
  * `formatUSDC(12345000000n) === "1,234.50"`.
+ *
+ * The number of fractional digits shown is derived from the token's actual
+ * decimal precision (`decimals`) rather than being hardcoded to 2, so a
+ * 6-decimal token renders its full precision (e.g. `"1.234567"`) instead of
+ * being silently truncated to `"1.23"`. Trailing zeros in the fractional
+ * part are trimmed, so tokens that genuinely use 2 decimals (e.g. USDC)
+ * still render as `"1,234.50"`.
  */
 export function formatUSDC(stroops: bigint, decimals = USDC_DECIMALS): string {
   const negative = stroops < 0n;
@@ -25,12 +32,18 @@ export function formatUSDC(stroops: bigint, decimals = USDC_DECIMALS): string {
   const base = 10n ** BigInt(decimals);
   const whole = absolute / base;
   const fraction = absolute % base;
-  const cents = fraction / 10n ** BigInt(Math.max(decimals - 2, 0));
 
   const wholeFormatted = whole.toLocaleString('en-US');
-  const centsFormatted = cents.toString().padStart(2, '0');
 
-  return `${negative ? '-' : ''}${wholeFormatted}.${centsFormatted}`;
+  if (decimals <= 0) {
+    return `${negative ? '-' : ''}${wholeFormatted}`;
+  }
+
+  const fractionFormatted = fraction.toString().padStart(decimals, '0').replace(/0+$/, '');
+
+  return fractionFormatted === ''
+    ? `${negative ? '-' : ''}${wholeFormatted}`
+    : `${negative ? '-' : ''}${wholeFormatted}.${fractionFormatted}`;
 }
 
 /**
@@ -46,12 +59,12 @@ export function toStroops(usdc: string, decimals = USDC_DECIMALS): bigint {
   const negative = cleaned.startsWith('-');
   const unsigned = negative ? cleaned.slice(1) : cleaned;
   const [wholePart = '', fractionPart = ''] = unsigned.split('.');
-  if (fractionPart.length > USDC_DECIMALS) {
+  if (fractionPart.length > decimals) {
     throw new Error(
-      `Invalid USDC amount: "${usdc}" has more than ${USDC_DECIMALS} fractional digits, which would silently lose precision.`,
+      `Invalid USDC amount: "${usdc}" has more than ${decimals} fractional digits, which would silently lose precision.`,
     );
   }
-  const paddedFraction = fractionPart.padEnd(USDC_DECIMALS, '0');
+  const paddedFraction = fractionPart.padEnd(decimals, '0');
 
   const whole = BigInt(wholePart === '' ? '0' : wholePart);
   const fraction = BigInt(paddedFraction === '' ? '0' : paddedFraction);
@@ -207,84 +220,4 @@ export interface NextActionableStateOptions {
  * Computes {@link NextActionableState} for `will` from the perspective of
  * `connectedAddress`. Only the owner may check in, cancel, or emergency
  * check in; triggering and releasing are permissionless once their
- * on-chain preconditions are met; and guardians may vote for an early
- * release at any point before the will is released or cancelled.
- *
- * PendingConfirmation: the will exists but is not yet active, so no
- * owner actions are available until it transitions to Active.
- *
- * Settled: the will is fully closed; no further actions are possible.
- */
-export function getNextActionableState(
-  will: Will,
-  connectedAddress: string,
-  nowOrOptions: Date | NextActionableStateOptions = new Date(),
-): NextActionableState {
-  const now = nowOrOptions instanceof Date ? nowOrOptions : new Date();
-  const options: NextActionableStateOptions = nowOrOptions instanceof Date ? {} : nowOrOptions;
-
-  // Terminal / pre-active states with no available actions
-  if (
-    will.status === WillStatus.PendingConfirmation ||
-    will.status === WillStatus.Released ||
-    will.status === WillStatus.Cancelled ||
-    will.status === WillStatus.Settled
-  ) {
-    return {
-      canCheckIn: false,
-      canTrigger: false,
-      canEmergencyCheckIn: false,
-      canRelease: false,
-      canCancel: false,
-      canGuardianVote: false,
-    };
-  }
-
-  const isOwner = will.owner === connectedAddress;
-  const isWillGuardian = isGuardian(will, connectedAddress);
-
-  const graceDeadlineMs =
-    (will.triggerTime?.getTime() ?? 0) + will.gracePeriodDays * 86_400 * 1000;
-  const isGracePeriodExpired = will.triggerTime !== null && now.getTime() >= graceDeadlineMs;
-
-  return {
-    canCheckIn: isOwner && will.status === WillStatus.Active,
-    canTrigger: will.status === WillStatus.Active && isCheckinDue(will),
-    canEmergencyCheckIn: isOwner && will.status === WillStatus.Triggered && !isGracePeriodExpired,
-    canRelease: will.status === WillStatus.Triggered && isGracePeriodExpired,
-    canCancel: isOwner && will.status === WillStatus.Active,
-    canGuardianVote:
-      isWillGuardian &&
-      !options.guardianAlreadyVoted &&
-      (will.status === WillStatus.Active || will.status === WillStatus.Triggered),
-  };
-}
-/**
- * Validates a guardian list: empty list is valid (guardians are optional),
- * at most {@link MAX_GUARDIANS} entries, every address (including the
- * optional `ownerAddress`) is a syntactically valid Stellar public key, no
- * duplicate addresses, and no owner address in the list.
- *
- * @param guardians - The list of guardian addresses to validate.
- * @param ownerAddress - Optional owner address; when supplied, the function
- *                       rejects any guardian that matches it.
- */
-export function validateGuardians(guardians: string[], ownerAddress?: string): boolean {
-  if (guardians.length > MAX_GUARDIANS) {
-    return false;
-  }
-  if (!guardians.every((address) => StrKey.isValidEd25519PublicKey(address))) {
-    return false;
-  }
-  if (ownerAddress !== undefined && !StrKey.isValidEd25519PublicKey(ownerAddress)) {
-    return false;
-  }
-  const unique = new Set(guardians);
-  if (unique.size !== guardians.length) {
-    return false;
-  }
-  if (ownerAddress !== undefined && unique.has(ownerAddress)) {
-    return false;
-  }
-  return true;
-}
+ * on-chain preconditions are met; and guardians may vote for 

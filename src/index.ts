@@ -181,6 +181,7 @@ export {
   MAX_GUARDIANS,
   calculateShares,
   formatDeadline,
+  formatTokenAmount,
   formatUSDC,
   getNextActionableState,
   getTimeUntilCheckin,
