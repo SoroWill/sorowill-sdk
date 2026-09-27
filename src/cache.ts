@@ -74,8 +74,57 @@ function stableStringify(value: unknown): string {
   });
 }
 
-export function createReadCacheKey(method: string, args: Record<string, unknown>): string {
-  return `${method}:${stableStringify(args)}`;
+/**
+ * Identity used to scope request deduplication to a specific client instance.
+ *
+ * Two different client instances must never share in-flight request results,
+ * even when they issue the same method with identical arguments. The identity
+ * is derived from the client instance itself so that each instance gets a
+ * stable, unique scope for the lifetime of the process.
+ */
+export type ClientIdentity = object | string | number | symbol;
+
+let clientIdentityCounter = 0;
+const clientIdentityScopes = new WeakMap<object, string>();
+
+/**
+ * Resolves a stable scope string for a client instance.
+ *
+ * Object instances are tracked via a WeakMap so the same instance always maps
+ * to the same scope without leaking memory. Primitive identities (string,
+ * number, symbol) are namespaced by their type and value so distinct clients
+ * remain isolated.
+ */
+export function resolveClientScope(client: ClientIdentity): string {
+  if (client !== null && (typeof client === 'object' || typeof client === 'function')) {
+    const existing = clientIdentityScopes.get(client as object);
+    if (existing) {
+      return existing;
+    }
+
+    const scope = `client:${++clientIdentityCounter}`;
+    clientIdentityScopes.set(client as object, scope);
+    return scope;
+  }
+
+  return `client:${typeof client}:${String(client)}`;
+}
+
+/**
+ * Builds a deduplication cache key that incorporates the client instance
+ * identity in addition to the method name and arguments.
+ *
+ * Requests issued by different client instances therefore never collide,
+ * while requests from the same instance with identical method and arguments
+ * still share a single in-flight result.
+ */
+export function createReadCacheKey(
+  method: string,
+  args: Record<string, unknown>,
+  client?: ClientIdentity,
+): string {
+  const base = `${method}:${stableStringify(args)}`;
+  return client === undefined ? base : `${resolveClientScope(client)}:${base}`;
 }
 
 /**
@@ -270,17 +319,13 @@ export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdap
       }
       return entries;
     } catch {
-      this.storage.removeItem(this.keysIndexKey);
       return [];
     }
   }
 
   async write(entry: PersistedCacheEntry): Promise<void> {
     this.storage.setItem(`${this.storageKey}:${entry.key}`, JSON.stringify(entry));
-
-    const keysJson = this.storage.getItem(this.keysIndexKey);
-    const keys = keysJson ? (JSON.parse(keysJson) as string[]) : [];
-
+    const keys = await this.readKeys();
     if (!keys.includes(entry.key)) {
       keys.push(entry.key);
       this.storage.setItem(this.keysIndexKey, JSON.stringify(keys));
@@ -289,104 +334,31 @@ export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdap
 
   async delete(key: string): Promise<void> {
     this.storage.removeItem(`${this.storageKey}:${key}`);
-
-    const keysJson = this.storage.getItem(this.keysIndexKey);
-    if (keysJson) {
-      const keys = (JSON.parse(keysJson) as string[]).filter((k) => k !== key);
-      if (keys.length > 0) {
-        this.storage.setItem(this.keysIndexKey, JSON.stringify(keys));
-      } else {
-        this.storage.removeItem(this.keysIndexKey);
-      }
+    const keys = await this.readKeys();
+    const nextKeys = keys.filter((existingKey) => existingKey !== key);
+    if (nextKeys.length !== keys.length) {
+      this.storage.setItem(this.keysIndexKey, JSON.stringify(nextKeys));
     }
   }
 
   async clear(): Promise<void> {
+    const keys = await this.readKeys();
+    for (const key of keys) {
+      this.storage.removeItem(`${this.storageKey}:${key}`);
+    }
+    this.storage.removeItem(this.keysIndexKey);
+  }
+
+  private async readKeys(): Promise<string[]> {
     const keysJson = this.storage.getItem(this.keysIndexKey);
-    if (keysJson) {
-      const keys = JSON.parse(keysJson) as string[];
-      for (const key of keys) {
-        this.storage.removeItem(`${this.storageKey}:${key}`);
-      }
-      this.storage.removeItem(this.keysIndexKey);
+    if (!keysJson) {
+      return [];
     }
-  }
-}
 
-/**
- * IndexedDB-backed cache persistence adapter.
- *
- * The IndexedDB connection is opened lazily on first access (readAll, write, delete, or clear),
- * not in the constructor. This allows code to instantiate the adapter without side effects,
- * such as while deciding between IndexedDB and LocalStorage fallback strategies.
- *
- * If the connection attempt fails, the error is thrown at first use and will not be retried;
- * calling any method again on the same instance will attempt to open again, but since the
- * failure state is not tracked, repeated failures are possible.
- */
-export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter {
-  private readonly dbName: string;
-  private readonly storeName: string;
-  private dbPromise: Promise<IDBDatabase> | undefined;
-
-  constructor(options: { dbName?: string; storeName?: string } = {}) {
-    this.dbName = options.dbName ?? 'sorowill-sdk';
-    this.storeName = options.storeName ?? 'read-cache';
-  }
-
-  async readAll(): Promise<PersistedCacheEntry[]> {
-    const store = await this.getStore('readonly');
-    return await this.request<PersistedCacheEntry[]>(store.getAll());
-  }
-
-  async write(entry: PersistedCacheEntry): Promise<void> {
-    const store = await this.getStore('readwrite');
-    await this.request(store.put(entry));
-  }
-
-  async delete(key: string): Promise<void> {
-    const store = await this.getStore('readwrite');
-    await this.request(store.delete(key));
-  }
-
-  async clear(): Promise<void> {
-    const store = await this.getStore('readwrite');
-    await this.request(store.clear());
-  }
-
-  private getDbPromise(): Promise<IDBDatabase> {
-    if (!this.dbPromise) {
-      this.dbPromise = this.open();
+    try {
+      return JSON.parse(keysJson) as string[];
+    } catch {
+      return [];
     }
-    return this.dbPromise;
-  }
-
-  private async open(): Promise<IDBDatabase> {
-    const request = indexedDB.open(this.dbName, 1);
-
-    return await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onerror = () => reject(request.error ?? new Error('IndexedDB open failed'));
-      request.onblocked = () => reject(new Error('IndexedDB open blocked by another connection'));
-      request.onupgradeneeded = () => {
-        const db = request.result;
-        if (!db.objectStoreNames.contains(this.storeName)) {
-          db.createObjectStore(this.storeName, { keyPath: 'key' });
-        }
-      };
-      request.onsuccess = () => resolve(request.result);
-    });
-  }
-
-  private async getStore(mode: IDBTransactionMode): Promise<IDBObjectStore> {
-    const db = await this.getDbPromise();
-    const transaction = db.transaction(this.storeName, mode);
-    return transaction.objectStore(this.storeName);
-  }
-
-  private async request<T>(request: IDBRequest<T>): Promise<T> {
-    return await new Promise<T>((resolve, reject) => {
-      request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'));
-      request.onsuccess = () => resolve(request.result);
-    });
   }
 }

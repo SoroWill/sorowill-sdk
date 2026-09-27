@@ -9,17 +9,22 @@ interface InFlightOperation<T> {
 export class InFlightTracker {
   private readonly inFlight = new Map<OperationKey, InFlightOperation<unknown>>();
 
-  getKey(willId: string | bigint, method: string): OperationKey {
+  getKey(willId: string | bigint, method: string, clientId?: string): OperationKey {
     const id = typeof willId === 'bigint' ? willId.toString() : willId;
-    return `${id}:${method}`;
+    const scope = clientId ?? '';
+    return `${scope}:${id}:${method}`;
   }
 
-  isInFlight(willId: string | bigint, method: string): boolean {
-    return this.inFlight.has(this.getKey(willId, method));
+  isInFlight(willId: string | bigint, method: string, clientId?: string): boolean {
+    return this.inFlight.has(this.getKey(willId, method, clientId));
   }
 
-  getInFlightPromise<T>(willId: string | bigint, method: string): OperationResult<T> | undefined {
-    const op = this.inFlight.get(this.getKey(willId, method));
+  getInFlightPromise<T>(
+    willId: string | bigint,
+    method: string,
+    clientId?: string,
+  ): OperationResult<T> | undefined {
+    const op = this.inFlight.get(this.getKey(willId, method, clientId));
     return op?.promise as OperationResult<T> | undefined;
   }
 
@@ -27,8 +32,9 @@ export class InFlightTracker {
     willId: string | bigint,
     method: string,
     operation: (signal: AbortSignal) => PromiseLike<T>,
+    clientId?: string,
   ): PromiseLike<T> {
-    const key = this.getKey(willId, method);
+    const key = this.getKey(willId, method, clientId);
 
     if (this.inFlight.has(key)) {
       return this.inFlight.get(key)!.promise as PromiseLike<T>;
@@ -50,8 +56,8 @@ export class InFlightTracker {
     this.inFlight.clear();
   }
 
-  abort(willId: string | bigint, method: string): void {
-    const key = this.getKey(willId, method);
+  abort(willId: string | bigint, method: string, clientId?: string): void {
+    const key = this.getKey(willId, method, clientId);
     const op = this.inFlight.get(key);
     if (op) {
       op.controller.abort();
