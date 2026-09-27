@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   LocalStorageWalletConnectSessionStore,
@@ -259,6 +259,62 @@ describe('WalletConnectAdapter', () => {
     const adapter = new WalletConnectAdapter(client);
     await expect(adapter.disconnect()).resolves.toBeUndefined();
     expect(await adapter.isConnected()).toBe(false);
+  });
+});
+
+describe('WalletConnectAdapter connect timeout', () => {
+  function makeClient(approval: () => Promise<WalletConnectSession>): WalletConnectClient {
+    return {
+      async connect() {
+        return { uri: 'wc:test', approval };
+      },
+      async disconnect() {},
+      async getSession() {
+        return null;
+      },
+      async request<T>(): Promise<T> {
+        throw new Error('not used');
+      },
+    };
+  }
+
+  it('resolves when approval settles before the timeout and clears the timer', async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new WalletConnectAdapter(makeClient(async () => makeSession()), { connectTimeoutMs: 1000 });
+      await expect(adapter.connect()).resolves.toBeDefined();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects when approval does not settle within connectTimeoutMs', async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new WalletConnectAdapter(makeClient(() => new Promise(() => {})), { connectTimeoutMs: 1000 });
+      const pending = expect(adapter.connect()).rejects.toThrow('WalletConnect pairing approval timed out after 1000ms');
+      await vi.advanceTimersByTimeAsync(1000);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('propagates approval rejection and clears the timer', async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new WalletConnectAdapter(
+        makeClient(async () => {
+          throw new Error('User rejected');
+        }),
+        { connectTimeoutMs: 1000 },
+      );
+      await expect(adapter.connect()).rejects.toThrow('User rejected');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
