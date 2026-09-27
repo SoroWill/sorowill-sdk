@@ -1,24 +1,8 @@
-import { createRequire } from 'node:module';
-import type ReactNamespace from 'react';
+import * as React from 'react';
 
 import { SoroWillClient } from '../SoroWillClient';
 import type { SoroWillClientOptions } from '../SoroWillClient';
 import type { Will } from '../types';
-
-/**
- * `react` is an optional peer dependency of this subpath — a static
- * `import ... from 'react'` would fail to resolve for a consumer that hasn't
- * installed it, even before any hook is actually called. Loading it lazily
- * via `createRequire` means the module only needs to resolve when a hook in
- * this file actually runs.
- */
-let react: typeof ReactNamespace | undefined;
-function getReact(): typeof ReactNamespace {
-  if (!react) {
-    react = createRequire(import.meta.url)('react');
-  }
-  return react!;
-}
 
 /** Standard data-fetching state returned by the hooks. */
 export interface UseQueryResult<T> {
@@ -29,12 +13,12 @@ export interface UseQueryResult<T> {
 }
 
 function useSoroWillClient(options: SoroWillClientOptions): SoroWillClient {
-  const client = getReact().useMemo(
+  const client = React.useMemo(
     () => new SoroWillClient(options),
     [options.network, options.contractId],
   );
 
-  getReact().useEffect(() => {
+  React.useEffect(() => {
     return () => client.destroy();
   }, [client]);
 
@@ -54,14 +38,14 @@ export function useWill(
   willId: string | null,
 ): UseQueryResult<Will> {
   const client = useSoroWillClient(clientOptions);
-  const [data, setData] = getReact().useState<Will | null>(null);
-  const [error, setError] = getReact().useState<Error | null>(null);
-  const [loading, setLoading] = getReact().useState(false);
-  const [fetchKey, setFetchKey] = getReact().useState(0);
+  const [data, setData] = React.useState<Will | null>(null);
+  const [error, setError] = React.useState<Error | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [fetchKey, setFetchKey] = React.useState(0);
 
-  const refetch = getReact().useCallback(() => setFetchKey((k) => k + 1), []);
+  const refetch = React.useCallback(() => setFetchKey((k) => k + 1), []);
 
-  getReact().useEffect(() => {
+  React.useEffect(() => {
     if (!willId) {
       setData(null);
       return;
@@ -109,14 +93,14 @@ export function useWillsByOwner(
   owner: string | null,
 ): UseQueryResult<Will[]> {
   const client = useSoroWillClient(clientOptions);
-  const [data, setData] = getReact().useState<Will[] | null>(null);
-  const [error, setError] = getReact().useState<Error | null>(null);
-  const [loading, setLoading] = getReact().useState(false);
-  const [fetchKey, setFetchKey] = getReact().useState(0);
+  const [data, setData] = React.useState<Will[] | null>(null);
+  const [error, setError] = React.useState<Error | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [fetchKey, setFetchKey] = React.useState(0);
 
-  const refetch = getReact().useCallback(() => setFetchKey((k) => k + 1), []);
+  const refetch = React.useCallback(() => setFetchKey((k) => k + 1), []);
 
-  getReact().useEffect(() => {
+  React.useEffect(() => {
     if (!owner) {
       setData(null);
       return;
@@ -164,14 +148,14 @@ export function useWillsByBeneficiary(
   beneficiary: string | null,
 ): UseQueryResult<Will[]> {
   const client = useSoroWillClient(clientOptions);
-  const [data, setData] = getReact().useState<Will[] | null>(null);
-  const [error, setError] = getReact().useState<Error | null>(null);
-  const [loading, setLoading] = getReact().useState(false);
-  const [fetchKey, setFetchKey] = getReact().useState(0);
+  const [data, setData] = React.useState<Will[] | null>(null);
+  const [error, setError] = React.useState<Error | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [fetchKey, setFetchKey] = React.useState(0);
 
-  const refetch = getReact().useCallback(() => setFetchKey((k) => k + 1), []);
+  const refetch = React.useCallback(() => setFetchKey((k) => k + 1), []);
 
-  getReact().useEffect(() => {
+  React.useEffect(() => {
     if (!beneficiary) {
       setData(null);
       return;
