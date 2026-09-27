@@ -750,3 +750,8 @@ npm run build
 ## Contributing via Drips Wave
 
 This repo participates in the **Stellar Wave Program** on [Drips](https://drips.network/wave). Maintainer-tagged issues carry Point values, and contributors who resolve them during an active Wave earn a proportional share of that Wave's reward pool. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the contribution workflow, and <https://drips.network/wave> for how Wave itself works.
+
+## Handsoff notes
+
+<!-- handsoff-issue-420 -->
+- #420: createWill does not validate that beneficiary addresses are valid Stellar accounts before creating, so the contract will later reject the beneficiary list during release
