@@ -151,8 +151,13 @@ export {
   WillNotTriggeredError,
   ZeroAmountError,
   mapContractError,
+  registerContractError,
+  registerContractErrors,
+  setContractErrorMap,
+  getContractErrorMap,
   UnsupportedBatchSizeError,
 } from './errors';
+export type { ContractErrorFactory } from './errors';
 
 export { RequestQueue, RequestPriority } from './requestQueue';
 export type { RequestQueueOptions } from './requestQueue';
