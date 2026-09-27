@@ -79,8 +79,22 @@ function useSoroWillClient(options: SoroWillClientOptions): SoroWillClient {
     deps,
   );
 
+  // Destroy the client only when it is actually replaced (i.e. the memoized
+  // instance changes), not on every effect cleanup. React StrictMode mounts,
+  // cleans up, and remounts effects while `useMemo` keeps the same client
+  // instance, so destroying in the cleanup would leave the remounted
+  // component holding a destroyed client. Tracking the previous instance in a
+  // ref lets us tear down the old client on replacement while leaving the
+  // current one usable across StrictMode's simulated unmount/remount.
+  const previousClientRef = getReact().useRef<SoroWillClient | null>(null);
+
   getReact().useEffect(() => {
-    return () => client.destroy();
+    const previousClient = previousClientRef.current;
+    previousClientRef.current = client;
+
+    if (previousClient && previousClient !== client) {
+      previousClient.destroy();
+    }
   }, [client]);
 
   return client;
