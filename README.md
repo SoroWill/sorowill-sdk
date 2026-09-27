@@ -755,3 +755,6 @@ This repo participates in the **Stellar Wave Program** on [Drips](https://drips.
 
 <!-- handsoff-issue-420 -->
 - #420: createWill does not validate that beneficiary addresses are valid Stellar accounts before creating, so the contract will later reject the beneficiary list during release
+
+<!-- handsoff-issue-421 -->
+- #421: updateBeneficiaries does not check if the new beneficiary percentages sum to 100%, so the SDK allows submissions that the contract will later reject
