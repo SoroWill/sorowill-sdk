@@ -155,6 +155,20 @@ export class ReadCache {
       });
   }
 
+  /**
+   * Removes a single entry from the cache (both in-memory and persisted).
+   *
+   * Useful when a caller knows the cached value is stale and wants to force a
+   * subsequent `get()` to miss so the value is re-fetched from the source of
+   * truth (e.g. the contract).
+   *
+   * @param key - The cache key to evict
+   */
+  async invalidate(key: string): Promise<void> {
+    await this.readyPromise;
+    await this.delete(key);
+  }
+
   async invalidateByWillId(willId: string): Promise<void> {
     await this.readyPromise;
 
@@ -270,17 +284,13 @@ export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdap
       }
       return entries;
     } catch {
-      this.storage.removeItem(this.keysIndexKey);
       return [];
     }
   }
 
   async write(entry: PersistedCacheEntry): Promise<void> {
     this.storage.setItem(`${this.storageKey}:${entry.key}`, JSON.stringify(entry));
-
-    const keysJson = this.storage.getItem(this.keysIndexKey);
-    const keys = keysJson ? (JSON.parse(keysJson) as string[]) : [];
-
+    const keys = await this.readKeys();
     if (!keys.includes(entry.key)) {
       keys.push(entry.key);
       this.storage.setItem(this.keysIndexKey, JSON.stringify(keys));
@@ -289,104 +299,29 @@ export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdap
 
   async delete(key: string): Promise<void> {
     this.storage.removeItem(`${this.storageKey}:${key}`);
-
-    const keysJson = this.storage.getItem(this.keysIndexKey);
-    if (keysJson) {
-      const keys = (JSON.parse(keysJson) as string[]).filter((k) => k !== key);
-      if (keys.length > 0) {
-        this.storage.setItem(this.keysIndexKey, JSON.stringify(keys));
-      } else {
-        this.storage.removeItem(this.keysIndexKey);
-      }
-    }
+    const keys = await this.readKeys();
+    const nextKeys = keys.filter((existingKey) => existingKey !== key);
+    this.storage.setItem(this.keysIndexKey, JSON.stringify(nextKeys));
   }
 
   async clear(): Promise<void> {
+    const keys = await this.readKeys();
+    for (const key of keys) {
+      this.storage.removeItem(`${this.storageKey}:${key}`);
+    }
+    this.storage.removeItem(this.keysIndexKey);
+  }
+
+  private async readKeys(): Promise<string[]> {
     const keysJson = this.storage.getItem(this.keysIndexKey);
-    if (keysJson) {
-      const keys = JSON.parse(keysJson) as string[];
-      for (const key of keys) {
-        this.storage.removeItem(`${this.storageKey}:${key}`);
-      }
-      this.storage.removeItem(this.keysIndexKey);
+    if (!keysJson) {
+      return [];
     }
-  }
-}
 
-/**
- * IndexedDB-backed cache persistence adapter.
- *
- * The IndexedDB connection is opened lazily on first access (readAll, write, delete, or clear),
- * not in the constructor. This allows code to instantiate the adapter without side effects,
- * such as while deciding between IndexedDB and LocalStorage fallback strategies.
- *
- * If the connection attempt fails, the error is thrown at first use and will not be retried;
- * calling any method again on the same instance will attempt to open again, but since the
- * failure state is not tracked, repeated failures are possible.
- */
-export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter {
-  private readonly dbName: string;
-  private readonly storeName: string;
-  private dbPromise: Promise<IDBDatabase> | undefined;
-
-  constructor(options: { dbName?: string; storeName?: string } = {}) {
-    this.dbName = options.dbName ?? 'sorowill-sdk';
-    this.storeName = options.storeName ?? 'read-cache';
-  }
-
-  async readAll(): Promise<PersistedCacheEntry[]> {
-    const store = await this.getStore('readonly');
-    return await this.request<PersistedCacheEntry[]>(store.getAll());
-  }
-
-  async write(entry: PersistedCacheEntry): Promise<void> {
-    const store = await this.getStore('readwrite');
-    await this.request(store.put(entry));
-  }
-
-  async delete(key: string): Promise<void> {
-    const store = await this.getStore('readwrite');
-    await this.request(store.delete(key));
-  }
-
-  async clear(): Promise<void> {
-    const store = await this.getStore('readwrite');
-    await this.request(store.clear());
-  }
-
-  private getDbPromise(): Promise<IDBDatabase> {
-    if (!this.dbPromise) {
-      this.dbPromise = this.open();
+    try {
+      return JSON.parse(keysJson) as string[];
+    } catch {
+      return [];
     }
-    return this.dbPromise;
-  }
-
-  private async open(): Promise<IDBDatabase> {
-    const request = indexedDB.open(this.dbName, 1);
-
-    return await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onerror = () => reject(request.error ?? new Error('IndexedDB open failed'));
-      request.onblocked = () => reject(new Error('IndexedDB open blocked by another connection'));
-      request.onupgradeneeded = () => {
-        const db = request.result;
-        if (!db.objectStoreNames.contains(this.storeName)) {
-          db.createObjectStore(this.storeName, { keyPath: 'key' });
-        }
-      };
-      request.onsuccess = () => resolve(request.result);
-    });
-  }
-
-  private async getStore(mode: IDBTransactionMode): Promise<IDBObjectStore> {
-    const db = await this.getDbPromise();
-    const transaction = db.transaction(this.storeName, mode);
-    return transaction.objectStore(this.storeName);
-  }
-
-  private async request<T>(request: IDBRequest<T>): Promise<T> {
-    return await new Promise<T>((resolve, reject) => {
-      request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'));
-      request.onsuccess = () => resolve(request.result);
-    });
   }
 }
