@@ -1,4 +1,3 @@
-import { createRequire } from 'node:module';
 import type ReactNamespace from 'react';
 
 import { SoroWillClient } from '../SoroWillClient';
@@ -9,15 +8,41 @@ import type { Will } from '../types';
  * `react` is an optional peer dependency of this subpath — a static
  * `import ... from 'react'` would fail to resolve for a consumer that hasn't
  * installed it, even before any hook is actually called. Loading it lazily
- * via `createRequire` means the module only needs to resolve when a hook in
- * this file actually runs.
+ * via a dynamic `import()` keeps the module browser-safe (no Node-only APIs
+ * like `node:module` or `import.meta.url`) while still only requiring `react`
+ * to resolve when a hook in this file actually runs.
  */
 let react: typeof ReactNamespace | undefined;
+let reactPromise: Promise<typeof ReactNamespace> | undefined;
+
+function loadReact(): Promise<typeof ReactNamespace> {
+  if (!reactPromise) {
+    reactPromise = import('react').then((mod) => {
+      react = (mod as { default?: typeof ReactNamespace }).default ?? (mod as unknown as typeof ReactNamespace);
+      return react;
+    });
+  }
+  return reactPromise;
+}
+
 function getReact(): typeof ReactNamespace {
   if (!react) {
-    react = createRequire(import.meta.url)('react');
+    throw new Error(
+      'react is not loaded yet. Call `await loadReact()` before using the SoroWill React hooks.',
+    );
   }
-  return react!;
+  return react;
+}
+
+/**
+ * Ensure `react` is loaded before rendering hooks from this subpath.
+ *
+ * Call this once (e.g. at app startup) and await it before mounting any
+ * component that uses the hooks below. This keeps `react` an optional peer:
+ * consumers that never touch the `./react` subpath never load it.
+ */
+export function loadReactHooks(): Promise<typeof ReactNamespace> {
+  return loadReact();
 }
 
 /** Standard data-fetching state returned by the hooks. */
