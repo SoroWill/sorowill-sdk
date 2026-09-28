@@ -43,6 +43,12 @@ export type {
   SubmitFeeBumpOptions,
 } from './feeBump';
 
+export { SimulationResultError } from './txValidation';
+export type {
+  SimulationResponse,
+  TransactionMatchOptions,
+} from './txValidation';
+
 export type {
   BatchOperation,
   BatchResult,
