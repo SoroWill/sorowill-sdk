@@ -488,6 +488,7 @@ Notes:
 | Export | Kind | Source module | Description |
 |---|---|---|---|
 | `RequestQueue` | class | `requestQueue` | FIFO queue with concurrency and rate-limit controls used internally by the client |
+| `InFlightTracker` | class | `inFlightTracker` | Deduplicates concurrent identical in-flight operations; can be shared across `SoroWillClient` instances targeting the same contract to prevent duplicate RPC calls (#503) |
 
 **Ordering guarantees.** State-changing calls (`createWill`, `checkIn`, `batch`, and other signed submissions) made on the same client are serialized per account: each one loads the sequence number, signs, submits, and waits for a terminal status — including any RPC retries and fee-bump resubmission — before the next begins. A retried operation therefore can never land after an operation issued later. Read-only RPC calls go through `RequestQueue` concurrently and carry no ordering guarantee across retries. Multiple `SoroWillClient` instances (or other apps) signing for the same account are not coordinated with each other; use a single client per account.
 

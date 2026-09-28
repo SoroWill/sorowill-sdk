@@ -192,6 +192,25 @@ export interface SoroWillClientOptions {
   /** Advanced override for testing or custom transports. */
   rpcServer?: SoroWillRpcServer;
   /**
+   * Optional shared in-flight deduplication tracker.
+   *
+   * By default each `SoroWillClient` instance creates its own `InFlightTracker`
+   * scoped to its `contractId`, so duplicate requests from *different* instances
+   * are not deduplicated. Pass a shared `InFlightTracker` (constructed with the
+   * same `contractId` as the clients) to enable cross-instance deduplication
+   * for the same contract (#503).
+   *
+   * @example
+   * ```ts
+   * import { InFlightTracker, SoroWillClient } from '@sorowill/sdk';
+   *
+   * const tracker = new InFlightTracker('CA3D5KRY...');
+   * const clientA = new SoroWillClient({ ..., inFlightTracker: tracker });
+   * const clientB = new SoroWillClient({ ..., inFlightTracker: tracker });
+   * ```
+   */
+  inFlightTracker?: InFlightTracker;
+  /**
    * Advanced override for testing or preloaded contract specs.
    *
    * By injecting a pre-built spec you can write snapshot tests that lock in
@@ -228,6 +247,33 @@ export interface SoroWillClientOptions {
    * are provided.
    */
   specJson?: Uint8Array;
+  /**
+   * How long (in milliseconds) the lazily-fetched contract spec is considered
+   * fresh before it is expired and re-fetched from the RPC node (#502).
+   *
+   * This is the primary mechanism for detecting a contract upgrade mid-session:
+   * once the TTL has elapsed, the next SDK call will transparently re-fetch the
+   * WASM, re-derive the `Spec`, and resume normal operation with the updated
+   * method signatures.
+   *
+   * - Set to a finite value (e.g. `300_000` = 5 minutes) if you need to handle
+   *   contract upgrades without constructing a new client.
+   * - Defaults to `Infinity` (never re-fetch) to preserve the previous
+   *   behaviour for existing consumers who do not need live upgrade detection.
+   * - Has no effect when `spec` or `specJson` are provided (those are treated
+   *   as permanent overrides and are not subject to TTL expiry).
+   *
+   * @example
+   * ```ts
+   * // Refresh the spec at most every 5 minutes.
+   * const client = new SoroWillClient({
+   *   network: 'testnet',
+   *   contractId: 'C...',
+   *   specCacheTtlMs: 5 * 60 * 1000,
+   * });
+   * ```
+   */
+  specCacheTtlMs?: number;
   /** Optional override for the Soroban RPC endpoint. */
   rpcUrl?: string;
   /** Optional override for the Stellar network passphrase. */
@@ -636,10 +682,33 @@ export class SoroWillClient {
   private readonly readCache: ReadCache | undefined;
   private readonly retryOptions: RpcRetryOptions;
   private specPromise: Promise<InstanceType<typeof Spec>> | undefined;
+  /**
+   * Wall-clock timestamp (ms) when the spec was last successfully resolved.
+   * Used together with `specCacheTtlMs` to expire and re-fetch the spec
+   * after a contract upgrade (#502).
+   */
+  private specResolvedAt: number | undefined;
+  /**
+   * Per-network cache for fee stats results. Keyed by network passphrase so
+   * that switching networks (e.g. testnet → mainnet mid-session) never returns
+   * stale fees from the previous network (#500).
+   */
+  private feeStatsCache: Map<string, rpc.Api.GetFeeStatsResponse>;
   private readonly debug: boolean;
   private readonly debugLogger: DebugLogger;
   private readonly autoFeeBumpOnTimeout: boolean;
   private readonly transactionTimeoutSeconds: number;
+  /**
+   * How long (in milliseconds) the lazily-fetched contract spec is considered
+   * fresh. After this TTL elapses the next call will re-fetch the spec from the
+   * RPC node, picking up any changes introduced by a contract upgrade (#502).
+   *
+   * `Infinity` (the default) keeps the behaviour from SDK ≤ 0.1.1: the spec is
+   * fetched once per client instance and never re-fetched automatically.
+   * Explicit `spec`/`specJson` overrides are always treated as permanent and are
+   * not subject to TTL expiry.
+   */
+  private readonly specCacheTtlMs: number;
 
   constructor(options: SoroWillClientOptions) {
     const config = NETWORK_CONFIG[options.network];
@@ -689,7 +758,12 @@ export class SoroWillClient {
         ? {}
         : { requestsPerSecond: options.requestsPerSecond }),
     });
-    this.inFlightTracker = new InFlightTracker();
+    this.inFlightTracker =
+      options.inFlightTracker ??
+      // Default: a private tracker scoped to this contract's address so that
+      // different client instances targeting different contracts never share a
+      // dedup entry for the same (willId, method) pair (#503).
+      new InFlightTracker(options.contractId);
     this.readCache = options.readCache === false ? undefined : new ReadCache(options.readCache);
     this.retryOptions = { ...DEFAULT_RETRY_OPTIONS, ...options.retry };
     const { maxAttempts, initialDelayMs, maxDelayMs, backoffFactor } = this.retryOptions;
@@ -712,6 +786,13 @@ export class SoroWillClient {
     if (!Number.isFinite(this.transactionTimeoutSeconds) || this.transactionTimeoutSeconds <= 0) {
       throw new RangeError('transactionTimeoutSeconds must be a finite number greater than zero');
     }
+
+    this.specCacheTtlMs = options.specCacheTtlMs ?? Infinity;
+    if (this.specCacheTtlMs !== Infinity && (!Number.isFinite(this.specCacheTtlMs) || this.specCacheTtlMs <= 0)) {
+      throw new RangeError('specCacheTtlMs must be a finite number greater than zero, or Infinity');
+    }
+
+    this.feeStatsCache = new Map();
 
     if (this.readCache && options.eventSource) {
       // Subscribe and automatically clean up the listener if setup throws.
@@ -1736,6 +1817,22 @@ export class SoroWillClient {
   private async getSpec(
     options?: RequestOptions,
   ): Promise<InstanceType<typeof Spec>> {
+    // TTL-based expiry: if the spec was fetched from the network (not from an
+    // explicit override) and the TTL has elapsed, treat it as stale and clear
+    // the cache so it is re-fetched on the next call. This allows the client to
+    // pick up new method signatures after a contract upgrade (#502).
+    const isFetchedSpec = !this.specOverride && !this.specJsonOverride;
+    if (
+      isFetchedSpec &&
+      this.specPromise !== undefined &&
+      this.specResolvedAt !== undefined &&
+      Number.isFinite(this.specCacheTtlMs) &&
+      Date.now() - this.specResolvedAt > this.specCacheTtlMs
+    ) {
+      this.specPromise = undefined;
+      this.specResolvedAt = undefined;
+    }
+
     if (!this.specPromise) {
       if (this.specOverride) {
         this.specPromise = Promise.resolve(this.specOverride) as Promise<InstanceType<typeof Spec>>;
@@ -1748,9 +1845,16 @@ export class SoroWillClient {
           () => this.server.getContractWasmByContractId(this.contract.contractId()),
           options,
         )
-          .then((wasm) => Spec.fromWasm(Buffer.from(wasm)))
+          .then((wasm) => {
+            const spec = Spec.fromWasm(Buffer.from(wasm));
+            // Record when the spec was successfully resolved so TTL expiry can
+            // be checked on the next call (#502).
+            this.specResolvedAt = Date.now();
+            return spec;
+          })
           .catch((error: unknown) => {
             this.specPromise = undefined;
+            this.specResolvedAt = undefined;
             throw error;
           });
       }
@@ -2230,6 +2334,7 @@ export class SoroWillClient {
 
   async refreshSpec(options?: RequestOptions): Promise<InstanceType<typeof Spec>> {
     this.specPromise = undefined;
+    this.specResolvedAt = undefined;
     return this.getSpec(options);
   }
 
@@ -2254,7 +2359,34 @@ export class SoroWillClient {
     if (typeof server.getFeeStats !== 'function') {
       throw new SoroWillError('The configured RPC server does not support getFeeStats');
     }
-    return this.rpc(() => server.getFeeStats!(), options);
+
+    // Detect network changes: if the wallet reports a different passphrase than
+    // the one we last cached stats for, flush the whole cache first (#500).
+    const currentPassphrase = await this.resolveCurrentNetworkPassphrase();
+    if (currentPassphrase !== this.networkPassphrase) {
+      // The wallet is on a different network than the client was configured for.
+      // Clear every cached entry so nothing stale leaks through.
+      this.feeStatsCache.clear();
+    }
+
+    const cacheKey = currentPassphrase;
+    const cached = this.feeStatsCache.get(cacheKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const result = await this.rpc(() => server.getFeeStats!(), options);
+    this.feeStatsCache.set(cacheKey, result);
+    return result;
+  }
+
+  /**
+   * Flushes the in-memory fee-stats cache for all networks.
+   * Call this after detecting a wallet network switch to guarantee the next
+   * `getNetworkFeeStats()` call fetches fresh data from the RPC node.
+   */
+  flushFeeStatsCache(): void {
+    this.feeStatsCache.clear();
   }
 
   /**
@@ -2399,5 +2531,25 @@ export class SoroWillClient {
 
   private async getWalletPublicKey(): Promise<string> {
     return this.wallet.getPublicKey();
+  }
+
+  /**
+   * Returns the wallet's currently reported network passphrase, falling back
+   * to the client's configured passphrase when the wallet does not implement
+   * `getNetwork()`. Used by `getNetworkFeeStats` to key the per-network cache
+   * and detect mid-session network switches (#500).
+   */
+  private async resolveCurrentNetworkPassphrase(): Promise<string> {
+    if (typeof this.wallet.getNetwork === 'function') {
+      try {
+        const details = await this.wallet.getNetwork();
+        if (details.networkPassphrase) {
+          return details.networkPassphrase;
+        }
+      } catch {
+        // If getNetwork() fails for any reason, fall back to the configured passphrase.
+      }
+    }
+    return this.networkPassphrase;
   }
 }
