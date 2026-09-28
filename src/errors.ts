@@ -681,8 +681,18 @@ export function mapContractError(error: unknown): Error {
   const text = errorText(error);
   const match =
     /Error\(Contract,\s*#?(\d+)\)/i.exec(text) ??
-    /(?:contract error|contracterror|error code)[^\d#]*#?(\d+)/i.exec(text);
+    /(?:contract error|contracterror|error code)[^\d#]*#?(\d+)/i.exec(text) ??
+    /^#?(\d+)$/i.exec(text.trim());
   const codeText = match?.[1];
-  const ErrorClass = codeText === undefined ? undefined : CONTRACT_ERRORS[Number(codeText)];
-  return ErrorClass === undefined ? (error instanceof Error ? error : new SoroWillError(text)) : new ErrorClass({ cause: error });
+  const code = codeText === undefined ? undefined : Number(codeText);
+  const ErrorClass = code === undefined ? undefined : CONTRACT_ERRORS[code];
+
+  if (ErrorClass === undefined) {
+    if (code !== undefined) {
+      return new SoroWillError(`SoroWill contract error #${code}: no mapping available. See contract documentation for error code reference.`, { cause: error });
+    }
+    return error instanceof Error ? error : new SoroWillError(text);
+  }
+
+  return new ErrorClass({ cause: error });
 }
