@@ -319,21 +319,17 @@ export class WalletConnectWalletAdapter implements WalletAdapter {
     return this.connector.disconnect();
   }
 
-  getPublicKey(): Promise<string> {
-    return this.connector.getPublicKey();
-  }
-
-  getNetwork?(): Promise<{ network: string; networkPassphrase: string }> {
-    return this.connector.getNetwork?.() ?? Promise.resolve({ network: '', networkPassphrase: '' });
-  }
-
-  async signTransaction(
-    transactionXdr: string,
-    opts: SignTransactionOptions,
-  ): Promise<string> {
-    const response = await this.connector.signTransaction(transactionXdr, opts);
-    // WalletConnect returns `{ envelope_xdr, hash }`; validate and extract the
-    // signed envelope XDR string before it reaches serialization code.
-    return extractSignedEnvelopeXdr(response);
-  }
-}
+/**
+ * The default {@link WalletAdapter}, backed by the Freighter browser
+ * extension. This is what {@link SoroWillClient} uses when no `wallet` option
+ * is supplied, so existing Freighter-based usage keeps working unchanged.
+ */
+export const freighterAdapter: WalletAdapter = {
+  isConnected: () => defaultFreighterWalletAdapter.isConnected(),
+  connect: () => defaultFreighterWalletAdapter.connect(),
+  reconnect: () => defaultFreighterWalletAdapter.reconnect(),
+  disconnect: () => defaultFreighterWalletAdapter.disconnect(),
+  getPublicKey,
+  signTransaction,
+  getNetwork: () => defaultFreighterWalletAdapter.getNetwork(),
+};

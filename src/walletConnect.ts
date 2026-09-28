@@ -60,7 +60,13 @@ export interface WalletConnectAdapterOptions {
   network?: string;
   networkPassphrase?: string;
   requestChainId?: string;
+  /** Defaults to `stellar_signXDR`, per the WalletConnect Stellar namespace documentation. */
   signTransactionMethod?: string;
+  /**
+   * Builds the signing request params. Defaults to `{ xdr }`, per the WalletConnect
+   * Stellar namespace documentation.
+   */
+  getSignTransactionParams?(transactionXdr: string, networkPassphrase: string): unknown;
   disconnectReason?: { code: number; message: string };
   sessionStore?: WalletConnectSessionStore;
   /**
@@ -78,8 +84,8 @@ export interface WalletConnectAdapterOptions {
 
 const DEFAULT_REQUIRED_NAMESPACES: Record<string, WalletConnectSessionNamespace> = {
   stellar: {
-    methods: ['stellar_signXdr'],
-    chains: ['stellar:pubnet'],
+    methods: ['stellar_signXDR'],
+    chains: ['stellar:pubnet', 'stellar:testnet'],
     events: [],
   },
 };
@@ -156,16 +162,22 @@ export function extractSignedTransactionXdr(response: unknown): string {
     return response;
   }
 
-  if (response && typeof response === 'object') {
-    const candidate = response as Partial<SignatureResponse> & { signedTxXdr?: unknown };
+  if (
+    response &&
+    typeof response === 'object' &&
+    'signedXDR' in response &&
+    typeof response.signedXDR === 'string'
+  ) {
+    return response.signedXDR;
+  }
 
-    if (typeof candidate.envelope_xdr === 'string') {
-      return candidate.envelope_xdr;
-    }
-
-    if (typeof candidate.signedTxXdr === 'string') {
-      return candidate.signedTxXdr;
-    }
+  if (
+    response &&
+    typeof response === 'object' &&
+    'signedTxXdr' in response &&
+    typeof response.signedTxXdr === 'string'
+  ) {
+    return response.signedTxXdr;
   }
 
   throw new Error('WalletConnect signing response did not include a signed transaction XDR');
@@ -335,9 +347,11 @@ export class WalletConnectAdapter implements WalletAdapter {
     return extractor(response);
   }
 
-  private async requireSession(): Promise<WalletConnectSession> {
-    if (this.session) {
-      return this.session;
+    const sessionNetwork = this.resolveNetwork(session);
+    if (opts.networkPassphrase !== sessionNetwork.networkPassphrase) {
+      throw new Error(
+        `WalletConnect session is connected to ${sessionNetwork.network} (${sessionNetwork.networkPassphrase}) but transaction is for a different network (${opts.networkPassphrase})`,
+      );
     }
 
     const topic = await this.sessionStore.getSessionTopic();
@@ -345,9 +359,24 @@ export class WalletConnectAdapter implements WalletAdapter {
       throw new Error('WalletConnect is not connected');
     }
 
-    const session = await this.client.getSession(topic);
-    if (!session) {
-      throw new Error('WalletConnect session could not be restored');
+    try {
+      const response = await Promise.race([
+        this.client.request({
+          topic: session.topic,
+          chainId: this.options.requestChainId ?? getDefaultChainId(session),
+          request: {
+            method: this.options.signTransactionMethod ?? 'stellar_signXDR',
+            params: this.options.getSignTransactionParams
+              ? this.options.getSignTransactionParams(transactionXdr, opts.networkPassphrase)
+              : { xdr: transactionXdr },
+          },
+        }),
+        timeoutPromise,
+      ]);
+
+      return (this.options.getSignedTransactionXdr ?? getDefaultSignedTransactionXdr)(response);
+    } finally {
+      clearTimeout(timeoutHandle!);
     }
 
     this.session = session;
@@ -364,11 +393,9 @@ export class WalletConnectAdapter implements WalletAdapter {
     return this.connection;
   }
 
-  private withTimeout<T>(promise: Promise<T>): Promise<T> {
-    const timeoutMs = this.options.timeoutMs ?? DEFAULT_SIGN_TIMEOUT_MS;
-    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-      return promise;
-    }
+  private buildConnection(session: WalletConnectSession): WalletConnection {
+    const publicKey = (this.options.getPublicKeyFromSession ?? getDefaultPublicKeyFromSession)(session);
+    const network = this.resolveNetwork(session);
 
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -386,5 +413,15 @@ export class WalletConnectAdapter implements WalletAdapter {
         },
       );
     });
+  }
+
+  private resolveNetwork(session: WalletConnectSession): { network: string; networkPassphrase: string } {
+    return (
+      this.options.getNetworkFromSession?.(session) ?? {
+        network: this.options.network ?? getDefaultNetwork(session).network,
+        networkPassphrase:
+          this.options.networkPassphrase ?? getDefaultNetwork(session).networkPassphrase,
+      }
+    );
   }
 }
