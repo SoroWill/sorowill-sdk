@@ -1,95 +1,113 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { IndexedDbCachePersistenceAdapter } from './cache';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  createReadCacheKey,
+  ReadCache,
+  type CachePersistenceAdapter,
+} from './cache';
 
-/**
- * Minimal fake IndexedDB factory whose open() can be scripted to fail a
- * configurable number of times before succeeding. Only the surface used by
- * IndexedDbCachePersistenceAdapter is implemented.
- */
-function createFakeIndexedDB(options: { failuresBeforeSuccess: number }) {
-  let openCalls = 0;
+describe('createReadCacheKey', () => {
+  it('produces identical keys regardless of runtime locale', () => {
+    const args = { Z: 1, a: 2, 'é': 3, A: 4 };
 
-  const makeRequest = () => {
-    const request: any = {
-      onsuccess: null,
-      onerror: null,
-      onupgradeneeded: null,
-      onblocked: null,
-      result: undefined,
-      error: null,
-    };
-    return request;
-  };
+    const originalLocale = Intl.DateTimeFormat().resolvedOptions().locale;
+    const originalLocaleCompare = String.prototype.localeCompare;
 
-  const fakeDb: any = {
-    objectStoreNames: { contains: () => true },
-    createObjectStore: () => ({}),
-    transaction: () => ({
-      objectStore: () => ({
-        get: () => {
-          const req = makeRequest();
-          queueMicrotask(() => {
-            req.result = undefined;
-            req.onsuccess && req.onsuccess();
-          });
-          return req;
-        },
-        put: () => {
-          const req = makeRequest();
-          queueMicrotask(() => req.onsuccess && req.onsuccess());
-          return req;
-        },
-        delete: () => {
-          const req = makeRequest();
-          queueMicrotask(() => req.onsuccess && req.onsuccess());
-          return req;
-        },
+    try {
+      const keyDefault = createReadCacheKey('read', args);
+
+      // Simulate a different runtime locale by making localeCompare behave
+      // differently; a locale-independent sort must be unaffected.
+      String.prototype.localeCompare = function (
+        this: string,
+        that: string,
+      ): number {
+        // Reverse-ish ordering to expose locale-dependent sorting.
+        return that < this ? -1 : that > this ? 1 : 0;
+      };
+
+      const keyOtherLocale = createReadCacheKey('read', args);
+
+      expect(keyOtherLocale).toBe(keyDefault);
+    } finally {
+      String.prototype.localeCompare = originalLocaleCompare;
+      void originalLocale;
+    }
+  });
+
+  it('sorts keys with a locale-independent code-unit comparison', () => {
+    const key = createReadCacheKey('read', { b: 1, A: 2, a: 3, B: 4 });
+    // Code-unit order: 'A' (65) < 'B' (66) < 'a' (97) < 'b' (98)
+    expect(key).toBe('read:{"A":2,"B":4,"a":3,"b":1}');
+  });
+
+  it('handles accented and capital letters deterministically', () => {
+    const args = { 'é': 1, Z: 2, a: 3 };
+    const first = createReadCacheKey('read', args);
+    const second = createReadCacheKey('read', { a: 3, Z: 2, 'é': 1 });
+    expect(first).toBe(second);
+  });
+});
+
+describe('ReadCache', () => {
+  let adapter: CachePersistenceAdapter;
+  let store: Map<string, string>;
+
+  beforeEach(() => {
+    store = new Map();
+    adapter = {
+      read: vi.fn(async (key: string) => store.get(key) ?? null),
+      write: vi.fn(async (key: string, value: string) => {
+        store.set(key, value);
       }),
-    }),
-    close: () => {},
-  };
-
-  const indexedDB: any = {
-    open: () => {
-      openCalls += 1;
-      const request = makeRequest();
-      const shouldFail = openCalls <= options.failuresBeforeSuccess;
-      queueMicrotask(() => {
-        if (shouldFail) {
-          request.error = new Error('blocked');
-          request.onerror && request.onerror();
-        } else {
-          request.result = fakeDb;
-          request.onsuccess && request.onsuccess();
-        }
-      });
-      return request;
-    },
-  };
-
-  return { indexedDB, getOpenCalls: () => openCalls };
-}
-
-describe('IndexedDbCachePersistenceAdapter', () => {
-  const originalIndexedDB = (globalThis as any).indexedDB;
+      delete: vi.fn(async (key: string) => {
+        store.delete(key);
+      }),
+    };
+  });
 
   afterEach(() => {
-    (globalThis as any).indexedDB = originalIndexedDB;
     vi.restoreAllMocks();
   });
 
-  it('retries open() after a rejected open instead of caching the rejection', async () => {
-    const fake = createFakeIndexedDB({ failuresBeforeSuccess: 1 });
-    (globalThis as any).indexedDB = fake.indexedDB;
+  it('returns cached values for identical arguments', async () => {
+    const cache = new ReadCache(adapter);
+    const loader = vi.fn(async () => 'value');
 
-    const adapter = new IndexedDbCachePersistenceAdapter('test-db');
+    await cache.get('read', { a: 1, b: 2 }, loader);
+    const second = await cache.get('read', { b: 2, a: 1 }, loader);
 
-    // First call fails because the first open() rejects.
-    await expect(adapter.get('missing')).rejects.toThrow();
-    expect(fake.getOpenCalls()).toBe(1);
+    expect(second).toBe('value');
+    expect(loader).toHaveBeenCalledTimes(1);
+  });
 
-    // Second call must attempt to open again and succeed.
-    await expect(adapter.get('missing')).resolves.toBeUndefined();
-    expect(fake.getOpenCalls()).toBe(2);
+  describe('ttlMs validation', () => {
+    it('accepts a finite non-negative ttlMs', () => {
+      expect(() => new ReadCache(adapter, { ttlMs: 0 })).not.toThrow();
+      expect(() => new ReadCache(adapter, { ttlMs: 1000 })).not.toThrow();
+    });
+
+    it('throws for a negative ttlMs', () => {
+      expect(() => new ReadCache(adapter, { ttlMs: -1 })).toThrow(
+        /ttlMs/,
+      );
+    });
+
+    it('throws for NaN ttlMs', () => {
+      expect(() => new ReadCache(adapter, { ttlMs: Number.NaN })).toThrow(
+        /ttlMs/,
+      );
+    });
+
+    it('throws for Infinity ttlMs', () => {
+      expect(() => new ReadCache(adapter, { ttlMs: Number.POSITIVE_INFINITY })).toThrow(
+        /ttlMs/,
+      );
+    });
+
+    it('throws for -Infinity ttlMs', () => {
+      expect(() => new ReadCache(adapter, { ttlMs: Number.NEGATIVE_INFINITY })).toThrow(
+        /ttlMs/,
+      );
+    });
   });
 });

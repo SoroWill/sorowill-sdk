@@ -1,3 +1,4 @@
+import * as React from 'react';
 import type ReactNamespace from 'react';
 
 import { SoroWillClient } from '../SoroWillClient';
@@ -5,44 +6,14 @@ import type { SoroWillClientOptions } from '../SoroWillClient';
 import type { Will } from '../types';
 
 /**
- * `react` is an optional peer dependency of this subpath — a static
- * `import ... from 'react'` would fail to resolve for a consumer that hasn't
- * installed it, even before any hook is actually called. Loading it lazily
- * via a dynamic `import()` keeps the module browser-safe (no Node-only APIs
- * like `node:module` or `import.meta.url`) while still only requiring `react`
- * to resolve when a hook in this file actually runs.
+ * `react` is an optional peer dependency of this subpath. It is imported
+ * statically via ES6 `import` syntax so that ESM-only bundlers (Vite,
+ * esbuild, Webpack 5+) can resolve it at build time without relying on
+ * CommonJS `require`/`createRequire`, which those bundlers do not support.
  */
-let react: typeof ReactNamespace | undefined;
-let reactPromise: Promise<typeof ReactNamespace> | undefined;
-
-function loadReact(): Promise<typeof ReactNamespace> {
-  if (!reactPromise) {
-    reactPromise = import('react').then((mod) => {
-      react = (mod as { default?: typeof ReactNamespace }).default ?? (mod as unknown as typeof ReactNamespace);
-      return react;
-    });
-  }
-  return reactPromise;
-}
-
+const react: typeof ReactNamespace = React;
 function getReact(): typeof ReactNamespace {
-  if (!react) {
-    throw new Error(
-      'react is not loaded yet. Call `await loadReact()` before using the SoroWill React hooks.',
-    );
-  }
   return react;
-}
-
-/**
- * Ensure `react` is loaded before rendering hooks from this subpath.
- *
- * Call this once (e.g. at app startup) and await it before mounting any
- * component that uses the hooks below. This keeps `react` an optional peer:
- * consumers that never touch the `./react` subpath never load it.
- */
-export function loadReactHooks(): Promise<typeof ReactNamespace> {
-  return loadReact();
 }
 
 /** Standard data-fetching state returned by the hooks. */
@@ -50,6 +21,12 @@ export interface UseQueryResult<T> {
   data: T | null;
   error: Error | null;
   loading: boolean;
+  /**
+   * `true` while a request for a new input is in flight and `data` still
+   * holds the result of the previous input. `data` is reset to `null`
+   * whenever the input becomes falsy, so it is never stale in that case.
+   */
+  isStale: boolean;
   refetch: () => void;
 }
 
@@ -116,6 +93,7 @@ export function useWill(
   const [data, setData] = getReact().useState<Will | null>(null);
   const [error, setError] = getReact().useState<Error | null>(null);
   const [loading, setLoading] = getReact().useState(false);
+  const [isStale, setIsStale] = getReact().useState(false);
   const [fetchKey, setFetchKey] = getReact().useState(0);
 
   const refetch = getReact().useCallback(() => setFetchKey((k) => k + 1), []);
@@ -123,6 +101,9 @@ export function useWill(
   getReact().useEffect(() => {
     if (!willId) {
       setData(null);
+      setError(null);
+      setLoading(false);
+      setIsStale(false);
       return;
     }
 
@@ -130,6 +111,7 @@ export function useWill(
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setIsStale(true);
 
     client
       .getWill(willId, { signal: controller.signal })
@@ -137,12 +119,14 @@ export function useWill(
         if (!cancelled) {
           setData(will);
           setLoading(false);
+          setIsStale(false);
         }
       })
       .catch((err: unknown) => {
         if (!cancelled) {
           setError(err instanceof Error ? err : new Error(String(err)));
           setLoading(false);
+          setIsStale(false);
         }
       });
 
@@ -152,7 +136,7 @@ export function useWill(
     };
   }, [client, willId, fetchKey]);
 
-  return { data, error, loading, refetch };
+  return { data, error, loading, isStale, refetch };
 }
 
 /**
@@ -171,6 +155,7 @@ export function useWillsByOwner(
   const [data, setData] = getReact().useState<Will[] | null>(null);
   const [error, setError] = getReact().useState<Error | null>(null);
   const [loading, setLoading] = getReact().useState(false);
+  const [isStale, setIsStale] = getReact().useState(false);
   const [fetchKey, setFetchKey] = getReact().useState(0);
 
   const refetch = getReact().useCallback(() => setFetchKey((k) => k + 1), []);
@@ -178,6 +163,9 @@ export function useWillsByOwner(
   getReact().useEffect(() => {
     if (!owner) {
       setData(null);
+      setError(null);
+      setLoading(false);
+      setIsStale(false);
       return;
     }
 
@@ -185,6 +173,7 @@ export function useWillsByOwner(
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setIsStale(true);
 
     client
       .getWillsByOwner(owner, { signal: controller.signal })
@@ -192,12 +181,14 @@ export function useWillsByOwner(
         if (!cancelled) {
           setData(wills);
           setLoading(false);
+          setIsStale(false);
         }
       })
       .catch((err: unknown) => {
         if (!cancelled) {
           setError(err instanceof Error ? err : new Error(String(err)));
           setLoading(false);
+          setIsStale(false);
         }
       });
 
@@ -207,7 +198,7 @@ export function useWillsByOwner(
     };
   }, [client, owner, fetchKey]);
 
-  return { data, error, loading, refetch };
+  return { data, error, loading, isStale, refetch };
 }
 
 /**
@@ -226,6 +217,7 @@ export function useWillsByBeneficiary(
   const [data, setData] = getReact().useState<Will[] | null>(null);
   const [error, setError] = getReact().useState<Error | null>(null);
   const [loading, setLoading] = getReact().useState(false);
+  const [isStale, setIsStale] = getReact().useState(false);
   const [fetchKey, setFetchKey] = getReact().useState(0);
 
   const refetch = getReact().useCallback(() => setFetchKey((k) => k + 1), []);
@@ -233,6 +225,9 @@ export function useWillsByBeneficiary(
   getReact().useEffect(() => {
     if (!beneficiary) {
       setData(null);
+      setError(null);
+      setLoading(false);
+      setIsStale(false);
       return;
     }
 
@@ -240,6 +235,7 @@ export function useWillsByBeneficiary(
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setIsStale(true);
 
     client
       .getWillsByBeneficiary(beneficiary, { signal: controller.signal })
@@ -247,12 +243,14 @@ export function useWillsByBeneficiary(
         if (!cancelled) {
           setData(wills);
           setLoading(false);
+          setIsStale(false);
         }
       })
       .catch((err: unknown) => {
         if (!cancelled) {
           setError(err instanceof Error ? err : new Error(String(err)));
           setLoading(false);
+          setIsStale(false);
         }
       });
 
@@ -262,5 +260,5 @@ export function useWillsByBeneficiary(
     };
   }, [client, beneficiary, fetchKey]);
 
-  return { data, error, loading, refetch };
+  return { data, error, loading, isStale, refetch };
 }
