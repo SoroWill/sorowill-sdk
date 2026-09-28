@@ -1,3 +1,12 @@
+/**
+ * Public API surface of @sorowill/sdk.
+ *
+ * Everything exported from this module is part of the stable, semver-covered
+ * API. Internal implementation types (e.g. Soroban's `xdr.ScVal`, the contract
+ * spec adapter, RPC endpoint pool, debug logger) are intentionally NOT
+ * re-exported and may change in any release. Import raw Soroban types from
+ * `@stellar/stellar-sdk` directly if you need them.
+ */
 export { SoroWillClient, parseWillId, SoroWillInvalidIdError } from './SoroWillClient';
 export type {
   EventSubscription,
@@ -75,6 +84,7 @@ export {
 export type { WalletAdapter, WalletConnection } from './wallet';
 
 export { createAlbedoAdapter } from './adapters/albedo';
+export type { AlbedoAdapterOptions } from './adapters/albedo';
 export {
   LocalStorageWalletConnectSessionStore,
   MemoryWalletConnectSessionStore,
@@ -90,10 +100,19 @@ export type {
   WalletConnectSessionStore,
 } from './walletConnect';
 
-export { ReadCache } from './cache';
-export type { ReadCacheOptions } from './cache';
+export {
+  IndexedDbCachePersistenceAdapter,
+  LocalStorageCachePersistenceAdapter,
+  MemoryCachePersistenceAdapter,
+  ReadCache,
+  createReadCacheKey,
+} from './cache';
+export type { CachePersistenceAdapter, PersistedCacheEntry, ReadCacheOptions } from './cache';
 
-export { unsubscribeFromWillEvents } from './events';
+export {
+  addEventListener,
+  unsubscribeFromWillEvents,
+} from './events';
 export type {
   WillEvent,
   WillEventListener,
@@ -111,6 +130,7 @@ export {
   ConfirmationWindowExpiredError,
   DuplicateBeneficiaryError,
   DuplicateGuardianError,
+  ExorbitantFeeError,
   FixedAmountExceedsBalanceError,
   FreighterInstallCheckError,
   GracePeriodExpiredError,
@@ -118,7 +138,9 @@ export {
   GuardianCooldownActiveError,
   InsufficientBalanceError,
   InvalidContractIdError,
+  InvalidDayCountError,
   InvalidGuardianThresholdError,
+  InvalidPaginationOptionsError,
   InvalidPercentageError,
   InvalidPercentagesError,
   InvalidPeriodError,
@@ -132,6 +154,7 @@ export {
   KeeperBountyExceedsMaxError,
   MergeWouldExceedLimitsError,
   NotGuardianError,
+  GuardianValidationError,
   InvalidCursorError,
   NotOwnerError,
   NotSameOwnerError,
@@ -160,10 +183,21 @@ export {
   WillNotTriggeredError,
   ZeroAmountError,
   mapContractError,
+  registerContractError,
+  registerContractErrors,
+  setContractErrorMap,
+  getContractErrorMap,
   UnsupportedBatchSizeError,
+  UnknownContractErrorCodeError,
 } from './errors';
+export type { ContractErrorFactory } from './errors';
 
-export { RequestQueue, RequestPriority } from './requestQueue';
+export {
+  RequestQueue,
+  RequestPriority,
+  getSharedRequestQueue,
+  releaseSharedRequestQueue,
+} from './requestQueue';
 export type { RequestQueueOptions } from './requestQueue';
 
 export { buildSep7TxUri, parseSep7Callback } from './sep7';
@@ -190,9 +224,11 @@ export {
   MAX_GUARDIANS,
   calculateShares,
   formatDeadline,
+  formatTokenAmount,
   formatUSDC,
   getNextActionableState,
   getTimeUntilCheckin,
+  hasDuplicateBeneficiaries,
   isBeneficiary,
   isCheckinDue,
   isGuardian,
@@ -201,3 +237,10 @@ export {
   validateGuardians,
 } from './utils';
 export type { NextActionableState } from './utils';
+
+export {
+  DEFAULT_NETWORK,
+  getDefaultContractId,
+  resolveSoroWillConfig,
+} from './config';
+export type { SoroWillConfig, SoroWillConfigInput } from './config';
