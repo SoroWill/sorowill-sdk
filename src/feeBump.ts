@@ -8,6 +8,72 @@ import {
 
 import type { SoroWillNetwork } from './SoroWillClient';
 
+/**
+ * Raised when an inner transaction passed to {@link buildFeeBumpXdr} has a
+ * sequence number that has already been consumed on-chain.  Wrapping a stale
+ * transaction in a fee-bump envelope would produce a fee-bump that fails with
+ * `txBAD_SEQ`, so we detect and reject it before the envelope is built.
+ */
+export class StaleTransactionSequenceError extends Error {
+  /** The sequence number carried by the stale inner transaction. */
+  readonly innerSequence: string;
+  /** The current on-chain sequence number for the source account. */
+  readonly accountSequence: string;
+
+  constructor(innerSequence: string, accountSequence: string, options?: ErrorOptions) {
+    super(
+      `Inner transaction sequence (${innerSequence}) has already been used. ` +
+        `The account's current sequence is ${accountSequence}. ` +
+        `Rebuild and re-sign the transaction with a fresh sequence number before wrapping it in a fee bump.`,
+      options,
+    );
+    this.name = 'StaleTransactionSequenceError';
+    this.innerSequence = innerSequence;
+    this.accountSequence = accountSequence;
+  }
+}
+
+/**
+ * Validates that the inner transaction's sequence number is still ahead of the
+ * account's current on-chain sequence.  Stellar requires that a transaction's
+ * sequence number be exactly `accountSequence + 1`; if the account has already
+ * advanced past the transaction's sequence, the fee-bump will fail with
+ * `txBAD_SEQ`.
+ *
+ * @param innerTransactionXdr - The prepared inner transaction XDR.
+ * @param network - The Stellar network to query.
+ * @throws {StaleTransactionSequenceError} when the sequence has already been used.
+ */
+export async function validateInnerTransactionSequence(
+  innerTransactionXdr: string,
+  network: SoroWillNetwork,
+): Promise<void> {
+  const config = NETWORK_CONFIG[network];
+  const server = new rpc.Server(config.rpcUrl, {
+    allowHttp: config.rpcUrl.startsWith('http://'),
+  });
+
+  const innerTx = TransactionBuilder.fromXDR(
+    innerTransactionXdr,
+    config.networkPassphrase,
+  ) as Transaction;
+
+  const sourceAccount = innerTx.source;
+  const innerSequence = BigInt(innerTx.sequence);
+
+  const accountData = await server.getAccount(sourceAccount);
+  // getAccount returns the account's *current* sequence — the last one used.
+  // A valid next transaction must have sequence === accountSequence + 1.
+  const accountSequence = BigInt(accountData.sequence);
+
+  if (innerSequence <= accountSequence) {
+    throw new StaleTransactionSequenceError(
+      innerSequence.toString(),
+      accountSequence.toString(),
+    );
+  }
+}
+
 interface NetworkConfig {
   rpcUrl: string;
   networkPassphrase: string;
@@ -62,10 +128,23 @@ export interface SubmitFeeBumpOptions {
  * their account loaded — no Freighter connection is required on the
  * user's side.
  *
+ * Before building the envelope this function validates that the inner
+ * transaction's sequence number has not yet been consumed on-chain.  If the
+ * inner transaction was prepared, cached, and is now being retried after a
+ * delay, the sequence may already be spent — in that case
+ * {@link StaleTransactionSequenceError} is thrown so the caller can rebuild
+ * with a fresh sequence rather than submitting a fee-bump that will fail with
+ * `txBAD_SEQ`.
+ *
  * @returns The base64-encoded XDR of the fee-bump transaction envelope.
+ * @throws {StaleTransactionSequenceError} when the inner transaction's sequence has already been used.
  */
 export async function buildFeeBumpXdr(options: FeeBumpOptions): Promise<string> {
   const config = NETWORK_CONFIG[options.network];
+
+  // Validate that the inner transaction's sequence number is still valid
+  // before wrapping it in a fee-bump envelope.
+  await validateInnerTransactionSequence(options.innerTransactionXdr, options.network);
 
   const innerTx = TransactionBuilder.fromXDR(
     options.innerTransactionXdr,

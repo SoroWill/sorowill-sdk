@@ -35,6 +35,8 @@ export {
   signFeeBumpXdr,
   submitFeeBump,
   submitFeeBumpTransaction,
+  validateInnerTransactionSequence,
+  StaleTransactionSequenceError,
 } from './feeBump';
 export type {
   FeeBumpOptions,
