@@ -80,6 +80,48 @@ export interface WalletConnection {
 }
 
 /**
+ * The object shape some wallets (notably WalletConnect) return from
+ * `signTransaction` instead of a bare XDR string. The signed envelope is
+ * carried in `envelope_xdr`; `hash` is optional metadata.
+ */
+export interface SignatureResponse {
+  envelope_xdr: string;
+  hash?: string;
+}
+
+/**
+ * Validates a wallet `signTransaction` response and normalizes it to the
+ * signed envelope XDR string the SDK expects.
+ *
+ * Wallets are inconsistent here: some return a plain XDR string, while
+ * others (e.g. WalletConnect) return a {@link SignatureResponse} object.
+ * Passing the object straight through to serialization code that expects a
+ * string causes a cast error, so we validate and extract `envelope_xdr`.
+ *
+ * @throws {Error} if the response is neither a non-empty string nor a valid
+ *   {@link SignatureResponse} object.
+ */
+export function extractSignedEnvelopeXdr(response: unknown): string {
+  if (typeof response === 'string') {
+    if (response.length === 0) {
+      throw new Error('Wallet returned an empty signed transaction XDR.');
+    }
+    return response;
+  }
+
+  if (response !== null && typeof response === 'object') {
+    const { envelope_xdr } = response as Partial<SignatureResponse>;
+    if (typeof envelope_xdr === 'string' && envelope_xdr.length > 0) {
+      return envelope_xdr;
+    }
+  }
+
+  throw new Error(
+    'Wallet returned an invalid signTransaction response: expected a signed XDR string or a SignatureResponse object with an `envelope_xdr` string.',
+  );
+}
+
+/**
  * The full capability set a Stellar wallet must expose for
  * {@link SoroWillClient} to read the connected account and sign transactions.
  *
@@ -273,12 +315,67 @@ export class FreighterWalletAdapter implements WalletAdapter {
       }),
     ]);
 
-    if (result.error) {
+    if (result && typeof result === 'object' && 'error' in result && result.error) {
       throw new Error(result.error.message);
     }
 
-    // Freighter returns a bare signed-XDR string, but normalize defensively
-    // so any adapter that returns a SignatureResponse is handled uniformly.
-    return normalizeSignatureResponse(result.signedTxXdr as string | SignatureResponse);
+    // Freighter returns a bare XDR string, but normalize defensively so any
+    // wallet that returns a SignatureResponse object is handled uniformly.
+    return extractSignedEnvelopeXdr(result);
   }
 }
+
+/**
+ * WalletConnect-backed wallet adapter.
+ *
+ * WalletConnect's `signTransaction` returns a {@link SignatureResponse}
+ * object (`{ envelope_xdr, hash }`) rather than a bare XDR string. This
+ * adapter validates that response and extracts `envelope_xdr` so downstream
+ * serialization receives the string it expects.
+ */
+export class WalletConnectWalletAdapter implements WalletAdapter {
+  constructor(
+    private readonly connector: {
+      isConnected(): Promise<boolean>;
+      connect(): Promise<WalletConnection>;
+      reconnect(): Promise<WalletConnection>;
+      disconnect(): Promise<void>;
+      getPublicKey(): Promise<string>;
+      signTransaction(
+        transactionXdr: string,
+        opts: SignTransactionOptions,
+      ): Promise<string | SignatureResponse>;
+      getNetwork?(): Promise<{ network: string; networkPassphrase: string }>;
+    },
+  ) {}
+
+  isConnected(): Promise<boolean> {
+    return this.connector.isConnected();
+  }
+
+  connect(): Promise<WalletConnection> {
+    return this.connector.connect();
+  }
+
+  reconnect(): Promise<WalletConnection> {
+    return this.connector.reconnect();
+  }
+
+  disconnect(): Promise<void> {
+    return this.connector.disconnect();
+  }
+
+/**
+ * The default {@link WalletAdapter}, backed by the Freighter browser
+ * extension. This is what {@link SoroWillClient} uses when no `wallet` option
+ * is supplied, so existing Freighter-based usage keeps working unchanged.
+ */
+export const freighterAdapter: WalletAdapter = {
+  isConnected: () => defaultFreighterWalletAdapter.isConnected(),
+  connect: () => defaultFreighterWalletAdapter.connect(),
+  reconnect: () => defaultFreighterWalletAdapter.reconnect(),
+  disconnect: () => defaultFreighterWalletAdapter.disconnect(),
+  getPublicKey,
+  signTransaction,
+  getNetwork: () => defaultFreighterWalletAdapter.getNetwork(),
+};

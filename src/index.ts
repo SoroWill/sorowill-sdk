@@ -67,6 +67,7 @@ export {
 export type { WalletAdapter, WalletConnection } from './wallet';
 
 export { createAlbedoAdapter } from './adapters/albedo';
+export type { AlbedoAdapterOptions } from './adapters/albedo';
 export {
   LocalStorageWalletConnectSessionStore,
   MemoryWalletConnectSessionStore,
@@ -84,7 +85,10 @@ export type {
 export { ReadCache } from './cache';
 export type { ReadCacheOptions } from './cache';
 
-export { unsubscribeFromWillEvents } from './events';
+export {
+  addEventListener,
+  unsubscribeFromWillEvents,
+} from './events';
 export type {
   WillEvent,
   WillEventListener,
@@ -102,6 +106,7 @@ export {
   ConfirmationWindowExpiredError,
   DuplicateBeneficiaryError,
   DuplicateGuardianError,
+  ExorbitantFeeError,
   FixedAmountExceedsBalanceError,
   FreighterInstallCheckError,
   GracePeriodExpiredError,
@@ -123,6 +128,7 @@ export {
   KeeperBountyExceedsMaxError,
   MergeWouldExceedLimitsError,
   NotGuardianError,
+  GuardianValidationError,
   InvalidCursorError,
   NotOwnerError,
   NotSameOwnerError,
@@ -151,10 +157,20 @@ export {
   WillNotTriggeredError,
   ZeroAmountError,
   mapContractError,
+  registerContractError,
+  registerContractErrors,
+  setContractErrorMap,
+  getContractErrorMap,
   UnsupportedBatchSizeError,
 } from './errors';
+export type { ContractErrorFactory } from './errors';
 
-export { RequestQueue, RequestPriority } from './requestQueue';
+export {
+  RequestQueue,
+  RequestPriority,
+  getSharedRequestQueue,
+  releaseSharedRequestQueue,
+} from './requestQueue';
 export type { RequestQueueOptions } from './requestQueue';
 
 export { buildSep7TxUri, parseSep7Callback } from './sep7';
@@ -184,6 +200,7 @@ export {
   formatUSDC,
   getNextActionableState,
   getTimeUntilCheckin,
+  hasDuplicateBeneficiaries,
   isBeneficiary,
   isCheckinDue,
   isGuardian,
@@ -192,3 +209,10 @@ export {
   validateGuardians,
 } from './utils';
 export type { NextActionableState } from './utils';
+
+export {
+  DEFAULT_NETWORK,
+  getDefaultContractId,
+  resolveSoroWillConfig,
+} from './config';
+export type { SoroWillConfig, SoroWillConfigInput } from './config';

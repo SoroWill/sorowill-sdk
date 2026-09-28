@@ -469,7 +469,7 @@ For applications that need custom signing logic (e.g. multi-sig, custom key deri
 | `HookRegistry` | interface | `hooks` | `on`/`off` registration shape for hooks |
 | `CollectedSignature` | interface | `multisig` | A partial signature collected by `MultisigCollector` |
 | `MultisigCollectorOptions` | interface | `multisig` | Options for constructing a `MultisigCollector` |
-| `FeeBumpOptions` | interface | `feeBump` | Options for `buildFeeBumpXdr` |
+| `FeeBumpOptions` | interface | `feeBump` | Options for `buildFeeBumpXdr` (`fee` defaults to the inner transaction fee) |
 | `SubmitFeeBumpOptions` | interface | `feeBump` | Options for `submitFeeBump` |
 | `BuildSep7TxUriOptions` | interface | `sep7` | Options for `buildSep7TxUri` |
 | `Sep7CallbackResult` | interface | `sep7` | Parsed result of a SEP-7 callback URL |
@@ -633,12 +633,14 @@ interface WalletConnection {
 If no `wallet` is passed, the client defaults to `freighterAdapter`, so existing code keeps working unchanged. To use [Albedo](https://albedo.link) instead, pass the bundled adapter:
 
 ```ts
+import { Networks } from '@stellar/stellar-sdk';
 import { SoroWillClient, createAlbedoAdapter } from '@sorowill/sdk';
 
 const client = new SoroWillClient({
   network: 'testnet',
   contractId: 'C...',
-  wallet: createAlbedoAdapter(),
+  // Defaults to the public network when no passphrase is given.
+  wallet: createAlbedoAdapter({ networkPassphrase: Networks.TESTNET }),
 });
 ```
 
@@ -753,11 +755,5 @@ This repo participates in the **Stellar Wave Program** on [Drips](https://drips.
 
 ## Handsoff notes
 
-<!-- handsoff-issue-412 -->
-- #412: SoroWillClient does not validate that the provided contractId is actually a valid Stellar contract address, so passing an invalid ID silently fails during the first RPC cal
-
-<!-- handsoff-issue-413 -->
-- #413: getWillById does not handle the case where the contract returns a will but the response parsing fails due to unexpected field types, leaving the promise hanging
-
-<!-- handsoff-issue-415 -->
-- #415: batch() packs multiple operations into one transaction but Soroban allows only one contract invocation per transaction, causing all batched operations to fail
+<!-- handsoff-issue-416 -->
+- #416: getNetworkFeeStats calls RPC.getFeeStats() once and caches the result indefinitely, so fee estimates become stale across multiple calls in a long-running app
