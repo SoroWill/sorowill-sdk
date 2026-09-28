@@ -15,6 +15,30 @@ interface SendTransactionErrorResponse {
   errorResultXdr?: string;
 }
 
+/** The Stellar base fee, in stroops (0.00001 XLM). */
+export const BASE_FEE = '100';
+
+/** Default maximum multiple of the base fee allowed for a fee-bump. */
+export const DEFAULT_MAX_FEE_MULTIPLIER = 10;
+
+/**
+ * Error thrown when a fee-bump fee exceeds the configured reasonable maximum.
+ */
+export class ExorbitantFeeError extends Error {
+  constructor(
+    public readonly fee: string,
+    public readonly maxFee: string,
+    public readonly multiplier: number,
+  ) {
+    super(
+      `Fee-bump fee ${fee} stroops exceeds the maximum allowed ${maxFee} stroops ` +
+        `(${multiplier}x the base fee of ${BASE_FEE} stroops). ` +
+        `Pass a higher maxFeeMultiplier or set it to 0 to disable this check.`,
+    );
+    this.name = 'ExorbitantFeeError';
+  }
+}
+
 /** Options for building a fee-bump transaction. */
 export interface FeeBumpOptions {
   /** The network to use. */
@@ -23,8 +47,11 @@ export interface FeeBumpOptions {
   innerTransactionXdr: string;
   /** The fee source account's public key (the account sponsoring the fee). */
   feeSourcePublicKey: string;
-  /** The maximum fee the sponsor is willing to pay, in stroops. Defaults to BASE_FEE. */
-  fee: string;
+  /**
+   * The maximum fee the sponsor is willing to pay, in stroops. Defaults to
+   * the inner transaction's fee when omitted.
+   */
+  fee?: string;
 }
 
 /** Options for submitting a signed fee-bump transaction. */
@@ -35,6 +62,26 @@ export interface SubmitFeeBumpOptions {
   feeBumpXdr: string;
   /** The maximum number of attempts to poll for transaction confirmation. Defaults to 30. */
   pollAttempts?: number;
+  /** Optional RPC server to use instead of the network's configured endpoints (e.g. for tests). */
+  rpcServer?: SoroWillRpcServer;
+}
+
+/**
+ * Validate that a fee-bump fee is within a reasonable multiple of the base fee.
+ *
+ * @throws {ExorbitantFeeError} if `fee` exceeds `maxFeeMultiplier` times the base fee.
+ */
+export function assertReasonableFeeBumpFee(
+  fee: string,
+  maxFeeMultiplier: number = DEFAULT_MAX_FEE_MULTIPLIER,
+): void {
+  if (maxFeeMultiplier <= 0) return;
+
+  const feeAmount = BigInt(fee);
+  const maxFee = BigInt(BASE_FEE) * BigInt(maxFeeMultiplier);
+  if (feeAmount > maxFee) {
+    throw new ExorbitantFeeError(fee, maxFee.toString(), maxFeeMultiplier);
+  }
 }
 
 /**
@@ -48,9 +95,12 @@ export interface SubmitFeeBumpOptions {
  *
  * @returns The base64-encoded XDR of the fee-bump transaction envelope.
  * @throws {InvalidPublicKeyError} if `feeSourcePublicKey` is not a valid Stellar public key.
+ * @throws {ExorbitantFeeError} if `fee` exceeds `maxFeeMultiplier` times the base fee.
  */
 export async function buildFeeBumpXdr(options: FeeBumpOptions): Promise<string> {
   const config = NETWORK_CONFIG[options.network];
+
+  assertReasonableFeeBumpFee(options.fee, options.maxFeeMultiplier);
 
   const { feeSourcePublicKey } = options;
   if (typeof feeSourcePublicKey !== 'string' || !feeSourcePublicKey.startsWith('G')) {
@@ -70,7 +120,7 @@ export async function buildFeeBumpXdr(options: FeeBumpOptions): Promise<string> 
 
   const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
     feeSource,
-    options.fee,
+    options.fee || innerTx.fee,
     innerTx,
     config.networkPassphrase,
   );
@@ -141,17 +191,14 @@ export async function submitFeeBumpTransaction(
   options: SubmitFeeBumpOptions,
 ): Promise<{ txHash: string; createdAt: number }> {
   const config = NETWORK_CONFIG[options.network];
-  const rpcUrl = config.rpcUrls[0]!;
-  const server = new rpc.Server(rpcUrl, {
-    allowHttp: rpcUrl.startsWith('http://'),
-  });
+  const pool = new RpcEndpointPool(config.rpcUrls, options.rpcServer);
 
   const feeBumpTx = TransactionBuilder.fromXDR(
     options.feeBumpXdr,
     config.networkPassphrase,
   ) as Transaction;
 
-  const sendResponse = await server.sendTransaction(feeBumpTx);
+  const sendResponse = await pool.withFailover((server) => server.sendTransaction(feeBumpTx));
   if (sendResponse.status === 'ERROR') {
     const errorResponse = sendResponse as SendTransactionErrorResponse;
     const diagnosticInfo = errorResponse.diagnosticEventsXdr ?
@@ -164,8 +211,18 @@ export async function submitFeeBumpTransaction(
     );
   }
 
+  if (sendResponse.status === 'TRY_AGAIN_LATER') {
+    throw new SoroWillError(
+      'Fee-bump transaction was not accepted: the RPC node returned TRY_AGAIN_LATER. Retry later.',
+      { cause: sendResponse },
+    );
+  }
+
+  // PENDING, and DUPLICATE (already submitted), both poll the returned hash.
   const pollAttempts = options.pollAttempts ?? 30;
-  const txResponse = await server.pollTransaction(sendResponse.hash, { attempts: pollAttempts });
+  const txResponse = await pool.withFailover((server) =>
+    server.pollTransaction(sendResponse.hash, { attempts: pollAttempts }),
+  );
   if (txResponse.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
     const failed = txResponse as { resultXdr?: unknown; diagnosticEventsXdr?: unknown };
     const resultDetail = failed.resultXdr ? ` (result: ${xdrToString(failed.resultXdr)})` : '';
@@ -190,6 +247,7 @@ export async function submitFeeBumpTransaction(
  * @param options.feeSourceSecretKey - Secret key of the fee sponsor account.
  * @param options.network - Stellar network to use.
  * @param options.pollAttempts - Maximum number of attempts to poll for transaction confirmation. Defaults to 30.
+ * @param options.maxFeeMultiplier - Maximum multiple of the base fee allowed. Defaults to 10x. Set to 0 to disable.
  */
 export async function submitFeeBump(options: {
   innerTransactionXdr: string;
@@ -197,6 +255,7 @@ export async function submitFeeBump(options: {
   network: SoroWillNetwork;
   fee?: string;
   pollAttempts?: number;
+  maxFeeMultiplier?: number;
 }): Promise<{ txHash: string; createdAt: number }> {
   const config = NETWORK_CONFIG[options.network];
   let keypair: Keypair;
@@ -221,6 +280,7 @@ export async function submitFeeBump(options: {
     innerTransactionXdr: options.innerTransactionXdr,
     feeSourcePublicKey: publicKey,
     fee,
+    maxFeeMultiplier: options.maxFeeMultiplier,
   });
 
   const signedXdr = signFeeBumpXdr(feeBumpXdr, options.feeSourceSecretKey, config.networkPassphrase);
