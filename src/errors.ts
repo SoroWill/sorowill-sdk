@@ -735,7 +735,8 @@ export function mapContractError(error: unknown): Error {
   const text = errorText(error);
   const match =
     /Error\(Contract,\s*#?(\d+)\)/i.exec(text) ??
-    /(?:contract error|contracterror|error code)[^\d#]*#?(\d+)/i.exec(text);
+    /(?:contract error|contracterror|error code)[^\d#]*#?(\d+)/i.exec(text) ??
+    /^#?(\d+)$/i.exec(text.trim());
   const codeText = match?.[1];
 
   if (codeText === undefined) {

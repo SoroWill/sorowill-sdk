@@ -44,6 +44,21 @@ npm install @stellar/freighter-api
 
 If you only use another adapter (e.g. `createAlbedoAdapter()`, `WalletConnectAdapter`), you can skip it.
 
+## Compatibility
+
+### Node.js
+- **Minimum version:** Node.js 22+
+- The SDK targets modern Node.js versions that include native `fetch` support and ES2022+ features
+
+### Browser compatibility
+- **Chrome/Edge:** 64+
+- **Firefox:** 57+
+- **Safari:** 11.1+
+- **Mobile browsers:** iOS Safari 11.3+, Chrome Android 64+
+- **Requires:** `fetch` API (native or polyfilled for older environments)
+
+For older environments, you can polyfill `fetch` using [`node-fetch`](https://www.npmjs.com/package/node-fetch) (v3+, ESM) or [`cross-fetch`](https://www.npmjs.com/package/cross-fetch). See [Custom fetch](#custom-fetch--environments-without-a-global-fetch) for setup instructions.
+
 ## Quick Start
 
 ```ts

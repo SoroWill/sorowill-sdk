@@ -1006,6 +1006,7 @@ export class SoroWillClient {
     options?: RequestOptions,
   ): Promise<{ txHash: string; nextDeadline: Date }> {
     parseWillId(willId);
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const owner = await this.getWalletPublicKey();
     // checkin_period_days is a stored will property not returned by the
     // contract's check_in function, so a separate getWill() read is
@@ -1033,6 +1034,8 @@ export class SoroWillClient {
    * @throws {Error} If the wallet is not connected or fails to sign.
    */
   async triggerWill(willId: string, options?: RequestOptions): Promise<{ txHash: string }> {
+    parseWillId(willId);
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const { txHash } = await this.invoke('trigger_will', { will_id: parseWillId(willId) }, options);
     return { txHash };
   }
@@ -1043,6 +1046,7 @@ export class SoroWillClient {
     options?: RequestOptions,
   ): Promise<{ txHash: string; nextDeadline: Date }> {
     parseWillId(willId);
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const owner = await this.getWalletPublicKey();
     // checkin_period_days is a stored will property not returned by the
     // contract's emergency_checkin function, so a separate getWill() read is
@@ -1074,6 +1078,8 @@ export class SoroWillClient {
     willId: string,
     options?: RequestOptions,
   ): Promise<{ txHash: string }> {
+    parseWillId(willId);
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const { txHash } = await this.invoke(
       'release_inheritance',
       { will_id: parseWillId(willId) },
@@ -1088,6 +1094,7 @@ export class SoroWillClient {
     options?: RequestOptions,
   ): Promise<{ txHash: string; refundAmount: string }> {
     parseWillId(willId);
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const owner = await this.getWalletPublicKey();
     const { txHash, returnValue } = await this.invoke('cancel_will', {
       will_id: parseWillId(willId),
@@ -1119,6 +1126,7 @@ export class SoroWillClient {
         'Invalid beneficiaries: list must be 1–10 entries, every percentage must be a positive integer, and percentages must sum to exactly 100.',
       );
     }
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const owner = await this.getWalletPublicKey();
     const { txHash } = await this.invoke(
       'update_beneficiaries',
@@ -1135,6 +1143,7 @@ export class SoroWillClient {
     options?: RequestOptions,
   ): Promise<{ txHash: string }> {
     parseWillId(willId);
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const owner = await this.getWalletPublicKey();
     const { txHash } = await this.invoke('top_up', {
       will_id: parseWillId(willId),
@@ -1261,6 +1270,13 @@ export class SoroWillClient {
     owner: string,
     options?: (PaginationOptions & RequestOptions) | RequestOptions,
   ): Promise<Will[] | PaginatedWillsResult> {
+    const paginationOptions = options as PaginationOptions | undefined;
+    if (paginationOptions?.cursor !== undefined) {
+      parseCursor(paginationOptions.cursor);
+    }
+    if (paginationOptions?.pageSize !== undefined) {
+      normalizePositiveInteger(paginationOptions.pageSize, 'pageSize');
+    }
     const cacheKey = createReadCacheKey('get_wills_by_owner', { owner });
     if (this.readCache) {
       await this.readCache.ready();
@@ -1289,6 +1305,13 @@ export class SoroWillClient {
     beneficiary: string,
     options?: (PaginationOptions & RequestOptions) | RequestOptions,
   ): Promise<Will[] | PaginatedWillsResult> {
+    const paginationOptions = options as PaginationOptions | undefined;
+    if (paginationOptions?.cursor !== undefined) {
+      parseCursor(paginationOptions.cursor);
+    }
+    if (paginationOptions?.pageSize !== undefined) {
+      normalizePositiveInteger(paginationOptions.pageSize, 'pageSize');
+    }
     const cacheKey = createReadCacheKey('get_wills_by_beneficiary', { beneficiary });
     if (this.readCache) {
       await this.readCache.ready();
@@ -1345,6 +1368,7 @@ export class SoroWillClient {
    */
   async guardianTrigger(willId: string, options?: RequestOptions): Promise<{ txHash: string }> {
     parseWillId(willId);
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const guardian = await this.getWalletPublicKey();
     const { txHash, returnValue, events } = await this.invoke('guardian_trigger', {
       will_id: parseWillId(willId),
@@ -1415,6 +1439,7 @@ export class SoroWillClient {
     if (operations.length > 1) {
       throw new UnsupportedBatchSizeError(operations.length);
     }
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const hookContexts = operations.map(({ method, args }) => ({
       before: {
         method,
@@ -1502,6 +1527,7 @@ export class SoroWillClient {
     sourcePublicKey: string,
     options: BuildSep7TxUriOptions,
   ): Promise<string> {
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const builtTx = await this.buildInvocationTransaction(method, args, sourcePublicKey);
     const prepared = await this.prepareInvocation(method, args, builtTx, sourcePublicKey);
     assertPreparedTransactionMatchesIntendedOperation({
@@ -2240,6 +2266,7 @@ export class SoroWillClient {
     args: Record<string, unknown>,
     sourcePublicKey?: string,
   ): Promise<Transaction> {
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     return this.prepareInvocation(method, args, undefined, sourcePublicKey);
   }
 
@@ -2264,6 +2291,7 @@ export class SoroWillClient {
     signedTxXdr: string,
     options?: RequestOptions,
   ): Promise<{ txHash: string; createdAt: number; returnValue: ScVal | undefined }> {
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const signedTx = TransactionBuilder.fromXDR(signedTxXdr, this.networkPassphrase);
     if (!(signedTx instanceof Transaction)) {
       throw new SoroWillError(
