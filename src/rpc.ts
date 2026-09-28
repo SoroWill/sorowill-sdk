@@ -106,20 +106,37 @@ export function isRpcTimeoutError(error: unknown): boolean {
 const DEFAULT_FAILOVER_COOLDOWN_MS = 60_000;
 
 /**
- * Default per-request RPC timeout in milliseconds. Slow networks or high-load
- * periods can legitimately take longer than this, so callers can override it
- * via `SoroWillClientOptions.rpcTimeoutMs`.
+ * Terminal transaction statuses reported by `getTransaction`. A transaction
+ * in any of these states has already been resolved on-chain, so a fee-bump
+ * must NOT be submitted for it (doing so risks a duplicate operation).
  */
-export const DEFAULT_RPC_TIMEOUT_MS = 30_000;
+const TERMINAL_TRANSACTION_STATUSES = new Set(['SUCCESS', 'FAILED']);
 
-/** Base delay (ms) for the exponential backoff applied to timeout errors. */
-export const DEFAULT_RPC_TIMEOUT_RETRY_BASE_DELAY_MS = 1_000;
-
-/** Maximum number of attempts (initial try + retries) for timeout errors. */
-export const DEFAULT_RPC_TIMEOUT_MAX_ATTEMPTS = 3;
-
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Queries the network for the current status of a submitted transaction.
+ *
+ * Returns `true` when the transaction has reached a terminal state
+ * (`SUCCESS` or `FAILED`) and therefore must not be fee-bumped, and `false`
+ * when it is still pending (e.g. `NOT_FOUND`) or its status cannot be
+ * determined. Callers that gate a fee-bump on this result should treat an
+ * indeterminate status as "still pending" so a genuinely stuck transaction
+ * is not left unbumped.
+ */
+export async function isTransactionResolved(
+  server: SoroWillRpcServer,
+  transactionHash: string,
+): Promise<boolean> {
+  try {
+    const response = await server.getTransaction(transactionHash);
+    const status = (response as { status?: unknown }).status;
+    return typeof status === 'string' && TERMINAL_TRANSACTION_STATUSES.has(status);
+  } catch {
+    // A lookup failure (e.g. the transaction is not yet indexed) means we
+    // cannot confirm resolution, so report it as unresolved and allow the
+    // caller to proceed with the bump.
+    return false;
+  }
+}
 
 export class RpcEndpointPool {
   private readonly servers: SoroWillRpcServer[];
@@ -236,8 +253,9 @@ export class RpcEndpointPool {
     let lastError: unknown;
 
     for (let attempt = 0; attempt < this.servers.length; attempt += 1) {
-      const rpcUrl = this.rpcUrls[this.activeIndex];
-      const server = this.servers[this.activeIndex];
+      const index = this.activeIndex;
+      const rpcUrl = this.rpcUrls[index];
+      const server = this.servers[index];
 
       if (!rpcUrl || !server) {
         break;
@@ -250,8 +268,11 @@ export class RpcEndpointPool {
         if (!isRetryableRpcConnectionError(error) || attempt === this.servers.length - 1) {
           throw error;
         }
-        this.lastFailoverAt = Date.now();
-        this.activeIndex = (this.activeIndex + 1) % this.servers.length;
+        // Only advance if no concurrent call has already failed over away from this endpoint.
+        if (this.activeIndex === index) {
+          this.lastFailoverAt = Date.now();
+          this.activeIndex = (index + 1) % this.servers.length;
+        }
       }
     }
 
