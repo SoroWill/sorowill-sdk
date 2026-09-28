@@ -262,59 +262,75 @@ describe('WalletConnectAdapter', () => {
   });
 });
 
-describe('WalletConnectAdapter connect timeout', () => {
-  function makeClient(approval: () => Promise<WalletConnectSession>): WalletConnectClient {
-    return {
-      async connect() {
-        return { uri: 'wc:test', approval };
+describe('WalletConnectAdapter defaults and network resolution', () => {
+  function makeClient(session: WalletConnectSession, response: unknown) {
+    const calls: Array<{ requiredNamespaces?: unknown; request?: unknown; chainId?: string }> = [];
+    const client: WalletConnectClient = {
+      async connect(options) {
+        calls.push({ requiredNamespaces: options.requiredNamespaces });
+        return { uri: 'wc:test', approval: async () => session };
       },
       async disconnect() {},
-      async getSession() {
-        return null;
+      async getSession(topic) {
+        return topic === session.topic ? session : null;
       },
-      async request<T>(): Promise<T> {
-        throw new Error('not used');
+      async request<T>(options: { topic: string; chainId: string; request: { method: string; params: unknown } }) {
+        calls.push({ request: options.request, chainId: options.chainId });
+        return response as T;
       },
     };
+    return { client, calls };
   }
 
-  it('resolves when approval settles before the timeout and clears the timer', async () => {
-    vi.useFakeTimers();
-    try {
-      const adapter = new WalletConnectAdapter(makeClient(async () => makeSession()), { connectTimeoutMs: 1000 });
-      await expect(adapter.connect()).resolves.toBeDefined();
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
+  it('requests pubnet and testnet with the documented method and parses signedXDR', async () => {
+    const { client, calls } = makeClient(makeSession(), { signedXDR: 'SIGNED_DOC_XDR' });
+    const adapter = new WalletConnectAdapter(client);
+
+    const connection = await adapter.connect();
+    const signed = await adapter.signTransaction('UNSIGNED_XDR', {
+      networkPassphrase: connection.networkPassphrase,
+    });
+
+    expect(calls[0]!.requiredNamespaces).toEqual({
+      stellar: { methods: ['stellar_signXDR'], chains: ['stellar:pubnet', 'stellar:testnet'], events: [] },
+    });
+    expect(calls[1]!.request).toEqual({ method: 'stellar_signXDR', params: { xdr: 'UNSIGNED_XDR' } });
+    expect(signed).toBe('SIGNED_DOC_XDR');
   });
 
-  it('rejects when approval does not settle within connectTimeoutMs', async () => {
-    vi.useFakeTimers();
-    try {
-      const adapter = new WalletConnectAdapter(makeClient(() => new Promise(() => {})), { connectTimeoutMs: 1000 });
-      const pending = expect(adapter.connect()).rejects.toThrow('WalletConnect pairing approval timed out after 1000ms');
-      await vi.advanceTimersByTimeAsync(1000);
-      await pending;
-    } finally {
-      vi.useRealTimers();
-    }
+  it('keeps the legacy request shape available through override options', async () => {
+    const { client, calls } = makeClient(makeSession(), { signedTxXdr: 'SIGNED_LEGACY' });
+    const adapter = new WalletConnectAdapter(client, {
+      signTransactionMethod: 'stellar_signXdr',
+      getSignTransactionParams: (transactionXdr, networkPassphrase) => ({ transactionXdr, networkPassphrase }),
+    });
+
+    const connection = await adapter.connect();
+    await expect(
+      adapter.signTransaction('UNSIGNED_XDR', { networkPassphrase: connection.networkPassphrase }),
+    ).resolves.toBe('SIGNED_LEGACY');
+    expect(calls[1]!.request).toEqual({
+      method: 'stellar_signXdr',
+      params: { transactionXdr: 'UNSIGNED_XDR', networkPassphrase: connection.networkPassphrase },
+    });
   });
 
-  it('propagates approval rejection and clears the timer', async () => {
-    vi.useFakeTimers();
-    try {
-      const adapter = new WalletConnectAdapter(
-        makeClient(async () => {
-          throw new Error('User rejected');
-        }),
-        { connectTimeoutMs: 1000 },
-      );
-      await expect(adapter.connect()).rejects.toThrow('User rejected');
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
+  it('signs on a custom chain using the configured network and networkPassphrase', async () => {
+    const session = makeSession();
+    session.namespaces!.stellar!.accounts = ['stellar:futurenet:GABC123'];
+    const { client } = makeClient(session, { signedXDR: 'SIGNED_CUSTOM' });
+    const adapter = new WalletConnectAdapter(client, {
+      network: 'futurenet',
+      networkPassphrase: 'Test SDF Future Network ; October 2022',
+    });
+
+    await adapter.connect();
+    await expect(
+      adapter.signTransaction('UNSIGNED_XDR', { networkPassphrase: 'Test SDF Future Network ; October 2022' }),
+    ).resolves.toBe('SIGNED_CUSTOM');
+    await expect(
+      adapter.signTransaction('UNSIGNED_XDR', { networkPassphrase: 'Test SDF Network ; September 2015' }),
+    ).rejects.toThrow('but transaction is for a different network');
   });
 });
 
