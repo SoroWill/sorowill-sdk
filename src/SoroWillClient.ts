@@ -1105,6 +1105,13 @@ export class SoroWillClient {
     owner: string,
     options?: (PaginationOptions & RequestOptions) | RequestOptions,
   ): Promise<Will[] | PaginatedWillsResult> {
+    const paginationOptions = options as PaginationOptions | undefined;
+    if (paginationOptions?.cursor !== undefined) {
+      parseCursor(paginationOptions.cursor);
+    }
+    if (paginationOptions?.pageSize !== undefined) {
+      normalizePositiveInteger(paginationOptions.pageSize, 'pageSize');
+    }
     const cacheKey = createReadCacheKey('get_wills_by_owner', { owner });
     if (this.readCache) {
       await this.readCache.ready();
@@ -1133,6 +1140,13 @@ export class SoroWillClient {
     beneficiary: string,
     options?: (PaginationOptions & RequestOptions) | RequestOptions,
   ): Promise<Will[] | PaginatedWillsResult> {
+    const paginationOptions = options as PaginationOptions | undefined;
+    if (paginationOptions?.cursor !== undefined) {
+      parseCursor(paginationOptions.cursor);
+    }
+    if (paginationOptions?.pageSize !== undefined) {
+      normalizePositiveInteger(paginationOptions.pageSize, 'pageSize');
+    }
     const cacheKey = createReadCacheKey('get_wills_by_beneficiary', { beneficiary });
     if (this.readCache) {
       await this.readCache.ready();
