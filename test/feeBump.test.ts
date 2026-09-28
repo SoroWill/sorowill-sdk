@@ -35,6 +35,14 @@ vi.mock('@stellar/stellar-sdk', () => {
       return new MockKeypair('GDEFAULTPUBLICKEY', secretKey);
     }
 
+    static random(): MockKeypair {
+      return new MockKeypair('GRANDOMPUBLICKEY', 'SRANDOMSECRETKEY');
+    }
+
+    secret(): string {
+      return this._secretKey || 'SDEFAULTSECRETKEY';
+    }
+
     signDecorated(_hash: Uint8Array): any {
       return { toXDR: () => 'MOCK_SIGNATURE' };
     }
@@ -109,6 +117,12 @@ vi.mock('@stellar/stellar-sdk', () => {
 
   const BASE_FEE = '100';
 
+  class MockSpec {
+    static fromWasm(): MockSpec {
+      return new MockSpec();
+    }
+  }
+
   return {
     BASE_FEE,
     Keypair: MockKeypair,
@@ -128,16 +142,36 @@ vi.mock('@stellar/stellar-sdk', () => {
         },
       },
     },
+    contract: {
+      Spec: MockSpec,
+    },
   };
 });
 
+import { Keypair, Networks, TransactionBuilder } from '@stellar/stellar-sdk';
+
 import {
   buildFeeBumpXdr,
+  signFeeBumpXdr,
   submitFeeBumpTransaction,
   submitFeeBump,
   validateInnerTransactionSequence,
   StaleTransactionSequenceError,
 } from '../src/feeBump';
+import { InvalidPublicKeyError } from '../src/errors';
+
+/** Builds a placeholder inner-transaction XDR for the mocked stellar-sdk above. */
+function makeInnerTxXdr(_networkPassphrase: string): string {
+  return 'INNER_TX_XDR';
+}
+
+/** Builds an unsigned fee-bump transaction XDR wrapping `innerXdr`, for the mocked stellar-sdk above. */
+function makeFeeBumpXdr(innerXdr: string, feeSource: Keypair, networkPassphrase: string): string {
+  const innerTx = TransactionBuilder.fromXDR(innerXdr, networkPassphrase);
+  return (TransactionBuilder as any)
+    .buildFeeBumpTransaction(feeSource, '5000', innerTx, networkPassphrase)
+    .toXDR();
+}
 
 describe('feeBump', () => {
   beforeEach(() => {
@@ -168,6 +202,25 @@ describe('feeBump', () => {
       });
 
       expect(xdr).toBeTruthy();
+    });
+
+    it('should throw InvalidPublicKeyError for a malformed feeSourcePublicKey', async () => {
+      await expect(
+        buildFeeBumpXdr({
+          network: 'testnet',
+          innerTransactionXdr: 'INNER_TX_XDR',
+          feeSourcePublicKey: 'SNOTAPUBLICKEY',
+          fee: '5000',
+        }),
+      ).rejects.toThrow(InvalidPublicKeyError);
+      await expect(
+        buildFeeBumpXdr({
+          network: 'testnet',
+          innerTransactionXdr: 'INNER_TX_XDR',
+          feeSourcePublicKey: 'SNOTAPUBLICKEY',
+          fee: '5000',
+        }),
+      ).rejects.toThrow(/feeSourcePublicKey/);
     });
   });
 
@@ -250,6 +303,29 @@ describe('feeBump', () => {
           feeBumpXdr: 'SIGNED_FEE_BUMP_XDR',
         }),
       ).rejects.toThrow(/Fee-bump transaction did not succeed: ERROR/);
+    });
+
+    it('should include resultXdr and diagnostics in the non-success error message', async () => {
+      mockState.sendTransaction.mockResolvedValueOnce({
+        status: 'PENDING',
+        hash: 'TX_HASH_789',
+      });
+      mockState.pollTransaction.mockResolvedValueOnce({
+        status: 'FAILED',
+        resultXdr: { toXDR: () => 'RESULT_XDR_BASE64' },
+        diagnosticEventsXdr: [{ toXDR: () => 'DIAG_EVENT_BASE64' }],
+      });
+
+      await expect(
+        submitFeeBumpTransaction({
+          network: 'testnet',
+          feeBumpXdr: 'SIGNED_FEE_BUMP_XDR',
+          pollAttempts: 5,
+        }),
+      ).rejects.toThrow(
+        'Fee-bump transaction did not succeed: FAILED (result: RESULT_XDR_BASE64) (diagnostics: DIAG_EVENT_BASE64)',
+      );
+      expect(mockState.pollTransaction).toHaveBeenCalledWith('TX_HASH_789', { attempts: 5 });
     });
   });
 

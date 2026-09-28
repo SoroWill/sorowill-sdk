@@ -1,8 +1,24 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createRequire } from 'node:module';
+import type ReactNamespace from 'react';
 
 import { SoroWillClient } from '../SoroWillClient';
 import type { SoroWillClientOptions } from '../SoroWillClient';
 import type { Will } from '../types';
+
+/**
+ * `react` is an optional peer dependency of this subpath — a static
+ * `import ... from 'react'` would fail to resolve for a consumer that hasn't
+ * installed it, even before any hook is actually called. Loading it lazily
+ * via `createRequire` means the module only needs to resolve when a hook in
+ * this file actually runs.
+ */
+let react: typeof ReactNamespace | undefined;
+function getReact(): typeof ReactNamespace {
+  if (!react) {
+    react = createRequire(import.meta.url)('react');
+  }
+  return react!;
+}
 
 /** Standard data-fetching state returned by the hooks. */
 export interface UseQueryResult<T> {
@@ -13,12 +29,12 @@ export interface UseQueryResult<T> {
 }
 
 function useSoroWillClient(options: SoroWillClientOptions): SoroWillClient {
-  const client = useMemo(
+  const client = getReact().useMemo(
     () => new SoroWillClient(options),
     [options.network, options.contractId],
   );
 
-  useEffect(() => {
+  getReact().useEffect(() => {
     return () => client.destroy();
   }, [client]);
 
@@ -38,14 +54,14 @@ export function useWill(
   willId: string | null,
 ): UseQueryResult<Will> {
   const client = useSoroWillClient(clientOptions);
-  const [data, setData] = useState<Will | null>(null);
-  const [error, setError] = useState<Error | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [fetchKey, setFetchKey] = useState(0);
+  const [data, setData] = getReact().useState<Will | null>(null);
+  const [error, setError] = getReact().useState<Error | null>(null);
+  const [loading, setLoading] = getReact().useState(false);
+  const [fetchKey, setFetchKey] = getReact().useState(0);
 
-  const refetch = useCallback(() => setFetchKey((k) => k + 1), []);
+  const refetch = getReact().useCallback(() => setFetchKey((k) => k + 1), []);
 
-  useEffect(() => {
+  getReact().useEffect(() => {
     if (!willId) {
       setData(null);
       return;
@@ -93,14 +109,14 @@ export function useWillsByOwner(
   owner: string | null,
 ): UseQueryResult<Will[]> {
   const client = useSoroWillClient(clientOptions);
-  const [data, setData] = useState<Will[] | null>(null);
-  const [error, setError] = useState<Error | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [fetchKey, setFetchKey] = useState(0);
+  const [data, setData] = getReact().useState<Will[] | null>(null);
+  const [error, setError] = getReact().useState<Error | null>(null);
+  const [loading, setLoading] = getReact().useState(false);
+  const [fetchKey, setFetchKey] = getReact().useState(0);
 
-  const refetch = useCallback(() => setFetchKey((k) => k + 1), []);
+  const refetch = getReact().useCallback(() => setFetchKey((k) => k + 1), []);
 
-  useEffect(() => {
+  getReact().useEffect(() => {
     if (!owner) {
       setData(null);
       return;
@@ -148,14 +164,14 @@ export function useWillsByBeneficiary(
   beneficiary: string | null,
 ): UseQueryResult<Will[]> {
   const client = useSoroWillClient(clientOptions);
-  const [data, setData] = useState<Will[] | null>(null);
-  const [error, setError] = useState<Error | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [fetchKey, setFetchKey] = useState(0);
+  const [data, setData] = getReact().useState<Will[] | null>(null);
+  const [error, setError] = getReact().useState<Error | null>(null);
+  const [loading, setLoading] = getReact().useState(false);
+  const [fetchKey, setFetchKey] = getReact().useState(0);
 
-  const refetch = useCallback(() => setFetchKey((k) => k + 1), []);
+  const refetch = getReact().useCallback(() => setFetchKey((k) => k + 1), []);
 
-  useEffect(() => {
+  getReact().useEffect(() => {
     if (!beneficiary) {
       setData(null);
       return;

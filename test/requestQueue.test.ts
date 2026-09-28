@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { RequestQueue } from '../src/requestQueue';
+import { RequestQueue, RequestPriority } from '../src/requestQueue';
 import { RequestTimeoutError } from '../src/errors';
 
 describe('RequestQueue', () => {
@@ -271,6 +271,136 @@ describe('RequestQueue', () => {
 
       const queue4 = new RequestQueue({ maxConcurrent: 10, requestsPerSecond: 20 });
       expect(queue4).toBeDefined();
+    });
+  });
+
+  describe('priority', () => {
+    it('executes high-priority requests before low-priority ones in the same batch', async () => {
+      const queue = new RequestQueue({ maxConcurrent: 1 });
+      const executed: string[] = [];
+
+      const p1 = queue.enqueue(() => {
+        executed.push('low1');
+        return Promise.resolve();
+      }, undefined, undefined, RequestPriority.Low);
+
+      const p2 = queue.enqueue(() => {
+        executed.push('low2');
+        return Promise.resolve();
+      }, undefined, undefined, RequestPriority.Low);
+
+      const p3 = queue.enqueue(() => {
+        executed.push('high');
+        return Promise.resolve();
+      }, undefined, undefined, RequestPriority.High);
+
+      const p4 = queue.enqueue(() => {
+        executed.push('low3');
+        return Promise.resolve();
+      }, undefined, undefined, RequestPriority.Low);
+
+      await Promise.all([p1, p2, p3, p4]);
+
+      expect(executed).toEqual(['low1', 'high', 'low2', 'low3']);
+    });
+
+    it('executes requests with same priority in FIFO order', async () => {
+      const queue = new RequestQueue({ maxConcurrent: 1 });
+      const executed: number[] = [];
+
+      const p1 = queue.enqueue(() => {
+        executed.push(1);
+        return Promise.resolve();
+      }, undefined, undefined, RequestPriority.Normal);
+
+      const p2 = queue.enqueue(() => {
+        executed.push(2);
+        return Promise.resolve();
+      }, undefined, undefined, RequestPriority.Normal);
+
+      const p3 = queue.enqueue(() => {
+        executed.push(3);
+        return Promise.resolve();
+      }, undefined, undefined, RequestPriority.Normal);
+
+      await Promise.all([p1, p2, p3]);
+
+      expect(executed).toEqual([1, 2, 3]);
+    });
+
+    it('prioritizes high-priority requests even after low-priority bursts', async () => {
+      const queue = new RequestQueue({ maxConcurrent: 1 });
+      const executed: string[] = [];
+
+      const lowPriorityPromises = Array.from({ length: 5 }, (_, i) =>
+        queue.enqueue(() => {
+          executed.push(`low-${i}`);
+          return Promise.resolve();
+        }, undefined, undefined, RequestPriority.Low),
+      );
+
+      const highPriorityPromise = queue.enqueue(() => {
+        executed.push('high');
+        return Promise.resolve();
+      }, undefined, undefined, RequestPriority.High);
+
+      await Promise.all([...lowPriorityPromises, highPriorityPromise]);
+
+      const highIndex = executed.indexOf('high');
+      expect(highIndex).toBeLessThan(3);
+      expect(executed[0]).toBe('low-0');
+    });
+
+    it('respects priority levels (Low < Normal < High)', async () => {
+      const queue = new RequestQueue({ maxConcurrent: 1 });
+      const executed: string[] = [];
+
+      queue.enqueue(() => {
+        executed.push('low');
+        return Promise.resolve();
+      }, undefined, undefined, RequestPriority.Low);
+
+      queue.enqueue(() => {
+        executed.push('high');
+        return Promise.resolve();
+      }, undefined, undefined, RequestPriority.High);
+
+      queue.enqueue(() => {
+        executed.push('normal');
+        return Promise.resolve();
+      }, undefined, undefined, RequestPriority.Normal);
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(executed[0]).toBe('low');
+      expect(executed[1]).toBe('high');
+      expect(executed[2]).toBe('normal');
+    });
+
+    it('uses Normal priority by default', async () => {
+      const queue = new RequestQueue({ maxConcurrent: 1 });
+      const executed: string[] = [];
+
+      queue.enqueue(() => {
+        executed.push('default');
+        return Promise.resolve();
+      });
+
+      queue.enqueue(() => {
+        executed.push('low');
+        return Promise.resolve();
+      }, undefined, undefined, RequestPriority.Low);
+
+      queue.enqueue(() => {
+        executed.push('high');
+        return Promise.resolve();
+      }, undefined, undefined, RequestPriority.High);
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(executed[0]).toBe('default');
+      expect(executed[1]).toBe('high');
+      expect(executed[2]).toBe('low');
     });
   });
 });

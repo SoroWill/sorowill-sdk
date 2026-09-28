@@ -30,7 +30,11 @@ vi.mock('@stellar/freighter-api', () => ({
   default: freighterApiMock,
 }));
 
-vi.mock('@stellar/stellar-sdk', () => {
+vi.mock('@stellar/stellar-sdk', async () => {
+  const { StrKey } = await vi.importActual<typeof import('@stellar/stellar-sdk')>(
+    '@stellar/stellar-sdk',
+  );
+
   class MockAccount {
     constructor(
       public readonly accountId: string,
@@ -82,6 +86,7 @@ vi.mock('@stellar/stellar-sdk', () => {
     Account: MockAccount,
     BASE_FEE: '100',
     Contract: MockContract,
+    StrKey,
     Networks: { PUBLIC: 'PUBLIC', TESTNET: 'TESTNET' },
     Transaction: class MockTransaction {},
     TransactionBuilder: MockTransactionBuilder,
@@ -145,8 +150,8 @@ import { MAX_GUARDIANS } from '../src/utils';
 // ---------------------------------------------------------------------------
 
 const VALID_BENEFICIARIES = [
-  { address: 'GBENA', percentage: 60 },
-  { address: 'GBENB', percentage: 40 },
+  { address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 60 },
+  { address: 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6', percentage: 40 },
 ];
 
 const BASE_CREATE_WILL_PARAMS = {

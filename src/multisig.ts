@@ -3,11 +3,14 @@ import {
   BASE_FEE,
   Contract,
   Keypair,
+  StrKey,
   Transaction,
   TransactionBuilder,
   rpc,
   xdr,
 } from '@stellar/stellar-sdk';
+
+import { InvalidSecretKeyError, InvalidTransactionXdrError } from './errors';
 
 /** A single collected signature from one signer. */
 export interface CollectedSignature {
@@ -25,6 +28,24 @@ export interface MultisigCollectorOptions {
   networkPassphrase: string;
   /** The number of signatures required before the transaction can be submitted. */
   threshold: number;
+}
+
+/**
+ * Validates that a transaction XDR is well-formed and can be decoded.
+ * @throws {InvalidTransactionXdrError} if the XDR is malformed.
+ */
+function validateTransactionXdr(transactionXdr: string): void {
+  try {
+    const envelope = xdr.TransactionEnvelope.fromXDR(transactionXdr, 'base64');
+    if (
+      envelope.switch() !== xdr.EnvelopeType.envelopeTypeTx() &&
+      envelope.switch() !== xdr.EnvelopeType.envelopeTypeTxFeeBump()
+    ) {
+      throw new Error('Unsupported transaction envelope type');
+    }
+  } catch {
+    throw new InvalidTransactionXdrError();
+  }
 }
 
 /**
@@ -61,6 +82,7 @@ export class MultisigCollector {
     if (options.threshold < 1) {
       throw new Error('Threshold must be at least 1');
     }
+    validateTransactionXdr(options.transactionXdr);
     this._transactionXdr = options.transactionXdr;
     this._networkPassphrase = options.networkPassphrase;
     this._threshold = options.threshold;
@@ -99,8 +121,15 @@ export class MultisigCollector {
   /**
    * Add a signature from a signer.
    * @throws if the signer has already signed.
+   * @throws if signerPublicKey is not a valid Stellar Ed25519 public key.
    */
   addSignature(signerPublicKey: string, signature: string): void {
+    if (!StrKey.isValidEd25519PublicKey(signerPublicKey)) {
+      throw new Error(
+        `"${signerPublicKey}" is not a valid Stellar public key. ` +
+          'A Stellar Ed25519 public key must be a 56-character StrKey starting with "G".',
+      );
+    }
     if (this._signatures.some((s) => s.signerPublicKey === signerPublicKey)) {
       throw new Error(`Signer ${signerPublicKey} has already signed`);
     }
@@ -167,7 +196,9 @@ export class MultisigCollector {
     };
   }
 
-  /** Reconstitute a collector from a serialised state. */
+  /** Reconstitute a collector from a serialised state.
+   * @throws {InvalidTransactionXdrError} if the transaction XDR is malformed.
+   */
   static fromJSON(data: {
     transactionXdr: string;
     networkPassphrase: string;
@@ -236,13 +267,20 @@ export async function buildMultisigTransactionXdr(options: {
  * Sign a transaction XDR with a specific secret key and return the
  * decorated signature as a base64 string suitable for
  * {@link MultisigCollector.addSignature}.
+ * @throws {InvalidSecretKeyError} if the secret key is malformed.
  */
 export function signWithSecretKey(
   transactionXdr: string,
   secretKey: string,
   networkPassphrase: string,
 ): string {
-  const keypair = Keypair.fromSecret(secretKey);
+  let keypair: Keypair;
+  try {
+    keypair = Keypair.fromSecret(secretKey);
+  } catch {
+    throw new InvalidSecretKeyError('signWithSecretKey');
+  }
+
   const tx = TransactionBuilder.fromXDR(transactionXdr, networkPassphrase) as Transaction;
 
   const hashed = tx.hash();

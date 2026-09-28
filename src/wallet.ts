@@ -103,13 +103,18 @@ export interface WalletConnection {
  * > to handle real end-user funds in a browser or any environment where the
  * > secret could be exposed to untrusted code.
  */
+export interface SignTransactionOptions {
+  networkPassphrase: string;
+  timeoutMs?: number;
+}
+
 export interface WalletAdapter {
   isConnected(): Promise<boolean>;
   connect(): Promise<WalletConnection>;
   reconnect(): Promise<WalletConnection>;
   disconnect(): Promise<void>;
   getPublicKey(): Promise<string>;
-  signTransaction(transactionXdr: string, opts: { networkPassphrase: string; timeoutMs?: number }): Promise<string>;
+  signTransaction(transactionXdr: string, opts: SignTransactionOptions): Promise<string>;
   /** Reports the network this wallet is currently set to, without prompting the user. Optional — not every wallet adapter can report this. */
   getNetwork?(): Promise<{ network: string; networkPassphrase: string }>;
 }

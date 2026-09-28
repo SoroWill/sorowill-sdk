@@ -26,7 +26,11 @@ vi.mock('@stellar/freighter-api', () => ({
   default: freighterApiMock,
 }));
 
-vi.mock('@stellar/stellar-sdk', () => {
+vi.mock('@stellar/stellar-sdk', async () => {
+  const { StrKey } = await vi.importActual<typeof import('@stellar/stellar-sdk')>(
+    '@stellar/stellar-sdk',
+  );
+
   class MockAccount {
     constructor(
       public readonly accountId: string,
@@ -100,6 +104,7 @@ vi.mock('@stellar/stellar-sdk', () => {
     Account: MockAccount,
     BASE_FEE: '100',
     Contract: MockContract,
+    StrKey,
     Networks: { PUBLIC: 'PUBLIC', TESTNET: 'TESTNET' },
     Transaction: MockTransaction,
     TransactionBuilder: MockTransactionBuilder,
@@ -136,6 +141,7 @@ vi.mock('@stellar/stellar-sdk', () => {
 });
 
 import { SoroWillClient } from '../src/SoroWillClient';
+import { calculateShares } from '../src/utils';
 
 function makeClient() {
   return new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
@@ -161,8 +167,8 @@ describe('beneficiary percentage -> contract basis points', () => {
       token: 'CTOKEN',
       amount: '1000000',
       beneficiaries: [
-        { address: 'GBENA', percentage: 30 },
-        { address: 'GBENB', percentage: 70 },
+        { address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', percentage: 30 },
+        { address: 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6', percentage: 70 },
       ],
       checkinPeriodDays: 90,
       gracePeriodDays: 7,
@@ -170,8 +176,8 @@ describe('beneficiary percentage -> contract basis points', () => {
     });
 
     expect(beneficiariesFor('create_will')).toEqual([
-      { address: 'GBENA', basis_points: 3000 },
-      { address: 'GBENB', basis_points: 7000 },
+      { address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', basis_points: 3000 },
+      { address: 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6', basis_points: 7000 },
     ]);
   });
 
@@ -185,18 +191,79 @@ describe('beneficiary percentage -> contract basis points', () => {
     await makeClient().updateBeneficiaries({
       willId: '1',
       beneficiaries: [
-        { address: 'GBENA', percentage: 33 },
-        { address: 'GBENB', percentage: 33 },
-        { address: 'GBENC', percentage: 34 },
+        { address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', percentage: 33 },
+        { address: 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6', percentage: 33 },
+        { address: 'GDPS7CHKGAWBCTWD4EWZ4MMFG56S4NCALGQOUBMX6DSCUIZFRQHHP3HB', percentage: 34 },
       ],
     });
 
     const bound = beneficiariesFor('update_beneficiaries');
     expect(bound).toEqual([
-      { address: 'GBENA', basis_points: 3300 },
-      { address: 'GBENB', basis_points: 3300 },
-      { address: 'GBENC', basis_points: 3400 },
+      { address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', basis_points: 3300 },
+      { address: 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6', basis_points: 3300 },
+      { address: 'GDPS7CHKGAWBCTWD4EWZ4MMFG56S4NCALGQOUBMX6DSCUIZFRQHHP3HB', basis_points: 3400 },
     ]);
     expect(bound.reduce((sum, b) => sum + b.basis_points, 0)).toBe(10_000);
+  });
+});
+
+describe('contract basis points -> beneficiary percentage (#362)', () => {
+  const A = 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO';
+  const B = 'GAKUAEWGL2TSFIMEXD2VDVPX2BMJTAFFZEPJS4QQRJJF3X54P6S3QCZ6';
+
+  function rawWill(beneficiaries: unknown[]) {
+    return {
+      id: 1n,
+      owner: A,
+      token: 'CTOKEN',
+      balance: 1_000_000n,
+      beneficiaries,
+      checkin_period_days: 90n,
+      grace_period_days: 7n,
+      last_checkin: 1_700_000_000n,
+      status: 'Active',
+      guardians: [],
+      guardian_votes: 0,
+    };
+  }
+
+  beforeEach(() => {
+    mockState.funcArgsCalls.length = 0;
+    mockState.simulateTransaction.mockReset();
+  });
+
+  it('round-trips createWill beneficiaries through getWill and feeds calculateShares directly', async () => {
+    const input = [
+      { address: A, percentage: 30 },
+      { address: B, percentage: 70 },
+    ];
+    const client = makeClient();
+    await client.createWill({
+      token: 'CTOKEN',
+      amount: '1000000',
+      beneficiaries: input,
+      checkinPeriodDays: 90,
+      gracePeriodDays: 7,
+      guardians: [],
+    });
+    mockState.simulateTransaction.mockResolvedValueOnce({
+      result: { retval: rawWill(beneficiariesFor('create_will')) },
+    });
+
+    const will = await client.getWill('1');
+
+    expect(will.beneficiaries).toEqual(input);
+    expect(calculateShares(will.balance, will.beneficiaries)).toEqual([
+      { address: A, share: '300000' },
+      { address: B, share: '700000' },
+    ]);
+  });
+
+  it('rejects basis_points that are not a whole percentage', async () => {
+    mockState.simulateTransaction.mockResolvedValueOnce({
+      result: { retval: rawWill([{ address: A, basis_points: 3333 }, { address: B, basis_points: 6667 }]) },
+    });
+
+    await expect(makeClient().getWill('1')).rejects.toThrow(/basis_points 3333/);
   });
 });

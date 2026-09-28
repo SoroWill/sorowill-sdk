@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { SoroWillClient } from '../src/index';
 import { xdr } from '@stellar/stellar-sdk';
 
@@ -33,19 +33,6 @@ describe('mapWill array cloning (issue #187)', () => {
       }),
       getLatestLedger: async () => ({ sequence: '123' }),
     };
-
-    // Mock the Spec loading
-    vi.mock('@stellar/stellar-sdk', async () => {
-      const actual = await vi.importActual('@stellar/stellar-sdk');
-      return {
-        ...(actual as Record<string, unknown>),
-        contract: {
-          Spec: {
-            fromWasm: vi.fn().mockResolvedValue(fakeSpec),
-          },
-        },
-      };
-    });
 
     const client = new SoroWillClient({
       network: 'testnet',
@@ -100,18 +87,6 @@ describe('mapWill array cloning (issue #187)', () => {
       }),
       getLatestLedger: async () => ({ sequence: '123' }),
     };
-
-    vi.mock('@stellar/stellar-sdk', async () => {
-      const actual = await vi.importActual('@stellar/stellar-sdk');
-      return {
-        ...(actual as Record<string, unknown>),
-        contract: {
-          Spec: {
-            fromWasm: vi.fn().mockResolvedValue(fakeSpec),
-          },
-        },
-      };
-    });
 
     const client = new SoroWillClient({
       network: 'testnet',

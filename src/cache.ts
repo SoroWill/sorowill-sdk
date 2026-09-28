@@ -240,6 +240,14 @@ export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdap
   private readonly keysIndexKey: string;
 
   constructor(storage: Storage, options: { key?: string } = {}) {
+    if (!storage) {
+      throw new Error(
+        'LocalStorageCachePersistenceAdapter requires a valid Storage object. ' +
+        'In server-side rendering (SSR) environments, window.localStorage is unavailable at construction time. ' +
+        'Either provide the Storage object conditionally (e.g., only in browsers), ' +
+        'or use MemoryCachePersistenceAdapter for SSR environments.',
+      );
+    }
     this.storage = storage;
     this.storageKey = options.key ?? DEFAULT_CACHE_NAMESPACE;
     this.keysIndexKey = `${this.storageKey}:__keys__`;
@@ -252,10 +260,17 @@ export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdap
     }
 
     try {
-      const parsed = JSON.parse(raw) as PersistedCacheEntry[];
-      return Array.isArray(parsed) ? parsed : [];
+      const keys = JSON.parse(keysJson) as string[];
+      const entries: PersistedCacheEntry[] = [];
+      for (const key of keys) {
+        const entryJson = this.storage.getItem(`${this.storageKey}:${key}`);
+        if (entryJson) {
+          entries.push(JSON.parse(entryJson) as PersistedCacheEntry);
+        }
+      }
+      return entries;
     } catch {
-      this.storage.removeItem(this.storageKey);
+      this.storage.removeItem(this.keysIndexKey);
       return [];
     }
   }
@@ -298,15 +313,25 @@ export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdap
   }
 }
 
+/**
+ * IndexedDB-backed cache persistence adapter.
+ *
+ * The IndexedDB connection is opened lazily on first access (readAll, write, delete, or clear),
+ * not in the constructor. This allows code to instantiate the adapter without side effects,
+ * such as while deciding between IndexedDB and LocalStorage fallback strategies.
+ *
+ * If the connection attempt fails, the error is thrown at first use and will not be retried;
+ * calling any method again on the same instance will attempt to open again, but since the
+ * failure state is not tracked, repeated failures are possible.
+ */
 export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter {
   private readonly dbName: string;
   private readonly storeName: string;
-  private readonly dbPromise: Promise<IDBDatabase>;
+  private dbPromise: Promise<IDBDatabase> | undefined;
 
   constructor(options: { dbName?: string; storeName?: string } = {}) {
     this.dbName = options.dbName ?? 'sorowill-sdk';
     this.storeName = options.storeName ?? 'read-cache';
-    this.dbPromise = this.open();
   }
 
   async readAll(): Promise<PersistedCacheEntry[]> {
@@ -329,6 +354,13 @@ export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter
     await this.request(store.clear());
   }
 
+  private getDbPromise(): Promise<IDBDatabase> {
+    if (!this.dbPromise) {
+      this.dbPromise = this.open();
+    }
+    return this.dbPromise;
+  }
+
   private async open(): Promise<IDBDatabase> {
     const request = indexedDB.open(this.dbName, 1);
 
@@ -346,7 +378,7 @@ export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter
   }
 
   private async getStore(mode: IDBTransactionMode): Promise<IDBObjectStore> {
-    const db = await this.dbPromise;
+    const db = await this.getDbPromise();
     const transaction = db.transaction(this.storeName, mode);
     return transaction.objectStore(this.storeName);
   }

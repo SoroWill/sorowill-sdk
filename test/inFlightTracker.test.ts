@@ -76,7 +76,7 @@ describe('InFlightTracker', () => {
       await tracker.track('will-1', 'checkIn', operation);
 
       expect(receivedSignal).toBeDefined();
-      expect(receivedSignal instanceof AbortSignal).toBe(true);
+      expect(receivedSignal).toBeInstanceOf(AbortSignal);
     });
 
     it('operation can observe abort signal', async () => {

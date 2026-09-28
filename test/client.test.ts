@@ -1,7 +1,7 @@
-import { Account, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk';
+import { Account, Keypair, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ReadCache } from '../src/cache';
+import { createReadCacheKey, ReadCache } from '../src/cache';
 import { isRetryableRpcConnectionError, RpcEndpointPool } from '../src/rpc';
 import { buildSep7TxUri, parseSep7Callback } from '../src/sep7';
 import { assertPreparedTransactionMatchesIntendedOperation } from '../src/txValidation';
@@ -190,8 +190,8 @@ describe('validateBeneficiaries', () => {
   it('accepts percentages that sum to 100', () => {
     expect(
       validateBeneficiaries([
-        { address: 'GBEN_A', percentage: 60 },
-        { address: 'GBEN_B', percentage: 40 },
+        { address: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', percentage: 60 },
+        { address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 40 },
       ]),
     ).toBe(true);
   });
@@ -228,7 +228,7 @@ describe('validateBeneficiaries', () => {
 
   it('accepts exactly MAX_BENEFICIARIES', () => {
     const exactlyMax = Array.from({ length: MAX_BENEFICIARIES }, (_, i) => ({
-      address: `GBEN_${i}`,
+      address: Keypair.random().publicKey(),
       percentage: i < MAX_BENEFICIARIES - 1 ? 10 : 100 - (MAX_BENEFICIARIES - 1) * 10,
     }));
     expect(validateBeneficiaries(exactlyMax)).toBe(true);
@@ -241,7 +241,12 @@ describe('validateGuardians', () => {
   });
 
   it('accepts a valid guardian list', () => {
-    expect(validateGuardians(['GA', 'GB'])).toBe(true);
+    expect(
+      validateGuardians([
+        'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+        'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG',
+      ]),
+    ).toBe(true);
   });
 
   it('rejects too many guardians exceeding MAX_GUARDIANS', () => {
@@ -258,11 +263,24 @@ describe('validateGuardians', () => {
   });
 
   it('accepts guardian list when owner is not in the list', () => {
-    expect(validateGuardians(['GA', 'GB'], 'GOWNER')).toBe(true);
+    expect(
+      validateGuardians(
+        [
+          'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+          'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG',
+        ],
+        'GD6P6MZ5GY5ENDIDREGJGV7HPWYKAJVWLBG3NTK5PNSZENTLXWIRGHWB',
+      ),
+    ).toBe(true);
   });
 
   it('accepts guardian list when ownerAddress is not supplied', () => {
-    expect(validateGuardians(['GA', 'GB'])).toBe(true);
+    expect(
+      validateGuardians([
+        'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+        'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG',
+      ]),
+    ).toBe(true);
   });
 });
 
@@ -333,6 +351,39 @@ describe('HookManager', () => {
     hm.onAfterInvoke(() => {});
     hm.offAfterInvoke(hook);
     expect(hm.afterInvokeCount).toBe(1);
+  });
+
+  it('offBeforeInvoke removes all occurrences of a duplicate hook', async () => {
+    const hm = new HookManager();
+    const calls: string[] = [];
+    const hook = async () => { calls.push('x'); };
+    hm.onBeforeInvoke(hook);
+    hm.onBeforeInvoke(async () => { calls.push('y'); });
+    hm.onBeforeInvoke(hook);
+    hm.onBeforeInvoke(async () => { calls.push('z'); });
+    hm.onBeforeInvoke(hook);
+    expect(hm.beforeInvokeCount).toBe(5);
+    hm.offBeforeInvoke(hook);
+    await hm.runBeforeInvoke({ method: 'test', args: {}, timestamp: '' });
+    expect(calls).toEqual(['y', 'z']);
+    expect(hm.beforeInvokeCount).toBe(2);
+  });
+
+  it('offAfterInvoke removes all occurrences of a duplicate hook', async () => {
+    const hm = new HookManager();
+    const calls: string[] = [];
+    const hook = async () => { calls.push('x'); };
+    hm.onAfterInvoke(hook);
+    hm.onAfterInvoke(async () => { calls.push('y'); });
+    hm.onAfterInvoke(hook);
+    hm.onAfterInvoke(async () => { calls.push('z'); });
+    hm.onAfterInvoke(hook);
+    expect(hm.afterInvokeCount).toBe(5);
+    hm.offAfterInvoke(hook);
+    const ctx: AfterInvokeContext = { method: 'test', args: { a: 1 }, timestamp: '', txHash: 'abc', error: null, durationMs: 42 };
+    await hm.runAfterInvoke(ctx);
+    expect(calls).toEqual(['y', 'z']);
+    expect(hm.afterInvokeCount).toBe(2);
   });
 
   it('clear removes all hooks', () => {
@@ -487,6 +538,49 @@ describe('RpcEndpointPool', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('deduplicates identical URLs in the endpoint list', async () => {
+    const pool = new RpcEndpointPool([
+      'https://rpc-a.example',
+      'https://rpc-b.example',
+      'https://rpc-a.example',
+      'https://rpc-c.example',
+      'https://rpc-b.example',
+    ]);
+    const attempts: string[] = [];
+
+    const result = await pool.withFailover(async (_server, rpcUrl) => {
+      attempts.push(rpcUrl);
+      if (attempts.length < 3) {
+        throw new Error('fetch failed');
+      }
+      return 'ok';
+    });
+
+    expect(result).toBe('ok');
+    expect(attempts).toEqual([
+      'https://rpc-a.example',
+      'https://rpc-b.example',
+      'https://rpc-c.example',
+    ]);
+  });
+
+  it('only attempts genuinely distinct endpoints on failover', async () => {
+    const attempts: string[] = [];
+    const pool = new RpcEndpointPool(
+      ['https://rpc-a.example', 'https://rpc-a.example', 'https://rpc-a.example'],
+      undefined,
+    );
+
+    await expect(
+      pool.withFailover(async (_server, rpcUrl) => {
+        attempts.push(rpcUrl);
+        throw new Error('fetch failed');
+      }),
+    ).rejects.toThrow('fetch failed');
+
+    expect(attempts).toEqual(['https://rpc-a.example']);
   });
 });
 

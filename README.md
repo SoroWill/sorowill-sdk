@@ -120,32 +120,41 @@ console.log(will.status, will.balance, will.beneficiaries);
 | `getWillsByOwner` | Lists every will owned by an address, with optional client-side pagination | `owner`, `PaginationOptions?` | `Promise<Will[] \| { wills, nextCursor }>` |
 | `getWillsByBeneficiary` | Lists every will an address is named in, with optional client-side pagination | `beneficiary`, `PaginationOptions?` | `Promise<Will[] \| { wills, nextCursor }>` |
 | `guardianTrigger` | Casts a guardian vote; 2 of 3 forces an early release | `willId` | `Promise<{ txHash }>` |
-| `batch` | Simulates, signs, and submits multiple contract operations atomically | `BatchOperation[]` | `Promise<BatchResult>` |
+| `batch` | Simulates, signs, and submits a single raw contract operation (Soroban allows one per transaction) | `BatchOperation[]` | `Promise<BatchResult>` |
 
 Every method also accepts an optional final `{ timeoutMs }` argument. RPC work flows through a
 shared FIFO queue configured by `maxConcurrentRequests` and `requestsPerSecond`, preventing bursts
 of reads or writes from overwhelming a public endpoint. A timeout rejects with
 `RequestTimeoutError`.
 
+## Client options
+
+Pass options to the `SoroWillClient` constructor (or to `forNetwork()`/`fromEnv()`) to configure behavior:
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `contractId` | string | Network-specific (see `DEFAULT_CONTRACT_IDS`) | Contract address on the target network |
+| `rpcUrl` | string | Mainnet or Testnet endpoint | Soroban RPC endpoint for transaction operations |
+| `networkPassphrase` | string | Networks.TESTNET or MAINNET | Network identifier (checked against the connected wallet) |
+| `timeoutMs` | number | `30000` | Milliseconds to wait for each RPC request before rejecting with `RequestTimeoutError` |
+| `maxConcurrentRequests` | number | `4` | Maximum number of simultaneous RPC requests |
+| `requestsPerSecond` | number | `10` | Rate limit: max requests started per rolling one-second window |
+| `pollAttempts` | number | `30` | Max attempts when polling for transaction finality; increase under mainnet congestion |
+| `autoFeeBumpOnTimeout` | boolean | `false` | **When `true`: if a transaction doesn't land within the poll window, the SDK automatically rebuilds and resubmits with a higher fee.** This means a second, higher-fee transaction may be submitted on your behalf without explicit re-signing. Defaults to `false` (disabled). Set to `true` only if you want this automatic retry behavior and are prepared for the cost implication (two transactions instead of one). See the fee-bump helpers section for manual fee-bump control. |
+| `transactionTimeoutSeconds` | number | `30` | Validity window (in seconds) for every built transaction; increase if your signing flow takes longer than 30 seconds (e.g. hardware wallets requiring user approval on-device) |
+| `debug` | boolean | `false` | Enable structured debug logging of operation builds, simulations, and submissions (no secrets logged) |
+| `readCache` | object | — | Read-cache configuration: `{ ttlMs: number, persistence?: CachePersistenceAdapter }` for in-memory or persistent caching across reloads |
+| `retry` | object | — | Transient-failure retry configuration: `{ maxAttempts: number, initialDelayMs: number }` with exponential backoff |
+| `wallet` | WalletAdapter | `freighterAdapter` | Wallet adapter for signing (Freighter, Ledger, WalletConnect, Hana, HOT, Albedo, LOBSTR, etc.) |
+| `spec` | ContractSpec | — | Advanced: pre-loaded contract spec to skip lazy WASM fetch on first call |
+| `specJson` | Uint8Array | — | Advanced: pre-loaded contract WASM bytes to skip lazy `getContractWasmByContractId` RPC call |
+
 ## Batch transactions
 
-`batch` combines native contract calls into one Stellar transaction and therefore one Freighter
-signature prompt:
+`batch` submits a raw contract call by its native method name and arguments:
 
 ```ts
 const result = await client.batch([
-  {
-    method: 'create_will',
-    args: {
-      owner: wallet.publicKey,
-      token: 'CBIEL...DAMA',
-      amount: 10_000_000n,
-      beneficiaries: [{ address: 'GBEN...AAAA', percentage: 100 }],
-      checkin_period_days: 90n,
-      grace_period_days: 7n,
-      guardians: [],
-    },
-  },
   {
     method: 'check_in',
     args: { will_id: 1n, owner: wallet.publicKey },
@@ -153,7 +162,73 @@ const result = await client.batch([
 ]);
 ```
 
-The whole batch is simulated and assembled together, signed once, and submitted atomically.
+Soroban transactions may contain only a single `InvokeHostFunction` operation, so multiple contract
+calls cannot be combined into one atomic transaction. `batch` therefore accepts exactly one
+operation and throws `UnsupportedBatchSizeError` for larger batches; submit each call separately.
+
+## Debugging and structured logging
+
+The SDK includes a built-in structured debug logger that emits JSON logs for every operation: builds, simulations, submissions, polls, successes, and errors. This is useful for diagnosing failing or slow contract calls, monitoring transaction lifecycle, and understanding RPC behavior under load.
+
+### Enabling debug logging
+
+Pass `debug: true` when constructing the client:
+
+```ts
+const client = new SoroWillClient({
+  network: 'testnet',
+  contractId: 'C...',
+  debug: true,  // Enable structured logging
+});
+```
+
+### Log output format
+
+The logger emits structured JSON to the console (via `console.log`) at each step of an operation. For example, you should expect to see logs like:
+
+```json
+{
+  "timestamp": "2024-01-15T10:30:45.123Z",
+  "phase": "build",
+  "operation": "check_in",
+  "details": {
+    "willId": "123",
+    "owner": "GABC..."
+  }
+}
+```
+
+```json
+{
+  "timestamp": "2024-01-15T10:30:46.456Z",
+  "phase": "simulate",
+  "operation": "check_in",
+  "details": {
+    "fee": "100000"
+  }
+}
+```
+
+```json
+{
+  "timestamp": "2024-01-15T10:30:47.789Z",
+  "phase": "submit",
+  "operation": "check_in",
+  "details": {
+    "txHash": "abcd1234..."
+  }
+}
+```
+
+### Privacy guarantee
+
+The DebugLogger is designed with a **no-secrets-logged guarantee**: it never logs private keys, secret seeds, or the private key material from any connected wallet. All logged data is either:
+
+- Operation parameters (amounts, addresses, flags)
+- RPC request/response metadata (fees, transaction hashes, XDR)
+- Timing and diagnostic information (phases, durations, error types)
+
+This makes it safe to forward debug logs to your own internal logging pipeline (e.g., a logging service, analytics tool, or error tracker) without worrying about leaking credentials.
 
 ## Typed errors
 
@@ -228,6 +303,18 @@ Every top-level export from `@sorowill/sdk` is listed below. When adding a new p
 | `SoroWillClient` | class | `SoroWillClient` | Main client for reading and writing to a deployed SoroWill contract |
 | `DEFAULT_CONTRACT_IDS` | const | `SoroWillClient` | Maintainer-managed default contract address per network; kept in sync with `deployments/` in the contracts repo |
 
+### Custom signing flow (advanced)
+
+For applications that need custom signing logic (e.g. multi-sig, custom key derivation), the following `SoroWillClient` instance methods support building and submitting transactions step-by-step:
+
+| Method | Description |
+|---|---|
+| `buildTransaction(method, args, sourcePublicKey?)` | Builds an **unsigned, unprepared** transaction for a contract invocation. Must be passed to `prepareTransaction()` (for simulation and fees) before signing. |
+| `prepareTransaction(unsignedTxXdr)` | Simulates an unsigned transaction and attaches the footprint and resource fee estimates required by Soroban. Must be called before signing. |
+| `submitSignedTransaction(signedTxXdr, options?)` | Submits a signed, prepared transaction and waits for it to reach a terminal status. Requires the transaction to have been prepared first (contains footprint and fees). |
+
+**Important:** Signing an unprepared transaction (directly from `buildTransaction()`) will fail. The workflow is: `buildTransaction()` → `prepareTransaction()` → sign → `submitSignedTransaction()`.
+
 ### Wallet helpers (Freighter)
 
 | Export | Kind | Source module | Description |
@@ -240,7 +327,7 @@ Every top-level export from `@sorowill/sdk` is listed below. When adding a new p
 | `getDefaultWalletAdapter` | function | `wallet` | Returns `freighterAdapter`; exported for testing overrides |
 | `FreighterWalletAdapter` | class | `wallet` | Class form of the Freighter adapter |
 
-### Wallet adapters
+### Wallet adapter exports
 
 | Export | Kind | Source module | Description |
 |---|---|---|---|
@@ -431,7 +518,7 @@ globalThis.fetch = fetch;
 
 Popular polyfill packages: [`node-fetch`](https://github.com/node-fetch/node-fetch) (v3+, ESM), [`cross-fetch`](https://github.com/lquixada/cross-fetch) (CJS and ESM).
 
-> **Note:** Node.js 18+ ships with a built-in global `fetch` (unflagged in 21+). If your `engines` field targets `>=18`, no polyfill is needed.
+> **Note:** The SDK currently targets Node.js 22+; this matches the active CI and the current `vitest`/`jsdom` runtime requirements, so no fetch polyfill is needed.
 
 ## Scripts, automation, and testing (KeypairSigner)
 
@@ -491,10 +578,55 @@ console.log('Created will', willId);
 
 ```ts
 interface WalletAdapter {
+  /**
+   * Reports whether the wallet is currently connected.
+   * Should return true only after a successful connect() call.
+   */
+  isConnected(): Promise<boolean>;
+
+  /**
+   * Initiates wallet connection and returns the connected account's details.
+   * Should be called once at app startup or when the user selects the wallet.
+   */
+  connect(): Promise<WalletConnection>;
+
+  /**
+   * Reconnects to a previously connected wallet without user interaction.
+   * Used for restoring state across page reloads or app restarts.
+   */
+  reconnect(): Promise<WalletConnection>;
+
+  /**
+   * Disconnects the wallet and clears all session state.
+   */
+  disconnect(): Promise<void>;
+
+  /**
+   * Returns the public key (Stellar address) of the connected account.
+   * Throws if called before connect() or after disconnect().
+   */
   getPublicKey(): Promise<string>;
-  signTransaction(transactionXdr: string, opts: { networkPassphrase: string }): Promise<string>;
-  // Optional: lets the client cross-check the wallet's active network (see below).
+
+  /**
+   * Signs a transaction with the connected account.
+   * The transaction XDR is modified in-place with the account's signature.
+   * Typically displays a user confirmation prompt (e.g., from a browser extension).
+   */
+  signTransaction(transactionXdr: string, opts: { networkPassphrase: string; timeoutMs?: number }): Promise<string>;
+
+  /**
+   * Optional: Reports the network this wallet is currently set to.
+   * If implemented, the client can cross-check the wallet's active network
+   * against the client's configured network and throw WalletNetworkMismatchError
+   * before building a transaction (see below).
+   */
   getNetwork?(): Promise<{ network: string; networkPassphrase: string }>;
+}
+
+interface WalletConnection {
+  publicKey: string;
+  network: string;
+  networkPassphrase: string;
 }
 ```
 
@@ -510,9 +642,9 @@ const client = new SoroWillClient({
 });
 ```
 
-Supporting another wallet (xBull, Rabet, Lobstr, …) is just a matter of implementing the two `WalletAdapter` methods and passing your object as `wallet`.
+Supporting another wallet (xBull, Rabet, Lobstr, …) requires implementing all six `WalletAdapter` methods and passing your object as the `wallet` option.
 
-## Wallet adapters
+## Using wallet adapters
 
 All adapters implement `WalletAdapter`, whose `connect`, `disconnect`,
 `isConnected`, `getPublicKey`, and `signTransaction` methods make it possible

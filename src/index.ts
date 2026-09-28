@@ -1,4 +1,4 @@
-export { SoroWillClient } from './SoroWillClient';
+export { SoroWillClient, parseWillId, SoroWillInvalidIdError } from './SoroWillClient';
 export type {
   EventSubscription,
   EventSubscriptionOptions,
@@ -123,8 +123,11 @@ export {
   InvalidPercentagesError,
   InvalidPeriodError,
   InvalidPreimageError,
+  InvalidPublicKeyError,
+  InvalidSecretKeyError,
   InvalidSplitError,
   InvalidTokenError,
+  InvalidTransactionXdrError,
   InvokeFailedError,
   KeeperBountyExceedsMaxError,
   MergeWouldExceedLimitsError,
@@ -157,9 +160,10 @@ export {
   WillNotTriggeredError,
   ZeroAmountError,
   mapContractError,
+  UnsupportedBatchSizeError,
 } from './errors';
 
-export { RequestQueue } from './requestQueue';
+export { RequestQueue, RequestPriority } from './requestQueue';
 export type { RequestQueueOptions } from './requestQueue';
 
 export { buildSep7TxUri, parseSep7Callback } from './sep7';

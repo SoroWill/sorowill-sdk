@@ -280,7 +280,9 @@ describe('SoroWillClient public methods', () => {
     const result = await client.createWill({
       token: 'CTOKEN',
       amount: '1000000',
-      beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+      beneficiaries: [
+        { address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 },
+      ],
       checkinPeriodDays: 90,
       gracePeriodDays: 7,
       guardians: [],
@@ -350,7 +352,9 @@ describe('SoroWillClient public methods', () => {
     });
     const result = await client.updateBeneficiaries({
       willId: '1',
-      beneficiaries: [{ address: 'GBEN2', percentage: 100 }],
+      beneficiaries: [
+        { address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 },
+      ],
     });
     expect(result.txHash).toBe('abc123');
   });

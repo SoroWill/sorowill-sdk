@@ -74,18 +74,22 @@ describe('Dependency/Supply-Chain Audit Workflow', () => {
   });
 
   describe('dependency audit policies', () => {
-    it('production dependencies have no known high/critical vulnerabilities', () => {
-      const result = spawnSync('npm', ['audit', '--omit=dev', '--audit-level=high', '--json'], {
-        cwd: projectRoot,
-        encoding: 'utf-8',
-      });
+    it(
+      'production dependencies have no known high/critical vulnerabilities',
+      () => {
+        const result = spawnSync('npm', ['audit', '--omit=dev', '--audit-level=high', '--json'], {
+          cwd: projectRoot,
+          encoding: 'utf-8',
+        });
 
-      const report = JSON.parse(result.stdout || '{}');
-      const highOrCriticalCount =
-        (report.metadata?.vulnerabilities?.high ?? 0) + (report.metadata?.vulnerabilities?.critical ?? 0);
+        const report = JSON.parse(result.stdout || '{}');
+        const highOrCriticalCount =
+          (report.metadata?.vulnerabilities?.high ?? 0) + (report.metadata?.vulnerabilities?.critical ?? 0);
 
-      expect(highOrCriticalCount).toBe(0);
-    });
+        expect(highOrCriticalCount).toBe(0);
+      },
+      30_000,
+    );
   });
 
   describe('CI/CD audit integration', () => {

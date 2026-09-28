@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SoroWillClient.forNetwork(network, overrides?)` static convenience constructor that resolves the maintainer-managed default `contractId` per network from `DEFAULT_CONTRACT_IDS`, while still allowing a full override via the optional `overrides` argument (closes #117).
 - `DEFAULT_CONTRACT_IDS` exported constant mapping each `SoroWillNetwork` to its current default contract address (closes #117).
 - Full public API export table added to README, listing every top-level export with its kind, source module, and a one-line description (closes #119).
-- CI test matrix now covers both Node 18 and Node 20, matching the `engines` field in `package.json` (closes #116).
+- Node.js 22 is the minimum supported runtime for the SDK; the package metadata, docs, and CI are aligned to the current toolchain requirements (closes #226).
 - Unit tests for `cancelWill` `refundAmount` correctness, including the primary (contract-returned value) and fallback (pre-call `getWill` balance) paths; the known race with a concurrent `topUp` is documented as a known limitation (closes #118).
 
 ### Changed

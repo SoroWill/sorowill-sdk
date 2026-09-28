@@ -24,7 +24,11 @@ vi.mock('@stellar/freighter-api', () => ({
   default: freighterApiMock,
 }));
 
-vi.mock('@stellar/stellar-sdk', () => {
+vi.mock('@stellar/stellar-sdk', async () => {
+  const { StrKey } = await vi.importActual<typeof import('@stellar/stellar-sdk')>(
+    '@stellar/stellar-sdk',
+  );
+
   class MockAccount {
     constructor(
       public readonly accountId: string,
@@ -107,6 +111,7 @@ vi.mock('@stellar/stellar-sdk', () => {
     Account: MockAccount,
     BASE_FEE: '100',
     Contract: MockContract,
+    StrKey,
     Networks: {
       PUBLIC: 'PUBLIC',
       TESTNET: 'TESTNET',
@@ -542,7 +547,9 @@ describe('SoroWillClient', () => {
       await expect(
         client.createWill({
           token: 'CTOKEN',
-          beneficiaries: [{ address: 'GBENEFICIARY', percentage: 100 }],
+          beneficiaries: [
+            { address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 },
+          ],
           amount: '1000000',
           checkinPeriodDays: 30,
           gracePeriodDays: 7,
