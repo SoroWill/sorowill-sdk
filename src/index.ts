@@ -79,6 +79,7 @@ export {
   LocalStorageWalletConnectSessionStore,
   MemoryWalletConnectSessionStore,
   WalletConnectAdapter,
+  WalletConnectTimeoutError,
 } from './walletConnect';
 export type {
   WalletConnectAdapterOptions,

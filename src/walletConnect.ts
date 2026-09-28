@@ -56,6 +56,16 @@ export interface WalletConnectAdapterOptions {
   getPublicKeyFromSession?(session: WalletConnectSession): string;
   getNetworkFromSession?(session: WalletConnectSession): { network: string; networkPassphrase: string };
   getSignedTransactionXdr?(response: unknown): string;
+  /**
+   * Maximum time in milliseconds to wait for the wallet to approve a
+   * WalletConnect session.  If `connection.approval()` does not resolve
+   * within this window the pending connection is cleaned up and
+   * {@link WalletConnectTimeoutError} is thrown.
+   *
+   * Defaults to **30 000 ms** (30 seconds).  Set to `0` to disable the
+   * timeout entirely (not recommended for production use).
+   */
+  connectionTimeoutMs?: number;
 }
 
 const DEFAULT_REQUIRED_NAMESPACES: Record<string, WalletConnectSessionNamespace> = {
@@ -67,6 +77,31 @@ const DEFAULT_REQUIRED_NAMESPACES: Record<string, WalletConnectSessionNamespace>
 };
 
 const DEFAULT_DISCONNECT_REASON = { code: 6000, message: 'Disconnected by client' };
+
+/** Default connection timeout: 30 seconds. */
+const DEFAULT_CONNECTION_TIMEOUT_MS = 30_000;
+
+/**
+ * Raised when a WalletConnect session establishment does not complete within
+ * the configured {@link WalletConnectAdapterOptions.connectionTimeoutMs} window.
+ *
+ * When this error is thrown the adapter cleans up any in-progress pairing so
+ * the application is not left in an indeterminate state.
+ */
+export class WalletConnectTimeoutError extends Error {
+  /** The timeout value (in milliseconds) that was exceeded. */
+  readonly timeoutMs: number;
+
+  constructor(timeoutMs: number, options?: ErrorOptions) {
+    super(
+      `WalletConnect session approval timed out after ${timeoutMs}ms. ` +
+        'The wallet did not respond in time. Please try connecting again.',
+      options,
+    );
+    this.name = 'WalletConnectTimeoutError';
+    this.timeoutMs = timeoutMs;
+  }
+}
 
 function getFirstAccount(session: WalletConnectSession): string | undefined {
   const namespaces = session.namespaces ?? {};
@@ -226,7 +261,45 @@ export class WalletConnectAdapter implements WalletAdapter {
       await this.options.onPairingUri?.(connection.uri);
     }
 
-    const session = await connection.approval();
+    // Enforce a connection timeout so that a hanging wallet approval does not
+    // leave the application in an indeterminate pending state.
+    const timeoutMs =
+      this.options.connectionTimeoutMs !== undefined
+        ? this.options.connectionTimeoutMs
+        : DEFAULT_CONNECTION_TIMEOUT_MS;
+
+    let session: WalletConnectSession;
+    if (timeoutMs > 0) {
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+      const timeoutPromise = new Promise<never>((_resolve, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new WalletConnectTimeoutError(timeoutMs));
+        }, timeoutMs);
+      });
+
+      try {
+        session = await Promise.race([connection.approval(), timeoutPromise]);
+      } catch (err) {
+        clearTimeout(timeoutHandle);
+        // Clean up the pairing session to avoid leaving the WalletConnect
+        // client in an indefinite pending state.
+        try {
+          await this.client.disconnect({
+            topic: '',
+            reason: { code: 6001, message: 'Connection timed out' },
+          });
+        } catch {
+          // Ignore cleanup errors — the disconnect may fail if the pairing
+          // was never fully established.
+        }
+        throw err;
+      }
+      clearTimeout(timeoutHandle);
+    } else {
+      session = await connection.approval();
+    }
+
     return this.useSession(session);
   }
 
