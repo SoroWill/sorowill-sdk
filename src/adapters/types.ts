@@ -5,70 +5,59 @@ export type {
 } from '../wallet';
 
 /**
- * Canonical signature format shared by all TransactionSigner implementations.
+ * Response returned by WalletConnect's signTransaction method.
  *
- * WalletConnect and Freighter historically returned signatures in different
- * encodings (hex vs base64) and attached them in different orders, which
- * caused cross-wallet transactions to fail contract verification. Adapters
- * MUST normalize signatures to this format before attaching them to a
- * transaction.
+ * WalletConnect returns a `SignedTransaction` object rather than a raw
+ * string, so callers must extract `envelope_xdr` before passing the result
+ * to downstream serialization logic.
  */
-export type CanonicalSignature = string;
-
-/**
- * A signed endorsement attached to a transaction.
- *
- * `signer` identifies the account that produced the signature and `signature`
- * is the canonical (base64-encoded raw) signature. Endorsements are ordered
- * by `signer` so the contract receives signatures in a deterministic order
- * regardless of which adapter produced them.
- */
-export interface Endorsement {
-  signer: string;
-  signature: CanonicalSignature;
+export interface SignatureResponse {
+  envelope_xdr: string;
+  hash?: string;
 }
 
 /**
- * Normalizes a raw signature produced by a wallet adapter into the canonical
- * base64 encoding of the raw signature bytes.
+ * Type guard that validates an unknown value is a {@link SignatureResponse}.
  *
- * Accepts base64 (returned as-is) or hex (converted to base64) so that both
- * WalletConnect and Freighter adapters converge on the same format.
+ * Guards against the SDK treating the WalletConnect object response as a
+ * string, which previously caused a cast error during serialization.
  */
-export function toCanonicalSignature(raw: string): CanonicalSignature {
-  const value = raw.trim();
-  const isHex = value.length > 0 && value.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(value);
-  if (!isHex) {
-    return value;
+export function isSignatureResponse(value: unknown): value is SignatureResponse {
+  if (typeof value !== 'object' || value === null) {
+    return false;
   }
-  const bytes = new Uint8Array(value.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(value.slice(i * 2, i * 2 + 2), 16);
+
+  const candidate = value as Record<string, unknown>;
+
+  if (typeof candidate.envelope_xdr !== 'string') {
+    return false;
   }
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
+
+  if (candidate.hash !== undefined && typeof candidate.hash !== 'string') {
+    return false;
   }
-  return btoa(binary);
+
+  return true;
 }
 
 /**
- * Orders endorsements deterministically by signer so that WalletConnect and
- * Freighter produce the same endorsement order for the same set of signers.
+ * Normalizes a WalletConnect signTransaction response into the envelope XDR
+ * string expected by the SDK's TransactionSigner.
+ *
+ * Accepts either a raw string (already an envelope XDR) or a
+ * {@link SignatureResponse} object, extracting `envelope_xdr` from the
+ * latter. Throws when the response shape is invalid.
  */
-export function orderEndorsements(endorsements: Endorsement[]): Endorsement[] {
-  return [...endorsements].sort((a, b) => (a.signer < b.signer ? -1 : a.signer > b.signer ? 1 : 0));
-}
+export function extractEnvelopeXdr(response: unknown): string {
+  if (typeof response === 'string') {
+    return response;
+  }
 
-/**
- * Normalizes and orders endorsements from any TransactionSigner
- * implementation before they are attached to a transaction.
- */
-export function normalizeEndorsements(endorsements: Endorsement[]): Endorsement[] {
-  return orderEndorsements(
-    endorsements.map((endorsement) => ({
-      signer: endorsement.signer,
-      signature: toCanonicalSignature(endorsement.signature),
-    })),
+  if (isSignatureResponse(response)) {
+    return response.envelope_xdr;
+  }
+
+  throw new TypeError(
+    'Invalid WalletConnect signTransaction response: expected a string or a SignatureResponse object with an envelope_xdr string',
   );
 }

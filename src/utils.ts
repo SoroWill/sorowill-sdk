@@ -3,8 +3,18 @@ import { StrKey } from '@stellar/stellar-sdk';
 import type { Beneficiary, Will } from './types';
 import { WillStatus } from './types';
 
-/** USDC (and most Soroban SEP-41 tokens) use 7 decimal places, matching classic Stellar asset precision. */
-const USDC_DECIMALS = 7;
+/**
+ * Default decimal precision assumed by {@link formatUSDC} and
+ * {@link toStroops} when the caller does not supply an explicit `decimals`
+ * value.
+ *
+ * **Assumption**: this default of 6 matches canonical USDC on most chains
+ * (Ethereum, Polygon, etc.). USDC-like or bridged tokens can use a different
+ * scale (e.g. 7 decimals for classic Stellar asset precision, or 8 for some
+ * wrapped tokens), so callers handling such tokens must pass the token's
+ * actual `decimals` explicitly to avoid displaying incorrect amounts.
+ */
+const USDC_DECIMALS = 6;
 
 /**
  * Approximate Soroban ledger close time, in milliseconds. Matches the
@@ -15,41 +25,107 @@ const USDC_DECIMALS = 7;
 export const SOROBAN_LEDGER_CLOSE_TIME_MS = 5_000;
 
 /**
+ * Generates a random nonce for transaction building.
+ *
+ * **Security assumption**: nonces MUST be unpredictable. An attacker who can
+ * predict a nonce can preempt the transaction (e.g. by front-running it with
+ * a colliding transaction ID). This function therefore uses the platform
+ * CSPRNG (`crypto.getRandomValues`) rather than `Math.random()`, which is
+ * seeded deterministically and trivially predictable.
+ *
+ * Returns a 32-character lowercase hex string (128 bits of entropy).
+ */
+export function generateRandomNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
  * Formats a base-unit token amount (e.g. contract-side `i128` stroops) as a
  * human-readable decimal string with thousands separators, e.g.
  * `formatUSDC(12345000000n) === "1,234.50"`.
+ *
+ * The result always has exactly two fractional digits. Sub-cent amounts are
+ * rounded half up (away from zero for negative values), so
+ * `formatUSDC(19_990_000n) === "2.00"` and `formatUSDC(19_949_999n) === "1.99"`.
  */
 export function formatUSDC(stroops: bigint, decimals = USDC_DECIMALS): string {
   const negative = stroops < 0n;
   const absolute = negative ? -stroops : stroops;
   const base = 10n ** BigInt(decimals);
-  const whole = absolute / base;
-  const fraction = absolute % base;
-  const cents = fraction / 10n ** BigInt(Math.max(decimals - 2, 0));
+  const totalCents = (absolute * 100n + base / 2n) / base;
+  const whole = totalCents / 100n;
+  const cents = totalCents % 100n;
 
   const wholeFormatted = whole.toLocaleString('en-US');
-  const centsFormatted = cents.toString().padStart(2, '0');
 
-  return `${negative ? '-' : ''}${wholeFormatted}.${centsFormatted}`;
+  if (decimals <= 0) {
+    return `${negative ? '-' : ''}${wholeFormatted}`;
+  }
+
+  const fractionFormatted = fraction.toString().padStart(decimals, '0').replace(/0+$/, '');
+
+  return fractionFormatted === ''
+    ? `${negative ? '-' : ''}${wholeFormatted}`
+    : `${negative ? '-' : ''}${wholeFormatted}.${fractionFormatted}`;
+}
+
+/**
+ * Expands a number written in scientific notation (e.g. `"1e-8"`,
+ * `"1.5e3"`, `"-2.5E-4"`) into its equivalent plain decimal string, so the
+ * rest of {@link toStroops} can parse it with the same logic used for
+ * standard decimal notation. Returns `null` when `value` is not valid
+ * scientific notation.
+ */
+function expandScientificNotation(value: string): string | null {
+  const match = /^(-?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const [, sign, intPart, fracPart = '', expPart] = match;
+  const exponent = Number(expPart);
+  const digits = intPart + fracPart;
+  // Position of the decimal point relative to `digits` after applying the exponent.
+  const pointPos = intPart.length + exponent;
+
+  let expanded: string;
+  if (pointPos <= 0) {
+    expanded = `0.${'0'.repeat(-pointPos)}${digits}`;
+  } else if (pointPos >= digits.length) {
+    expanded = `${digits}${'0'.repeat(pointPos - digits.length)}`;
+  } else {
+    expanded = `${digits.slice(0, pointPos)}.${digits.slice(pointPos)}`;
+  }
+
+  return `${sign}${expanded}`;
 }
 
 /**
  * Parses a human-readable decimal USDC string (e.g. `"1234.50"` or
  * `"1,234.5"`) into base units (stroops), as a `bigint`.
  *
- * `decimals` controls the token's precision and defaults to 7 (classic
- * Stellar / most SEP-41 tokens). Pass 6 for USDC, for example, so that
- * `toStroops("1", 6) === 1_000_000n`.
+ * `decimals` is the token's on-chain decimal precision and defaults to
+ * {@link USDC_DECIMALS} (6). Pass the token's actual `decimals` when it is
+ * not 6 so the parsed base units match the token's scale.
+ *
+ * Scientific notation (e.g. `"1e-8"`) is expanded to standard decimal
+ * notation before the `decimals` offset is applied, so
+ * `toStroops("1e-8", 8) === 100000000n`.
  */
 export function toStroops(usdc: string, decimals = USDC_DECIMALS): bigint {
   const cleaned = usdc.replace(/,/g, '').trim();
-  if (cleaned === '' || !/^-?\d*\.?\d*$/.test(cleaned) || cleaned === '-' || cleaned === '.') {
+  const expanded = expandScientificNotation(cleaned) ?? cleaned;
+  if (expanded === '' || !/^-?\d*\.?\d*$/.test(expanded) || expanded === '-' || expanded === '.') {
     throw new Error(`Invalid USDC amount: "${usdc}"`);
   }
 
   const negative = cleaned.startsWith('-');
   const unsigned = negative ? cleaned.slice(1) : cleaned;
-  const [wholePart = '', fractionPart = ''] = unsigned.split('.');
+  const [wholePart = '', rawFraction = ''] = unsigned.split('.');
+  // Trailing zeros carry no precision, so "1.50" is valid even for 1-decimal tokens.
+  const fractionPart = rawFraction.replace(/0+$/, '');
   if (fractionPart.length > decimals) {
     throw new Error(
       `Invalid USDC amount: "${usdc}" has more than ${decimals} fractional digits, which would silently lose precision.`,
@@ -87,7 +163,7 @@ export function isCheckinDue(will: Will): boolean {
  *
  * This function mirrors the Rust contract's `distribute()` function in the
  * SoroWill contracts repository:
- * https://github.com/SoroWill/sorowill-contracts/blob/main/contracts/sorowill/src/contract.rs
+ * https://github.com/SoroWill/sorowill-contracts/blob/main/contracts/will/src/lib.rs
  * (see `fn distribute` — integer division with remainder assigned to the
  * last beneficiary). Keep this implementation in sync with any changes to
  * that contract function.
@@ -142,7 +218,7 @@ export function formatDeadline(date: Date): string {
  * Maximum number of beneficiaries the SoroWill contract allows per will.
  *
  * **IMPORTANT**: This value mirrors the `MAX_BENEFICIARIES` constant in the
- * contract's `errors.rs` and must be kept in sync manually until the
+ * contract's `contracts/will/src/lib.rs` and must be kept in sync manually until the
  * contracts repo ships automated spec-drift tooling (issue #122).
  */
 export const MAX_BENEFICIARIES = 10;
@@ -151,15 +227,16 @@ export const MAX_BENEFICIARIES = 10;
  * Maximum number of guardians the SoroWill contract allows per will.
  *
  * **IMPORTANT**: This value mirrors the `MAX_GUARDIANS` constant in the
- * contract's `errors.rs` and must be kept in sync manually until the
+ * contract's `contracts/will/src/lib.rs` and must be kept in sync manually until the
  * contracts repo ships automated spec-drift tooling (issue #122).
  */
 export const MAX_GUARDIANS = 3;
 
 /**
  * Validates that a beneficiary list is well-formed: non-empty, at most
- * {@link MAX_BENEFICIARIES} entries, every percentage is a positive
- * integer, and percentages sum to exactly 100.
+ * {@link MAX_BENEFICIARIES} entries, no duplicate addresses (compared
+ * case-insensitively), every percentage is a positive integer, and
+ * percentages sum to exactly 100.
  *
  * Percentages are on the SDK's 0-100 scale. `SoroWillClient` scales them to
  * the contract's basis points (summing to 10,000) when it submits a
@@ -172,11 +249,24 @@ export function validateBeneficiaries(beneficiaries: Beneficiary[]): boolean {
   if (!beneficiaries.every((b) => StrKey.isValidEd25519PublicKey(b.address))) {
     return false;
   }
+  if (hasDuplicateBeneficiaries(beneficiaries)) {
+    return false;
+  }
   if (!beneficiaries.every((b) => Number.isInteger(b.percentage) && b.percentage > 0)) {
     return false;
   }
   const sum = beneficiaries.reduce((acc, b) => acc + b.percentage, 0);
   return sum === 100;
+}
+
+/**
+ * Returns whether two or more entries in `beneficiaries` share the same
+ * address (compared case-insensitively), which the contract rejects with
+ * `WillError::DuplicateBeneficiary`.
+ */
+export function hasDuplicateBeneficiaries(beneficiaries: Beneficiary[]): boolean {
+  const addresses = new Set(beneficiaries.map((b) => b.address.toUpperCase()));
+  return addresses.size !== beneficiaries.length;
 }
 
 /** Returns whether `address` is one of `will`'s guardians. */
