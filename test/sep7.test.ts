@@ -20,7 +20,7 @@ describe('buildSep7TxUri', () => {
       callbackUrl: 'https://example.com/callback',
       message: 'Sign this transaction',
     });
-    expect(result).toContain('msg=Sign+this+transaction');
+    expect(result).toContain('msg=Sign%20this%20transaction');
     expect(result).toContain('xdr=AAAAAAAA');
     expect(result).toContain('callback=url%3Ahttps%3A%2F%2Fexample.com%2Fcallback');
   });
@@ -30,7 +30,7 @@ describe('buildSep7TxUri', () => {
       callbackUrl: 'https://example.com/callback',
       networkPassphrase: 'Test SDF Network ; September 2015',
     });
-    expect(result).toContain('network_passphrase=Test+SDF+Network+%3B+September+2015');
+    expect(result).toContain('network_passphrase=Test%20SDF%20Network%20%3B%20September%202015');
   });
 
   it('builds URI with optional originDomain parameter', () => {
@@ -50,8 +50,8 @@ describe('buildSep7TxUri', () => {
     });
     expect(result).toContain('xdr=AAAAAAAA');
     expect(result).toContain('callback=url%3Ahttps%3A%2F%2Fexample.com%2Fcallback');
-    expect(result).toContain('msg=Sign+this+transaction');
-    expect(result).toContain('network_passphrase=Test+SDF+Network+%3B+September+2015');
+    expect(result).toContain('msg=Sign%20this%20transaction');
+    expect(result).toContain('network_passphrase=Test%20SDF%20Network%20%3B%20September%202015');
     expect(result).toContain('origin_domain=example.com');
   });
 

@@ -74,13 +74,23 @@ function normalizeSep7Params(input: string | URL | URLSearchParams): URLSearchPa
 }
 
 /**
- * SEP-7 requires parameter values to be percent-encoded so that reserved
- * characters (?, &, =, #, spaces, etc.) inside values such as callback URLs
- * do not break URI parsing. URLSearchParams encodes spaces as `+`, which is
- * not valid in a URI query string, so we additionally normalize `+` to `%20`.
+ * Builds a percent-encoded query string for a SEP-7 URI.
+ *
+ * `URLSearchParams.toString()` encodes spaces as `+` (application/x-www-form-urlencoded),
+ * which is not valid in a URI query string. We use `encodeURIComponent` directly on
+ * each key-value pair to produce proper percent-encoding (`%20` for spaces,
+ * `%3A` for colons, etc.) that is unambiguous in all URI contexts and deeplink handlers.
+ *
+ * Additionally, the SEP-7 `callback` field requires the `url:` prefix to be
+ * included in the encoded value so deeplink handlers can distinguish it from
+ * a plain URL. We encode the full `url:<callbackUrl>` string as a single unit.
  */
 function encodeSep7Params(params: URLSearchParams): string {
-  return params.toString().replace(/\+/g, '%20');
+  const parts: string[] = [];
+  params.forEach((value, key) => {
+    parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+  });
+  return parts.join('&');
 }
 
 export function buildSep7TxUri(transactionXdr: string, options: BuildSep7TxUriOptions): string {

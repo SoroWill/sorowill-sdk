@@ -96,9 +96,9 @@ describe('buildSep7SigningUri', () => {
 
     // The client's networkPassphrase should be encoded in the URI
     expect(uri).toContain('network_passphrase=');
-    // buildSep7TxUri uses application/x-www-form-urlencoded encoding (spaces as +)
-    const formEncodedPassphrase = Networks.TESTNET.replace(/ /g, '+').replace(/;/g, '%3B');
-    expect(uri).toContain(`network_passphrase=${formEncodedPassphrase}`);
+    // buildSep7TxUri uses encodeURIComponent (spaces as %20, semicolons as %3B)
+    const encodedPassphrase = encodeURIComponent(Networks.TESTNET);
+    expect(uri).toContain(`network_passphrase=${encodedPassphrase}`);
   });
 
   it('uses the provided network passphrase when options.networkPassphrase is specified', async () => {
@@ -120,9 +120,9 @@ describe('buildSep7SigningUri', () => {
 
     // The custom networkPassphrase should be encoded in the URI
     expect(uri).toContain('network_passphrase=');
-    // buildSep7TxUri uses application/x-www-form-urlencoded encoding (spaces as +)
-    const formEncodedPassphrase = customPassphrase.replace(/ /g, '+').replace(/;/g, '%3B');
-    expect(uri).toContain(`network_passphrase=${formEncodedPassphrase}`);
+    // buildSep7TxUri uses encodeURIComponent (spaces as %20, semicolons as %3B)
+    const encodedPassphrase = encodeURIComponent(customPassphrase);
+    expect(uri).toContain(`network_passphrase=${encodedPassphrase}`);
   });
 
   it('includes optional message parameter in the URI when provided', async () => {
@@ -142,7 +142,7 @@ describe('buildSep7SigningUri', () => {
     );
 
     expect(uri).toContain('msg=');
-    expect(uri).toContain('Sign+to+check+in+on+your+will');
+    expect(uri).toContain('Sign%20to%20check%20in%20on%20your%20will');
   });
 
   it('includes optional originDomain parameter in the URI when provided', async () => {

@@ -598,7 +598,7 @@ describe('SEP-7 helpers', () => {
     expect(uri).toContain('web+stellar:tx?');
     expect(uri).toContain('xdr=AAAA');
     expect(uri).toContain('callback=url%3Ahttps%3A%2F%2Fexample.com%2Fcallback');
-    expect(uri).toContain('msg=Sign+this+will+operation');
+    expect(uri).toContain('msg=Sign%20this%20will%20operation');
   });
 
   it('parses a callback url carrying a signed xdr result', () => {
