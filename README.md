@@ -283,6 +283,21 @@ const client = new SoroWillClient({
 });
 ```
 
+Alternatively, set the `SOROWILL_DEBUG` environment variable to any non-empty value. This is useful in CI scripts, automated tests, and server-side Node.js scripts where passing a constructor flag is not convenient:
+
+```bash
+SOROWILL_DEBUG=1 node my-script.mjs
+```
+
+### Production safety guard
+
+Debug logging is automatically suppressed in production environments, even if `debug: true` is passed to the constructor. The SDK detects production mode via:
+
+- **Node.js / server-side:** `process.env.NODE_ENV === 'production'`
+- **Vite / browser bundlers:** `import.meta.env.MODE === 'production'`
+
+This means debug logging can safely be left enabled in non-production builds without the risk of it emitting logs in your production deployment. If you need structured logging in production, route it through your own observability pipeline instead of the built-in console logger.
+
 ### Log output format
 
 The logger emits structured JSON to the console (via `console.log`) at each step of an operation. For example, you should expect to see logs like:
