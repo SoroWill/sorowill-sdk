@@ -136,6 +136,7 @@ export {
   GracePeriodExpiredError,
   GracePeriodNotExpiredError,
   GuardianCooldownActiveError,
+  HookExecutionError,
   InsufficientBalanceError,
   InvalidContractIdError,
   InvalidDayCountError,
