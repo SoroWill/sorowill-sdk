@@ -7,6 +7,41 @@ export class SoroWillError extends Error {
 }
 
 /**
+ * Raised when a `beforeInvoke` hook throws an error. The original error is
+ * available as the standard `cause` property. When this error is thrown, the
+ * transaction has not been built or signed — no state-changing operation was
+ * submitted to the network.
+ *
+ * @example
+ * ```ts
+ * hooks.onBeforeInvoke((ctx) => {
+ *   if (!ctx.args.willId) throw new Error('willId is required');
+ * });
+ *
+ * try {
+ *   await client.checkIn('42');
+ * } catch (err) {
+ *   if (err instanceof HookExecutionError) {
+ *     console.error('Hook failed:', err.hookName, err.cause);
+ *   }
+ * }
+ * ```
+ */
+export class HookExecutionError extends SoroWillError {
+  /** The name of the lifecycle phase where the hook failed ('beforeInvoke'). */
+  readonly hookName: string;
+
+  constructor(hookName: string, cause: unknown, options?: ErrorOptions) {
+    const message =
+      cause instanceof Error
+        ? `${hookName} hook threw an error: ${cause.message}`
+        : `${hookName} hook threw an error: ${String(cause)}`;
+    super(message, { ...options, cause });
+    this.hookName = hookName;
+  }
+}
+
+/**
  * Raised when an amount string passed to {@link SoroWillClient.createWill} or
  * {@link SoroWillClient.topUp} is not a valid positive integer. This catches
  * zero, negative, and malformed (non-numeric) strings before they reach

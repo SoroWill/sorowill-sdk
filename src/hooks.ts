@@ -1,5 +1,6 @@
-/**
- * Context object passed to beforeInvoke hooks.
+import { HookExecutionError } from './errors';
+
+
  * Contains all information about the contract call about to be made.
  */
 export interface BeforeInvokeContext {
@@ -107,10 +108,19 @@ export class HookManager {
     this.registry.afterInvoke.length = 0;
   }
 
-  /** @internal Run all beforeInvoke hooks. Returns `false` if any hook aborted. */
+  /** @internal Run all beforeInvoke hooks. Returns `false` if any hook aborted.
+   * If any hook throws, the error is wrapped in a `HookExecutionError` and
+   * re-thrown immediately. The transaction is not built or submitted when a
+   * hook throws — the client state is unchanged.
+   */
   async runBeforeInvoke(ctx: BeforeInvokeContext): Promise<boolean> {
     for (const hook of this.registry.beforeInvoke) {
-      const result = await hook(ctx);
+      let result: boolean | void;
+      try {
+        result = await hook(ctx);
+      } catch (err) {
+        throw new HookExecutionError('beforeInvoke', err);
+      }
       if (result === false) return false;
     }
     return true;
