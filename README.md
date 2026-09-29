@@ -59,6 +59,70 @@ If you only use another adapter (e.g. `createAlbedoAdapter()`, `WalletConnectAda
 
 For older environments, you can polyfill `fetch` using [`node-fetch`](https://www.npmjs.com/package/node-fetch) (v3+, ESM) or [`cross-fetch`](https://www.npmjs.com/package/cross-fetch). See [Custom fetch](#custom-fetch--environments-without-a-global-fetch) for setup instructions.
 
+### CommonJS vs ESM
+
+`@sorowill/sdk` is published as **ES Modules (ESM) only**. The package sets `"type": "module"` and ships a single ESM bundle — there is no CommonJS build.
+
+- **ESM (recommended):** Works out of the box in Node.js 22+, Vite, esbuild, and Webpack 5+.
+- **CommonJS (`require`):** Not supported. If your project uses CommonJS, you must either migrate to ESM (`import`) or use a [dynamic `import()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import) expression to load the SDK asynchronously.
+
+The React sub-path (`@sorowill/sdk/react`) also uses static `import` syntax and is fully compatible with ESM-only bundlers. It does **not** use `createRequire` or any CommonJS interop.
+
+### Bundler setup
+
+| Bundler | Minimum version | Notes |
+|---|---|---|
+| **Vite** | 4.x+ | Works without extra config. If you hit `Can't resolve '@stellar/stellar-sdk'`, add it to `optimizeDeps.include` — see [Vite setup](#vite) below. |
+| **esbuild** | 0.17+ | Pass `--bundle --format=esm`. The SDK is ESM-only; `--format=cjs` is not supported. |
+| **Webpack** | 5.x+ | Ensure `experiments.outputModule: true` or use `type: 'module'` in output. |
+| **Next.js** | 13+ (App Router) | Add the SDK and `@stellar/stellar-sdk` to `transpilePackages` — see [Next.js setup](#nextjs) below. |
+| **Rollup** | 3.x+ | Works without extra config; use `@rollup/plugin-node-resolve` with `exportConditions: ['import']`. |
+
+#### Vite
+
+No special config is required for most projects. If Vite reports a pre-bundling error for `@stellar/stellar-sdk` or `@sorowill/sdk`, add both to `optimizeDeps.include`:
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  optimizeDeps: {
+    include: ['@sorowill/sdk', '@stellar/stellar-sdk'],
+  },
+});
+```
+
+#### Next.js
+
+Next.js compiles dependencies through its own CommonJS pipeline by default. To use ESM packages, add them to `transpilePackages` in `next.config.js` (or `next.config.ts`):
+
+```js
+// next.config.js
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  transpilePackages: ['@sorowill/sdk', '@stellar/stellar-sdk'],
+};
+
+module.exports = nextConfig;
+```
+
+If you are on Next.js 13+ with the App Router, this is the recommended approach. For Pages Router projects on older Next.js versions, consider upgrading or using a dynamic `import()` inside `getServerSideProps` / `getStaticProps`.
+
+#### esbuild
+
+Bundle the SDK with ESM output:
+
+```bash
+esbuild src/index.ts --bundle --format=esm --platform=browser --outfile=dist/bundle.js
+```
+
+For Node.js scripts:
+
+```bash
+esbuild src/script.ts --bundle --format=esm --platform=node --outfile=dist/script.mjs
+```
+
 ## Quick Start
 
 ```ts
