@@ -8,6 +8,15 @@ interface InFlightOperation<T> {
   createdAt: number;
 }
 
+interface FailedOperation {
+  sequence: string;
+  failedAt: number;
+}
+
+const FAILED_SEQUENCE_TTL_MS = 60_000;
+const DEFAULT_MAX_IN_FLIGHT = 100;
+const DEFAULT_TTL_MS = 120_000;
+
 /**
  * Shared, process-wide tracker used to deduplicate identical concurrent
  * requests across every SoroWillClient instance (multiple tabs, workers, etc.).
@@ -18,11 +27,17 @@ interface InFlightOperation<T> {
  * `new SoroWillClient({ inFlightTracker: globalInFlightTracker })` (or simply
  * reusing a single SoroWillClient instance) makes the deduplication global.
  */
-export const globalInFlightTracker = /* @__PURE__ */ new InFlightTracker();
 
 export class InFlightTracker {
   private readonly inFlight = new Map<OperationKey, InFlightOperation<unknown>>();
   private readonly failedSequences = new Map<OperationKey, FailedOperation>();
+  private readonly maxInFlight: number;
+  private readonly ttlMs: number;
+
+  constructor(maxInFlight: number = DEFAULT_MAX_IN_FLIGHT, ttlMs: number = DEFAULT_TTL_MS) {
+    this.maxInFlight = maxInFlight;
+    this.ttlMs = ttlMs;
+  }
 
   getKey(willId: string | bigint, method: string, clientId?: string): OperationKey {
     const id = typeof willId === 'bigint' ? willId.toString() : willId;
@@ -216,3 +231,5 @@ export class InFlightTracker {
     }
   }
 }
+
+export const globalInFlightTracker = /* @__PURE__ */ new InFlightTracker();

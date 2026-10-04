@@ -51,7 +51,6 @@ import {
   InvokeFailedError,
   RequestTimeoutError,
   mapContractError,
-  RequestTimeoutError,
   SimulationError,
   SoroWillError,
   SoroWillInvalidAmountError,

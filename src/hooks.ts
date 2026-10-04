@@ -1,6 +1,6 @@
 import { HookExecutionError } from './errors';
 
-
+/**
  * Contains all information about the contract call about to be made.
  */
 export interface BeforeInvokeContext {

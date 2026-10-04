@@ -493,6 +493,9 @@ export class WalletConnectWalletAdapter implements WalletAdapter {
   disconnect(): Promise<void> {
     return this.connector.disconnect();
   }
+}
+
+const defaultFreighterWalletAdapter = new FreighterWalletAdapter();
 
 /**
  * The default {@link WalletAdapter}, backed by the Freighter browser
@@ -504,7 +507,7 @@ export const freighterAdapter: WalletAdapter = {
   connect: () => defaultFreighterWalletAdapter.connect(),
   reconnect: () => defaultFreighterWalletAdapter.reconnect(),
   disconnect: () => defaultFreighterWalletAdapter.disconnect(),
-  getPublicKey,
-  signTransaction,
+  getPublicKey: () => defaultFreighterWalletAdapter.getPublicKey(),
+  signTransaction: (xdr: string, opts: SignTransactionOptions) => defaultFreighterWalletAdapter.signTransaction(xdr, opts),
   getNetwork: () => defaultFreighterWalletAdapter.getNetwork(),
 };

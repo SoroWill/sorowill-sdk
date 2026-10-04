@@ -402,42 +402,6 @@ export class WalletConnectAdapter implements WalletAdapter {
     return extractor(response);
   }
 
-    const sessionNetwork = this.resolveNetwork(session);
-    if (opts.networkPassphrase !== sessionNetwork.networkPassphrase) {
-      throw new Error(
-        `WalletConnect session is connected to ${sessionNetwork.network} (${sessionNetwork.networkPassphrase}) but transaction is for a different network (${opts.networkPassphrase})`,
-      );
-    }
-
-    const topic = await this.sessionStore.getSessionTopic();
-    if (!topic) {
-      throw new Error('WalletConnect is not connected');
-    }
-
-    try {
-      const response = await Promise.race([
-        this.client.request({
-          topic: session.topic,
-          chainId: this.options.requestChainId ?? getDefaultChainId(session),
-          request: {
-            method: this.options.signTransactionMethod ?? 'stellar_signXDR',
-            params: this.options.getSignTransactionParams
-              ? this.options.getSignTransactionParams(transactionXdr, opts.networkPassphrase)
-              : { xdr: transactionXdr },
-          },
-        }),
-        timeoutPromise,
-      ]);
-
-      return (this.options.getSignedTransactionXdr ?? getDefaultSignedTransactionXdr)(response);
-    } finally {
-      clearTimeout(timeoutHandle!);
-    }
-
-    this.session = session;
-    return session;
-  }
-
   private useSession(session: WalletConnectSession): WalletConnection {
     this.session = session;
     this.connection = {

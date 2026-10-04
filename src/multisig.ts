@@ -339,6 +339,20 @@ export async function buildMultisigTransactionXdr(options: {
   // @ts-expect-error scArgs type mismatch between ContractSpec and stellar-sdk
   const operation = contract.call(options.method, ...scArgs);
 
-  cons
+  const account = await server.getAccount(options.sourceAccount);
+  const builderOpts: any = {
+    fee: options.fee || BASE_FEE,
+    networkPassphrase: options.networkPassphrase,
+  };
+  if (options.timeout) {
+    builderOpts.timebounds = {
+      minTime: 0,
+      maxTime: Math.floor(Date.now() / 1000) + options.timeout,
+    };
+  }
+  const builder = new TransactionBuilder(account, builderOpts);
 
-/* … truncated 1094 chars — edit only what you need near the top … */
+  builder.addOperation(operation);
+  const tx = builder.build();
+  return tx.toXDR();
+}
