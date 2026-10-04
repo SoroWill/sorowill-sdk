@@ -382,8 +382,10 @@ export interface BatchResult {
 }
 
 export interface RequestOptions {
+  signal?: AbortSignal;
   retries?: number;
   timeout?: number;
+  timeoutMs?: number;
 }
 
 export interface SoroWillEvent {
@@ -393,20 +395,21 @@ export interface SoroWillEvent {
   data: Record<string, unknown>;
 }
 
-// Override RequestOptions with signal support
-declare global {
-  interface RequestOptions {
-    signal?: AbortSignal;
-  }
-}
-
 export interface EventSubscription {
   unsubscribe(): void;
+  transport?: EventSubscriptionTransport;
+  closed?: boolean;
 }
 
 export interface EventSubscriptionOptions {
+  transport?: EventSubscriptionTransport;
   retryAttempts?: number;
   retryDelayMs?: number;
+  websocketConnectTimeoutMs?: number;
+  pollIntervalMs?: number;
+  pageSize?: number;
+  cursor?: string;
+  onError?: (error: Error) => void;
 }
 
 export type EventSubscriptionTransport = 'websocket' | 'polling';
