@@ -370,6 +370,25 @@ export class WalletConnectAdapter implements WalletAdapter {
     await this.sessionStore.clearSessionTopic();
   }
 
+  private async requireSession(): Promise<WalletConnectSession> {
+    if (this.session) {
+      return this.session;
+    }
+
+    const topic = await this.sessionStore.getSessionTopic();
+    if (!topic) {
+      throw new Error('WalletConnect session not available. Call connect() first.');
+    }
+
+    const session = await this.client.getSession(topic);
+    if (!session) {
+      throw new Error('WalletConnect session could not be found. Reconnect required.');
+    }
+
+    this.session = session;
+    return session;
+  }
+
   async getPublicKey(): Promise<string> {
     const session = await this.requireSession();
     const resolver = this.options.getPublicKeyFromSession ?? getDefaultPublicKeyFromSession;
