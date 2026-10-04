@@ -100,7 +100,9 @@ export class MultisigCollector {
     this._transactionXdr = options.transactionXdr;
     this._networkPassphrase = options.networkPassphrase;
     this._threshold = options.threshold;
-    this._timeoutMs = options.timeoutMs;
+    if (options.timeoutMs !== undefined) {
+      this._timeoutMs = options.timeoutMs;
+    }
     this._startedAt = Date.now();
   }
 
@@ -376,13 +378,17 @@ export function signWithSecretKey(
   secretKey: string,
   networkPassphrase: string,
 ): string {
-  if (!StrKey.isValidEd25519SecretSeed(secretKey)) {
-    throw new InvalidSecretKeyError();
+  let keypair: Keypair;
+  try {
+    keypair = Keypair.fromSecret(secretKey);
+  } catch {
+    throw new InvalidSecretKeyError('signWithSecretKey');
   }
 
-  const keypair = Keypair.fromSecret(secretKey);
-  const tx = TransactionBuilder.fromXDR(transactionXdr, networkPassphrase) as Transaction;
-  tx.sign(keypair);
-
-  return tx.toXDR();
+  const tx = TransactionBuilder.fromXDR(transactionXdr, networkPassphrase);
+  if (tx instanceof Transaction) {
+    tx.sign(keypair);
+    return tx.toXDR();
+  }
+  throw new Error('Failed to reconstruct transaction from XDR');
 }

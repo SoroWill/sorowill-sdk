@@ -38,6 +38,7 @@ import type {
 import { WillStatus } from './types';
 import {
   getDefaultWalletAdapter,
+  normalizeSignatureResponse,
   type WalletAdapter,
 } from './wallet';
 import {
@@ -556,13 +557,12 @@ interface RawEventRecord {
 function mapEventRecord(record: RawEventRecord, fallbackContractId: string): SoroWillEvent {
   const cursor = record.pagingToken ?? record.id ?? '';
   return {
-    id: record.id ?? cursor,
     cursor,
     ledger: record.ledger ?? null,
     ledgerClosedAt: record.ledgerClosedAt ? new Date(record.ledgerClosedAt) : null,
     contractId: record.contractId ?? fallbackContractId,
     txHash: record.txHash ?? null,
-    type: record.type ?? null,
+    type: record.type ?? '',
     topics: record.topics ?? record.topic ?? [],
     value: record.value,
     raw: record,
@@ -762,7 +762,7 @@ export class SoroWillClient {
       // Default: a private tracker scoped to this contract's address so that
       // different client instances targeting different contracts never share a
       // dedup entry for the same (willId, method) pair (#503).
-      new InFlightTracker(options.contractId);
+      new InFlightTracker();
     this.readCache = options.readCache === false ? undefined : new ReadCache(options.readCache);
     this.retryOptions = { ...DEFAULT_RETRY_OPTIONS, ...options.retry };
     const { maxAttempts, initialDelayMs, maxDelayMs, backoffFactor } = this.retryOptions;
@@ -1489,12 +1489,13 @@ export class SoroWillClient {
           context: 'batch',
         });
 
-        const signedTxXdr = await this.wallet.signTransaction(prepared.toXDR(), {
+        const signedTxResponse = await this.wallet.signTransaction(prepared.toXDR(), {
           networkPassphrase: this.networkPassphrase,
         });
+        const signedTxXdr = normalizeSignatureResponse(signedTxResponse);
         const result = await this.submitSignedTransaction(signedTxXdr, options);
         txHash = result.txHash;
-        return { txHash: result.txHash, createdAt: result.createdAt };
+        return { success: true, txHash: result.txHash, createdAt: result.createdAt };
       });
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
@@ -1644,7 +1645,7 @@ export class SoroWillClient {
         get closed() {
           return closed;
         },
-        close: () => {
+        unsubscribe: () => {
           if (closed) return;
           closed = true;
           clearConnectTimer();
@@ -1732,7 +1733,7 @@ export class SoroWillClient {
       get closed() {
         return closed;
       },
-      close: () => {
+      unsubscribe: () => {
         if (closed) return;
         closed = true;
         if (timer !== undefined) clearTimeout(timer);
@@ -2105,9 +2106,10 @@ export class SoroWillClient {
       );
       this.debugLogger.logSimulation(label, undefined, prepared.fee);
 
-      const signedTxXdr = await this.wallet.signTransaction(prepared.toXDR(), {
+      const signedTxResponse = await this.wallet.signTransaction(prepared.toXDR(), {
         networkPassphrase: this.networkPassphrase,
       });
+      const signedTxXdr = normalizeSignatureResponse(signedTxResponse);
       const signedTx = TransactionBuilder.fromXDR(
         signedTxXdr,
         this.networkPassphrase,
@@ -2178,9 +2180,10 @@ export class SoroWillClient {
             options,
           );
 
-          const feeBumpSignedXdr = await this.wallet.signTransaction(feeBumpPrepared.toXDR(), {
+          const feeBumpSignedResponse = await this.wallet.signTransaction(feeBumpPrepared.toXDR(), {
             networkPassphrase: this.networkPassphrase,
           });
+          const feeBumpSignedXdr = normalizeSignatureResponse(feeBumpSignedResponse);
           const feeBumpSignedTx = TransactionBuilder.fromXDR(
             feeBumpSignedXdr,
             this.networkPassphrase,

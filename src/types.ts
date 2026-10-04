@@ -295,21 +295,6 @@ export interface PaginatedWillsResult {
   nextCursor: string | null;
 }
 
-/**
- * The structured result some wallet adapters (e.g. WalletConnect) return from
- * a signing request instead of a bare signed-XDR string.
- *
- * `envelope_xdr` is the base64-encoded signed transaction envelope that must
- * be submitted to the network; `hash` is the transaction hash the wallet
- * computed while signing. Adapters that return a plain string are still
- * supported — see {@link TransactionSigner}.
- */
-export interface SignatureResponse {
-  /** Base64-encoded signed transaction envelope (XDR). */
-  envelope_xdr: string;
-  /** Hex-encoded transaction hash produced by the wallet while signing. */
-  hash: string;
-}
 
 /**
  * A function that signs a transaction envelope (XDR) and resolves to the
@@ -321,51 +306,9 @@ export interface SignatureResponse {
  * clear error, so a malformed adapter response fails at signing time rather
  * than silently downstream.
  */
-export type TransactionSigner = (
+export type TransactionSigner<T = void> = (
   xdr: string,
-) => Promise<string | SignatureResponse>;
-
-/**
- * Normalize the value resolved by a {@link TransactionSigner} into a signed
- * XDR string.
- *
- * Accepts either a signed-XDR string or a {@link SignatureResponse} object
- * (returning its `envelope_xdr`). Any other shape — including `null`,
- * `undefined`, or an object missing `envelope_xdr` — throws a descriptive
- * error so the failure surfaces at signing time instead of as a cryptic
- * downstream error.
- *
- * @param response - The raw value resolved by a wallet adapter's signer.
- * @returns The signed transaction envelope as a base64 XDR string.
- * @throws {Error} If `response` is neither a non-empty string nor a valid
- *   {@link SignatureResponse}.
- */
-export function normalizeSignatureResponse(
-  response: string | SignatureResponse,
-): string {
-  if (typeof response === 'string') {
-    if (response.length === 0) {
-      throw new Error(
-        'TransactionSigner returned an empty string; expected a signed XDR envelope.',
-      );
-    }
-    return response;
-  }
-
-  if (
-    response !== null &&
-    typeof response === 'object' &&
-    typeof (response as SignatureResponse).envelope_xdr === 'string' &&
-    (response as SignatureResponse).envelope_xdr.length > 0
-  ) {
-    return (response as SignatureResponse).envelope_xdr;
-  }
-
-  throw new Error(
-    'TransactionSigner returned an invalid response; expected a signed XDR string ' +
-      'or a SignatureResponse object with a non-empty `envelope_xdr` field.',
-  );
-}
+) => Promise<string | T>;
 
 /** Normalized contract event emitted by the SoroWill contr
 
@@ -390,9 +333,14 @@ export interface RequestOptions {
 
 export interface SoroWillEvent {
   type: string;
-  willId: string;
-  timestamp: number;
-  data: Record<string, unknown>;
+  cursor: string;
+  ledger: number | null;
+  ledgerClosedAt: Date | null;
+  contractId: string;
+  txHash: string | null;
+  topics: unknown[];
+  value: unknown;
+  raw: unknown;
 }
 
 export interface EventSubscription {

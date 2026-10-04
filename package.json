@@ -37,7 +37,7 @@
     "check:exports": "attw --pack . --profile node16 --ignore-rules cjs-resolves-to-esm,no-resolution"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^17.2.1"
+    "@stellar/stellar-sdk": "^16.3.1"
   },
   "devDependencies": {
     "@albedo-link/intent": "^0.13.0",

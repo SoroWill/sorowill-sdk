@@ -6,8 +6,9 @@ import {
   xdr,
 } from '@stellar/stellar-sdk';
 
-import { InvalidPublicKeyError, InvalidSecretKeyError } from './errors';
-import { NETWORK_CONFIG, type SoroWillNetwork } from './SoroWillClient';
+import { InvalidPublicKeyError, InvalidSecretKeyError, SoroWillError } from './errors';
+import { NETWORK_CONFIG, type SoroWillNetwork, type SoroWillRpcServer } from './SoroWillClient';
+import { RpcEndpointPool } from './rpc';
 
 interface SendTransactionErrorResponse {
   status: string;
@@ -53,6 +54,10 @@ export interface FeeBumpOptions {
    * the inner transaction's fee when omitted.
    */
   fee?: string;
+  /**
+   * Maximum multiple of base fee allowed for the fee-bump. Defaults to 10.
+   */
+  maxFeeMultiplier?: number;
 }
 
 /** Options for submitting a signed fee-bump transaction. */
@@ -159,7 +164,9 @@ export function estimateBatchFee(invocationCount: number, baseFee: number = 100)
 export async function buildFeeBumpXdr(options: FeeBumpOptions): Promise<string> {
   const config = NETWORK_CONFIG[options.network];
 
-  assertReasonableFeeBumpFee(options.fee, options.maxFeeMultiplier);
+  if (options.fee) {
+    assertReasonableFeeBumpFee(options.fee, options.maxFeeMultiplier ?? DEFAULT_MAX_FEE_MULTIPLIER);
+  }
 
   const { feeSourcePublicKey } = options;
   if (typeof feeSourcePublicKey !== 'string' || !feeSourcePublicKey.startsWith('G')) {
@@ -257,6 +264,7 @@ export async function submitFeeBumpTransaction(
     config.networkPassphrase,
   ) as Transaction;
 
+  const innerSequence = feeBumpTx.sequence;
   const sendResponse = await pool.withFailover((server) => server.sendTransaction(feeBumpTx));
   if (sendResponse.status === 'ERROR') {
     trackFailedFeeBumpSequence(innerSequence);
@@ -348,7 +356,7 @@ export async function submitFeeBump(options: {
     innerTransactionXdr: options.innerTransactionXdr,
     feeSourcePublicKey: publicKey,
     fee,
-    maxFeeMultiplier: options.maxFeeMultiplier,
+    ...(options.maxFeeMultiplier !== undefined && { maxFeeMultiplier: options.maxFeeMultiplier }),
   });
 
   const signedXdr = signFeeBumpXdr(feeBumpXdr, options.feeSourceSecretKey, config.networkPassphrase);
@@ -434,10 +442,10 @@ export async function autoFeeBumpOnTimeout(
   });
 
   if (timeoutResult === 'confirmed') {
-    const confirmed = await server.getTransaction(originalHash);
+    await server.getTransaction(originalHash);
     return {
       txHash: originalHash,
-      createdAt: confirmed.createdAt,
+      createdAt: Date.now(),
       bumped: false,
     };
   }

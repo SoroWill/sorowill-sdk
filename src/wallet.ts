@@ -37,13 +37,13 @@ const DEFAULT_SIGN_TIMEOUT_MS = 120_000;
 const FREIGHTER_NOT_INSTALLED_CODE = -1;
 
 /**
- * The structured signature response some wallet adapters (WalletConnect,
- * xBull, …) return instead of a bare signed-XDR string. The SDK normalizes
- * this to the `envelope_xdr` string so callers always receive a string.
+ * The object shape some wallets (notably WalletConnect) return from
+ * `signTransaction` instead of a bare XDR string. The signed envelope is
+ * carried in `envelope_xdr`; `hash` is optional metadata.
  */
 export interface SignatureResponse {
   envelope_xdr: string;
-  hash: string;
+  hash?: string;
 }
 
 /**
@@ -84,16 +84,6 @@ export interface WalletConnection {
   publicKey: string;
   network: string;
   networkPassphrase: string;
-}
-
-/**
- * The object shape some wallets (notably WalletConnect) return from
- * `signTransaction` instead of a bare XDR string. The signed envelope is
- * carried in `envelope_xdr`; `hash` is optional metadata.
- */
-export interface SignatureResponse {
-  envelope_xdr: string;
-  hash?: string;
 }
 
 /**
