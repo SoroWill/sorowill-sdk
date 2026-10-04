@@ -1,6 +1,14 @@
 import { rpc } from '@stellar/stellar-sdk';
 import type { SoroWillRpcServer } from './SoroWillClient';
 
+export const DEFAULT_RPC_TIMEOUT_MS = 30_000;
+export const DEFAULT_RPC_TIMEOUT_MAX_ATTEMPTS = 3;
+export const DEFAULT_RPC_TIMEOUT_RETRY_BASE_DELAY_MS = 1_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function isRetryableRpcConnectionError(error: unknown): boolean {
   const CONNECTION_FRAGMENTS = [
     'fetch failed',
