@@ -1,5 +1,4 @@
 import {
-  Account,
   BASE_FEE,
   Contract,
   Keypair,
@@ -275,13 +274,24 @@ export class MultisigCollector {
     timeoutMs?: number;
     signatures: CollectedSignature[];
   } {
-    return {
+    const result: {
+      transactionXdr: string;
+      networkPassphrase: string;
+      threshold: number;
+      timeoutMs?: number;
+      signatures: CollectedSignature[];
+    } = {
       transactionXdr: this._transactionXdr,
       networkPassphrase: this._networkPassphrase,
       threshold: this._threshold,
-      timeoutMs: this._timeoutMs,
       signatures: [...this._signatures],
     };
+
+    if (this._timeoutMs !== undefined) {
+      result.timeoutMs = this._timeoutMs;
+    }
+
+    return result;
   }
 
   /** Reconstitute a collector from a serialised state.
@@ -362,13 +372,13 @@ export function signWithSecretKey(
   secretKey: string,
   networkPassphrase: string,
 ): string {
-  const keypair = Keypair.fromSecret(secretKey);
   if (!StrKey.isValidEd25519SecretSeed(secretKey)) {
     throw new InvalidSecretKeyError();
   }
-  
-  const envelope = xdr.TransactionEnvelope.fromXDR(transactionXdr, 'base64');
+
+  const keypair = Keypair.fromSecret(secretKey);
   const tx = TransactionBuilder.fromXDR(transactionXdr, networkPassphrase) as Transaction;
-  
+  tx.sign(keypair);
+
   return tx.toXDR();
 }

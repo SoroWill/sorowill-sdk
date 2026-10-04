@@ -399,3 +399,14 @@ declare global {
     signal?: AbortSignal;
   }
 }
+
+export interface EventSubscription {
+  unsubscribe(): void;
+}
+
+export interface EventSubscriptionOptions {
+  retryAttempts?: number;
+  retryDelayMs?: number;
+}
+
+export type EventSubscriptionTransport = 'websocket' | 'polling';
