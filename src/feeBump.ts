@@ -3,6 +3,7 @@ import {
   Transaction,
   TransactionBuilder,
   rpc,
+  xdr,
 } from '@stellar/stellar-sdk';
 
 import { InvalidPublicKeyError, InvalidSecretKeyError } from './errors';

@@ -2,6 +2,13 @@ import type FreighterApi from '@stellar/freighter-api';
 
 import { FreighterInstallCheckError, SignTransactionTimeoutError, WalletNetworkMismatchError } from './errors';
 
+export class WalletSessionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WalletSessionError';
+  }
+}
+
 /**
  * `@stellar/freighter-api` is an optional peer dependency — consumers who
  * only use Albedo, Ledger, WalletConnect, or a custom {@link WalletAdapter}
