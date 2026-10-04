@@ -371,3 +371,188 @@ export class ReadCache {
     };
   }
 }
+
+/**
+ * In-memory cache persistence adapter. Stores entries in RAM only;
+ * data is lost when the process terminates.
+ */
+export class MemoryCachePersistenceAdapter implements CachePersistenceAdapter {
+  private entries: PersistedCacheEntry[] = [];
+
+  async readAll(): Promise<PersistedCacheEntry[]> {
+    return [...this.entries];
+  }
+
+  async write(entry: PersistedCacheEntry): Promise<void> {
+    const index = this.entries.findIndex((e) => e.key === entry.key);
+    if (index >= 0) {
+      this.entries[index] = entry;
+    } else {
+      this.entries.push(entry);
+    }
+  }
+
+  async delete(key: string): Promise<void> {
+    this.entries = this.entries.filter((e) => e.key !== key);
+  }
+
+  async clear(): Promise<void> {
+    this.entries = [];
+  }
+}
+
+/**
+ * LocalStorage-based cache persistence adapter. Stores entries in browser
+ * localStorage under a namespaced key.
+ */
+export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdapter {
+  private readonly namespace: string;
+
+  constructor(namespace: string = 'sorowill-cache') {
+    this.namespace = namespace;
+  }
+
+  async readAll(): Promise<PersistedCacheEntry[]> {
+    try {
+      const data = localStorage.getItem(this.namespace);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async write(entry: PersistedCacheEntry): Promise<void> {
+    try {
+      const entries = await this.readAll();
+      const index = entries.findIndex((e) => e.key === entry.key);
+      if (index >= 0) {
+        entries[index] = entry;
+      } else {
+        entries.push(entry);
+      }
+      localStorage.setItem(this.namespace, JSON.stringify(entries));
+    } catch {
+      // Silently fail if localStorage is unavailable or quota exceeded
+    }
+  }
+
+  async delete(key: string): Promise<void> {
+    try {
+      const entries = await this.readAll();
+      const filtered = entries.filter((e) => e.key !== key);
+      localStorage.setItem(this.namespace, JSON.stringify(filtered));
+    } catch {
+      // Silently fail if localStorage is unavailable
+    }
+  }
+
+  async clear(): Promise<void> {
+    try {
+      localStorage.removeItem(this.namespace);
+    } catch {
+      // Silently fail if localStorage is unavailable
+    }
+  }
+}
+
+/**
+ * IndexedDB-based cache persistence adapter. Stores entries in IndexedDB
+ * for more reliable and larger-capacity persistence.
+ */
+export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter {
+  private readonly dbName: string;
+  private readonly storeName: string;
+  private db: IDBDatabase | null = null;
+
+  constructor(dbName: string = 'sorowill-cache', storeName: string = 'entries') {
+    this.dbName = dbName;
+    this.storeName = storeName;
+  }
+
+  private async ensureDb(): Promise<IDBDatabase> {
+    if (this.db) {
+      return this.db;
+    }
+
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, 1);
+
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        this.db = request.result;
+        resolve(this.db);
+      };
+
+      request.onupgradeneeded = (event) => {
+        const db = (event.target as IDBOpenDBRequest).result;
+        if (!db.objectStoreNames.contains(this.storeName)) {
+          db.createObjectStore(this.storeName, { keyPath: 'key' });
+        }
+      };
+    });
+  }
+
+  async readAll(): Promise<PersistedCacheEntry[]> {
+    try {
+      const db = await this.ensureDb();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(this.storeName, 'readonly');
+        const store = transaction.objectStore(this.storeName);
+        const request = store.getAll();
+
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result || []);
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  async write(entry: PersistedCacheEntry): Promise<void> {
+    try {
+      const db = await this.ensureDb();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(this.storeName, 'readwrite');
+        const store = transaction.objectStore(this.storeName);
+        const request = store.put(entry);
+
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve();
+      });
+    } catch {
+      // Silently fail if IndexedDB is unavailable
+    }
+  }
+
+  async delete(key: string): Promise<void> {
+    try {
+      const db = await this.ensureDb();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(this.storeName, 'readwrite');
+        const store = transaction.objectStore(this.storeName);
+        const request = store.delete(key);
+
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve();
+      });
+    } catch {
+      // Silently fail if IndexedDB is unavailable
+    }
+  }
+
+  async clear(): Promise<void> {
+    try {
+      const db = await this.ensureDb();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(this.storeName, 'readwrite');
+        const store = transaction.objectStore(this.storeName);
+        const request = store.clear();
+
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve();
+      });
+    } catch {
+      // Silently fail if IndexedDB is unavailable
+    }
+  }
+}

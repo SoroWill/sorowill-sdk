@@ -475,3 +475,42 @@ export async function autoFeeBumpOnTimeout(
   const bumped = await submitFeeBump(bumpOptions);
   return { txHash: bumped.txHash, createdAt: bumped.createdAt, bumped: true };
 }
+
+export class StaleTransactionSequenceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StaleTransactionSequenceError';
+  }
+}
+
+export function validateInnerTransactionSequence(
+  innerTransactionXdr: string,
+  expectedSequence: string | bigint,
+): void {
+  try {
+    const envelope = xdr.TransactionEnvelope.fromXDR(innerTransactionXdr, 'base64');
+    let tx: xdr.Transaction;
+
+    if (envelope.switch() === xdr.EnvelopeType.envelopeTypeTx()) {
+      tx = envelope.v1()!.tx();
+    } else if (envelope.switch() === xdr.EnvelopeType.envelopeTypeTxFeeBump()) {
+      tx = envelope.feeBump()!.tx().innerTx().v1()!.tx();
+    } else {
+      throw new Error('Unsupported transaction envelope type');
+    }
+
+    const actualSequence = tx.seqNum().toString();
+    const expected = typeof expectedSequence === 'bigint' ? expectedSequence.toString() : expectedSequence;
+
+    if (actualSequence !== expected) {
+      throw new StaleTransactionSequenceError(
+        `Transaction sequence mismatch: expected ${expected}, got ${actualSequence}`,
+      );
+    }
+  } catch (error) {
+    if (error instanceof StaleTransactionSequenceError) {
+      throw error;
+    }
+    throw new Error(`Failed to validate transaction sequence: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}

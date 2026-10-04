@@ -55,9 +55,8 @@ export function formatUSDC(stroops: bigint, decimals = USDC_DECIMALS): string {
   const negative = stroops < 0n;
   const absolute = negative ? -stroops : stroops;
   const base = 10n ** BigInt(decimals);
-  const totalCents = (absolute * 100n + base / 2n) / base;
-  const whole = totalCents / 100n;
-  const cents = totalCents % 100n;
+  const whole = absolute / base;
+  const fraction = absolute % base;
 
   const wholeFormatted = whole.toLocaleString('en-US');
 
@@ -326,3 +325,52 @@ export interface NextActionableStateOptions {
  * on-chain preconditions are met; and guardians may vote for 
 
 /* … truncated 3004 chars — edit only what you need near the top … */
+
+export function getNextActionableState(
+  will: Will,
+  connectedAddress: string,
+  options: NextActionableStateOptions = {},
+): NextActionableState {
+  const isOwner = will.owner === connectedAddress;
+  const isGuardian = will.guardians.includes(connectedAddress);
+  const isActive = will.status === WillStatus.Active;
+  const isTriggered = will.status === WillStatus.Triggered;
+  const isGracePeriodExpired = will.gracePeriodExpiresAt < Date.now();
+  const isCheckinOverdue = isActive && will.nextCheckinDeadline < Date.now();
+  
+  return {
+    canCheckIn: isOwner && isActive && !isCheckinOverdue,
+    canTrigger: isCheckinOverdue && !isTriggered,
+    canEmergencyCheckIn: isOwner && isActive && isCheckinOverdue && !isGracePeriodExpired,
+    canRelease: isTriggered && isGracePeriodExpired,
+    canCancel: isOwner && (isActive || isTriggered),
+    canGuardianVote: isGuardian && isTriggered && !options.guardianAlreadyVoted,
+  };
+}
+
+export function validateGuardians(
+  guardians: string[],
+  ownerAddress?: string,
+): void {
+  if (!Array.isArray(guardians)) {
+    throw new Error('Guardians must be an array');
+  }
+
+  for (const guardian of guardians) {
+    if (!StrKey.isValidEd25519PublicKey(guardian)) {
+      throw new Error(`"${guardian}" is not a valid Stellar public key`);
+    }
+  }
+
+  if (ownerAddress && guardians.includes(ownerAddress)) {
+    throw new Error('Owner cannot be a guardian');
+  }
+
+  const seen = new Set<string>();
+  for (const guardian of guardians) {
+    if (seen.has(guardian)) {
+      throw new Error(`Duplicate guardian: ${guardian}`);
+    }
+    seen.add(guardian);
+  }
+}
