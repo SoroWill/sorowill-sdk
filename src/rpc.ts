@@ -135,7 +135,7 @@ export async function isTransactionResolved(
   transactionHash: string,
 ): Promise<boolean> {
   try {
-    const response = await server.getTransaction(transactionHash);
+    const response = await server.pollTransaction(transactionHash, { attempts: 1 });
     const status = (response as { status?: unknown }).status;
     return typeof status === 'string' && TERMINAL_TRANSACTION_STATUSES.has(status);
   } catch {

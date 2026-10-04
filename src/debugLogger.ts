@@ -46,11 +46,8 @@ function isProductionEnvironment(): boolean {
   // Vite / browser bundler check (import.meta.env is replaced at build time).
   if (
     typeof globalThis !== 'undefined' &&
-    // @ts-expect-error — import.meta.env is only available in bundler contexts
     typeof import.meta !== 'undefined' &&
-    // @ts-expect-error — not typed in the generic tsconfig
     typeof import.meta.env !== 'undefined' &&
-    // @ts-expect-error — not typed in the generic tsconfig
     (import.meta.env as Record<string, unknown>)['MODE'] === 'production'
   ) {
     return true;

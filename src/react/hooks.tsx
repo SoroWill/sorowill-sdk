@@ -47,7 +47,7 @@ const CLIENT_OPTION_KEYS = [
   'debug',
 ] as const satisfies readonly (keyof SoroWillClientOptions)[];
 
-function useSoroWillClient(options: SoroWillClientOptions): SoroWillClient {
+export function useSoroWillClient(options: SoroWillClientOptions): SoroWillClient {
   const deps = CLIENT_OPTION_KEYS.map((key) => options[key]);
 
   const client = getReact().useMemo(
