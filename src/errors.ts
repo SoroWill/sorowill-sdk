@@ -827,3 +827,5 @@ export function setContractErrorMap(map: Map<number, ContractErrorFactory>): voi
 export function getContractErrorMap(): Map<number, ContractErrorFactory> {
   return new Map();
 }
+
+export type ContractErrorFactory = (details: unknown) => Error;

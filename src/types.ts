@@ -392,3 +392,10 @@ export interface SoroWillEvent {
   timestamp: number;
   data: Record<string, unknown>;
 }
+
+// Override RequestOptions with signal support
+declare global {
+  interface RequestOptions {
+    signal?: AbortSignal;
+  }
+}
