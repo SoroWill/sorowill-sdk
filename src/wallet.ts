@@ -380,7 +380,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
   }
 
   async disconnect(): Promise<void> {
-    (this as any).session = undefined;
+    delete (this as unknown as Record<string, unknown>).session;
     return;
   }
 
