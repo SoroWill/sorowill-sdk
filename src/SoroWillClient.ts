@@ -1655,6 +1655,9 @@ export class SoroWillClient {
             // Best-effort close; the socket may already be gone.
           }
         },
+        close() {
+          this.unsubscribe();
+        },
       };
 
       socket.onopen = () => {
@@ -1737,6 +1740,9 @@ export class SoroWillClient {
         if (closed) return;
         closed = true;
         if (timer !== undefined) clearTimeout(timer);
+      },
+      close() {
+        this.unsubscribe();
       },
     };
 

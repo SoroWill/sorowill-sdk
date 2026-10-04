@@ -130,7 +130,7 @@ export class InFlightTracker {
     const existing = this.inFlight.get(key);
     if (existing) {
       if (!this.isExpired(existing)) {
-        return existing.promise as PromiseLike<T>;
+        return existing.promise as Promise<T>;
       }
       // Expired entry — evict and start a fresh operation.
       this.evict(key, existing);

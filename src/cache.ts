@@ -29,7 +29,6 @@ interface CacheEntry {
   value: unknown;
   expiresAt: number | null;
   willIds: Set<string>;
-  locale: string | undefined;
 }
 
 function serializeCacheValue(value: unknown): string {
@@ -156,51 +155,10 @@ export class ReadCache {
     this.persistence = options.persistence;
     this.maxEntries = options.maxEntries;
     this.readyPromise = this.hydrate();
-
-    // Register a locale-change listener in browser environments when opted in.
-    if (options.invalidateOnLocaleChange && typeof window !== 'undefined') {
-      this.localeChangeHandler = () => {
-        this.clear();
-      };
-      window.addEventListener('languagechange', this.localeChangeHandler);
-    }
   }
 
   async ready(): Promise<void> {
     await this.readyPromise;
-  }
-
-  /**
-   * Returns the locale currently associated with this cache instance.
-   */
-  getLocale(): string | undefined {
-    return this.locale;
-  }
-
-  /**
-   * Updates the active locale. If the locale actually changed, every entry
-   * cached under the previous locale is invalidated (in memory and, when
-   * configured, in persistent storage) so that subsequent reads cannot return
-   * stale translations.
-   */
-  async setLocale(locale: string | undefined): Promise<void> {
-    if (locale === this.locale) {
-      return;
-    }
-
-    const previousLocale = this.locale;
-    this.locale = locale;
-
-    await this.readyPromise;
-
-    const keysToDelete: string[] = [];
-    for (const [key, entry] of this.entries) {
-      if (entry.locale === previousLocale) {
-        keysToDelete.push(key);
-      }
-    }
-
-    await Promise.all(keysToDelete.map((key) => this.delete(key)));
   }
 
   /**
@@ -244,7 +202,6 @@ export class ReadCache {
       value,
       expiresAt: this.now() + this.ttlMs,
       willIds: new Set(willIds),
-      locale: this.locale,
     };
 
     this.touchedKeys.add(key);
@@ -355,7 +312,6 @@ export class ReadCache {
         value: deserializeCacheValue(persistedEntry.value),
         expiresAt: persistedEntry.expiresAt,
         willIds: new Set(persistedEntry.willIds),
-        locale: this.locale,
       });
     }
 
