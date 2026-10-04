@@ -26,25 +26,30 @@ describe('useSoroWillClient', () => {
 
   it('rebuilds the client when retry changes', () => {
     const { result, rerender } = renderHook(
-      ({ retry }: { retry: { attempts?: number } }) =>
-        useSoroWillClient({ network: 'testnet', contractId: 'CABC', retry }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ({ retry }: { retry: unknown }) =>
+        useSoroWillClient({ network: 'testnet', contractId: 'CABC', retry: retry as any }),
       { initialProps: { retry: { attempts: 1 } } },
     );
 
     const first = result.current;
-    rerender({ retry: 3 });
+    rerender({ retry: { attempts: 3 } });
 
     expect(result.current).not.toBe(first);
     expect(createClient).toHaveBeenCalledTimes(2);
   });
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   it('rebuilds the client when wallet changes', () => {
-    const walletA = { sign: vi.fn() } as unknown;
-    const walletB = { sign: vi.fn() } as unknown;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const walletA = { sign: vi.fn() } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const walletB = { sign: vi.fn() } as any;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { result, rerender } = renderHook(
-      ({ wallet }: { wallet: unknown }) =>
-        useSoroWillClient({ network: 'testnet', contractId: 'CABC', wallet: wallet as unknown as typeof walletA }),
+      ({ wallet }: { wallet: any }) =>
+        useSoroWillClient({ network: 'testnet', contractId: 'CABC', wallet }),
       { initialProps: { wallet: walletA } },
     );
 
