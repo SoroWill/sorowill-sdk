@@ -511,3 +511,28 @@ export const freighterAdapter: WalletAdapter = {
   signTransaction: (xdr: string, opts: SignTransactionOptions) => defaultFreighterWalletAdapter.signTransaction(xdr, opts),
   getNetwork: () => defaultFreighterWalletAdapter.getNetwork(),
 };
+
+export function getDefaultWalletAdapter(): WalletAdapter {
+  return freighterAdapter;
+}
+
+export async function getPublicKey(): Promise<string> {
+  return defaultFreighterWalletAdapter.getPublicKey();
+}
+
+export async function signTransaction(xdr: string, opts: SignTransactionOptions): Promise<string> {
+  return defaultFreighterWalletAdapter.signTransaction(xdr, opts);
+}
+
+export async function isFreighterInstalled(): Promise<boolean> {
+  try {
+    await loadFreighterApi();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function connectWallet(): Promise<WalletConnection> {
+  return defaultFreighterWalletAdapter.connect();
+}
