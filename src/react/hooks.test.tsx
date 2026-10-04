@@ -44,7 +44,7 @@ describe('useSoroWillClient', () => {
 
     const { result, rerender } = renderHook(
       ({ wallet }: { wallet: unknown }) =>
-        useSoroWillClient({ network: 'testnet', contractId: 'CABC', wallet: wallet as any }),
+        useSoroWillClient({ network: 'testnet', contractId: 'CABC', wallet: wallet as unknown as typeof walletA }),
       { initialProps: { wallet: walletA } },
     );
 
