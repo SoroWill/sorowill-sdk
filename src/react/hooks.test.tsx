@@ -26,9 +26,9 @@ describe('useSoroWillClient', () => {
 
   it('rebuilds the client when retry changes', () => {
     const { result, rerender } = renderHook(
-      ({ retry }: { retry: number }) =>
+      ({ retry }: { retry: { attempts?: number } }) =>
         useSoroWillClient({ network: 'testnet', contractId: 'CABC', retry }),
-      { initialProps: { retry: 1 } },
+      { initialProps: { retry: { attempts: 1 } } },
     );
 
     const first = result.current;
@@ -39,12 +39,12 @@ describe('useSoroWillClient', () => {
   });
 
   it('rebuilds the client when wallet changes', () => {
-    const walletA = { sign: vi.fn() };
-    const walletB = { sign: vi.fn() };
+    const walletA = { sign: vi.fn() } as unknown;
+    const walletB = { sign: vi.fn() } as unknown;
 
     const { result, rerender } = renderHook(
-      ({ wallet }: { wallet: typeof walletA }) =>
-        useSoroWillClient({ network: 'testnet', contractId: 'CABC', wallet }),
+      ({ wallet }: { wallet: unknown }) =>
+        useSoroWillClient({ network: 'testnet', contractId: 'CABC', wallet: wallet as any }),
       { initialProps: { wallet: walletA } },
     );
 

@@ -8,7 +8,7 @@
  * fetched from the RPC node.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Networks } from '@stellar/stellar-sdk';
 import { SoroWillClient } from '../src/SoroWillClient';
 import type { SoroWillRpcServer } from '../src/SoroWillClient';
