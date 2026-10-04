@@ -193,7 +193,7 @@ describe('getNextActionableState', () => {
     vi.useFakeTimers();
     vi.setSystemTime(skewedLocalClock);
     try {
-      const state = getNextActionableState(will, 'GOWNER', trustedNow);
+      const state = getNextActionableState(will, 'GOWNER', { now: trustedNow });
       expect(state.canEmergencyCheckIn).toBe(true);
       expect(state.canRelease).toBe(false);
     } finally {
