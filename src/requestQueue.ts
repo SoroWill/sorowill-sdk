@@ -248,3 +248,22 @@ export class RequestQueue {
     }
   }
 }
+
+const sharedQueueMap = new Map<string, RequestQueue>();
+
+export function getSharedRequestQueue(account?: string): RequestQueue {
+  const key = account ?? '__default__';
+  if (!sharedQueueMap.has(key)) {
+    sharedQueueMap.set(key, new RequestQueue({ account }));
+  }
+  return sharedQueueMap.get(key)!;
+}
+
+export function releaseSharedRequestQueue(account?: string): void {
+  const key = account ?? '__default__';
+  const queue = sharedQueueMap.get(key);
+  if (queue) {
+    queue.release();
+    sharedQueueMap.delete(key);
+  }
+}

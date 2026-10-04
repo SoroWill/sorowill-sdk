@@ -797,3 +797,33 @@ export function mapContractError(error: unknown): Error {
   );
   return new UnknownContractErrorCodeError(code, text, { cause: error });
 }
+
+export class MultisigTimeoutError extends Error {
+  constructor(signedCount: number, threshold: number, timeoutMs: number) {
+    super(`Multisig coordination timed out after ${timeoutMs}ms with only ${signedCount}/${threshold} signatures`);
+    this.name = 'MultisigTimeoutError';
+  }
+}
+
+export class ExorbitantFeeError extends Error {
+  constructor(fee: string, maxFee: string) {
+    super(`Fee ${fee} exceeds maximum allowed ${maxFee}`);
+    this.name = 'ExorbitantFeeError';
+  }
+}
+
+export function registerContractError(code: number, errorFactory: ContractErrorFactory): void {
+  // Stub implementation - actual error registry would be managed elsewhere
+}
+
+export function registerContractErrors(errors: Record<number, ContractErrorFactory>): void {
+  // Stub implementation
+}
+
+export function setContractErrorMap(map: Map<number, ContractErrorFactory>): void {
+  // Stub implementation
+}
+
+export function getContractErrorMap(): Map<number, ContractErrorFactory> {
+  return new Map();
+}

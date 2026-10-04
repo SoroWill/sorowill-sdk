@@ -356,3 +356,19 @@ export async function buildMultisigTransactionXdr(options: {
   const tx = builder.build();
   return tx.toXDR();
 }
+
+export function signWithSecretKey(
+  transactionXdr: string,
+  secretKey: string,
+  networkPassphrase: string,
+): string {
+  const keypair = Keypair.fromSecret(secretKey);
+  if (!StrKey.isValidEd25519SecretSeed(secretKey)) {
+    throw new InvalidSecretKeyError();
+  }
+  
+  const envelope = xdr.TransactionEnvelope.fromXDR(transactionXdr, 'base64');
+  const tx = TransactionBuilder.fromXDR(transactionXdr, networkPassphrase) as Transaction;
+  
+  return tx.toXDR();
+}

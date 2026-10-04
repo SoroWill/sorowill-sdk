@@ -370,3 +370,25 @@ export function normalizeSignatureResponse(
 /** Normalized contract event emitted by the SoroWill contr
 
 /* … truncated 2578 chars — edit only what you need near the top … */
+
+export interface BatchOperation {
+  method: string;
+  args: Record<string, unknown>;
+}
+
+export interface BatchResult {
+  success: boolean;
+  error?: Error;
+}
+
+export interface RequestOptions {
+  retries?: number;
+  timeout?: number;
+}
+
+export interface SoroWillEvent {
+  type: string;
+  willId: string;
+  timestamp: number;
+  data: Record<string, unknown>;
+}

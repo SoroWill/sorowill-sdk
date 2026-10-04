@@ -374,3 +374,10 @@ export function validateGuardians(
     seen.add(guardian);
   }
 }
+
+export function formatTokenAmount(
+  stroops: bigint | string | number,
+  decimals: number = USDC_DECIMALS,
+): string {
+  return formatUSDC(stroops, decimals);
+}
