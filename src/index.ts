@@ -154,6 +154,7 @@ export {
   InvokeFailedError,
   KeeperBountyExceedsMaxError,
   MergeWouldExceedLimitsError,
+  MultisigTimeoutError,
   NotGuardianError,
   GuardianValidationError,
   InvalidCursorError,
