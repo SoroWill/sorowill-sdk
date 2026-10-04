@@ -350,7 +350,11 @@ export async function buildMultisigTransactionXdr(options: {
   const operation = contract.call(options.method, ...scArgs);
 
   const account = await server.getAccount(options.sourceAccount);
-  const builderOpts: any = {
+  const builderOpts: {
+    fee: string;
+    networkPassphrase: string;
+    timebounds?: { minTime: number; maxTime: number };
+  } = {
     fee: options.fee || BASE_FEE,
     networkPassphrase: options.networkPassphrase,
   };

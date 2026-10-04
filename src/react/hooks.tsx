@@ -52,7 +52,6 @@ function useSoroWillClient(options: SoroWillClientOptions): SoroWillClient {
 
   const client = getReact().useMemo(
     () => new SoroWillClient(options),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- deps are derived from CLIENT_OPTION_KEYS
     deps,
   );
 
