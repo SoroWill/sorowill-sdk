@@ -40,8 +40,8 @@ describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () 
   }
 
   it('falls back to the secondary endpoint when the primary hangs beyond endpointTimeoutMs', async () => {
-    const primaryServer = makeMockServer('hang');
-    const secondaryServer = makeMockServer('fast');
+    const _primaryServer = makeMockServer('hang');
+    const _secondaryServer = makeMockServer('fast');
 
     // Alternate servers: index 0 → primary (hangs), index 1 → secondary (fast).
     let callIndex = 0;

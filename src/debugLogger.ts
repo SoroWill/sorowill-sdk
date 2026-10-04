@@ -47,7 +47,9 @@ function isProductionEnvironment(): boolean {
   if (
     typeof globalThis !== 'undefined' &&
     typeof import.meta !== 'undefined' &&
+    // @ts-expect-error — import.meta.env is only available in bundler contexts
     typeof import.meta.env !== 'undefined' &&
+    // @ts-expect-error — not typed in the generic tsconfig
     (import.meta.env as Record<string, unknown>)['MODE'] === 'production'
   ) {
     return true;
