@@ -33,15 +33,25 @@ export class InFlightTracker {
   private readonly failedSequences = new Map<OperationKey, FailedOperation>();
   private readonly maxInFlight: number;
   private readonly ttlMs: number;
+  private readonly scopeId: string | undefined;
 
-  constructor(maxInFlight: number = DEFAULT_MAX_IN_FLIGHT, ttlMs: number = DEFAULT_TTL_MS) {
-    this.maxInFlight = maxInFlight;
-    this.ttlMs = ttlMs;
+  constructor(scopeIdOrMaxInFlight?: string | number, ttlMs: number = DEFAULT_TTL_MS) {
+    if (typeof scopeIdOrMaxInFlight === 'string') {
+      // Called with scopeId
+      this.scopeId = scopeIdOrMaxInFlight;
+      this.maxInFlight = DEFAULT_MAX_IN_FLIGHT;
+      this.ttlMs = ttlMs;
+    } else {
+      // Called with maxInFlight (backwards compatible)
+      this.scopeId = undefined;
+      this.maxInFlight = scopeIdOrMaxInFlight ?? DEFAULT_MAX_IN_FLIGHT;
+      this.ttlMs = ttlMs;
+    }
   }
 
   getKey(willId: string | bigint, method: string, clientId?: string): OperationKey {
     const id = typeof willId === 'bigint' ? willId.toString() : willId;
-    const scope = clientId ?? '';
+    const scope = clientId ?? this.scopeId ?? '';
     return `${scope}:${id}:${method}`;
   }
 

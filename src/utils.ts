@@ -317,6 +317,7 @@ export interface NextActionableState {
 
 export interface NextActionableStateOptions {
   guardianAlreadyVoted?: boolean;
+  now?: Date;
 }
 
 /**
@@ -337,13 +338,15 @@ export function getNextActionableState(
   const isActive = will.status === WillStatus.Active;
   const isTriggered = will.status === WillStatus.Triggered;
 
+  const now = options.now?.getTime() ?? Date.now();
+
   // Compute grace period expiry from trigger time
   const isGracePeriodExpired = will.triggerTime !== null &&
-    (will.triggerTime.getTime() + will.gracePeriodDays * 86_400_000) < Date.now();
+    (will.triggerTime.getTime() + will.gracePeriodDays * 86_400_000) < now;
 
   // Compute check-in deadline from last check-in
   const nextCheckinDeadline = will.lastCheckin.getTime() + will.checkinPeriodDays * 86_400_000;
-  const isCheckinOverdue = isActive && nextCheckinDeadline < Date.now();
+  const isCheckinOverdue = isActive && nextCheckinDeadline < now;
   
   return {
     canCheckIn: isOwner && isActive && !isCheckinOverdue,

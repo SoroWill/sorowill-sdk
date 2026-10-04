@@ -332,6 +332,7 @@ export interface RequestOptions {
 }
 
 export interface SoroWillEvent {
+  id?: string;
   type: string;
   cursor: string;
   ledger: number | null;
@@ -345,6 +346,7 @@ export interface SoroWillEvent {
 
 export interface EventSubscription {
   unsubscribe(): void;
+  close(): void;
   transport?: EventSubscriptionTransport;
   closed?: boolean;
 }

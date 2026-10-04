@@ -1,5 +1,5 @@
 import { SignTransactionTimeoutError } from './errors';
-import type { WalletAdapter, WalletConnection } from './wallet';
+import type { WalletAdapter, WalletConnection, SignTransactionOptions } from './wallet';
 
 export interface WalletConnectSessionNamespace {
   accounts?: string[];
@@ -398,7 +398,7 @@ export class WalletConnectAdapter implements WalletAdapter {
     return resolver(session);
   }
 
-  async signTransaction(xdr: string): Promise<string> {
+  async signTransaction(xdr: string, _options?: SignTransactionOptions): Promise<string> {
     const session = await this.requireSession();
     const chainId = this.options.requestChainId ?? getDefaultChainId(session);
     const method = this.options.signTransactionMethod ?? 'stellar_signXdr';
