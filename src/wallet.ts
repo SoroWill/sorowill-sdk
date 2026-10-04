@@ -3,11 +3,22 @@ import type FreighterApi from '@stellar/freighter-api';
 import { FreighterInstallCheckError, SignTransactionTimeoutError, WalletNetworkMismatchError } from './errors';
 
 export class WalletSessionError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, cause?: unknown) {
+    super(message, cause ? { cause } : undefined);
     this.name = 'WalletSessionError';
   }
 }
+
+/**
+ * Represents a wallet session token used for transaction signing.
+ */
+export interface WalletSession {
+  token: string;
+  expiresAt?: number;
+}
+
+/** Default session token TTL in milliseconds (15 minutes). */
+export const DEFAULT_SESSION_TTL_MS = 15 * 60 * 1000;
 
 /**
  * `@stellar/freighter-api` is an optional peer dependency — consumers who
@@ -241,7 +252,7 @@ export async function ensureValidSession(
     );
   }
 
-  if (session && session.token && session.expiresAt > now) {
+  if (session && session.token && session.expiresAt !== undefined && session.expiresAt > now) {
     return session.token;
   }
 
@@ -261,7 +272,7 @@ export async function ensureValidSession(
     );
   }
 
-  if (!refreshed || !refreshed.token || refreshed.expiresAt <= now) {
+  if (!refreshed || !refreshed.token || refreshed.expiresAt === undefined || refreshed.expiresAt <= now) {
     throw new WalletSessionError(
       'The wallet session token is still invalid after refreshing. Reconnect the wallet and try again.',
     );
@@ -285,9 +296,12 @@ export interface FreighterWalletAdapterOptions {
 
 export class FreighterWalletAdapter implements WalletAdapter {
   private readonly expectedNetworkPassphrase?: string;
+  private session?: WalletSession;
 
   constructor(options: FreighterWalletAdapterOptions = {}) {
-    this.expectedNetworkPassphrase = options.expectedNetworkPassphrase;
+    if (options.expectedNetworkPassphrase !== undefined) {
+      this.expectedNetworkPassphrase = options.expectedNetworkPassphrase;
+    }
   }
 
   /**
@@ -366,7 +380,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
   }
 
   async disconnect(): Promise<void> {
-    this.session = undefined;
+    (this as any).session = undefined;
     return;
   }
 
@@ -489,6 +503,17 @@ export class WalletConnectWalletAdapter implements WalletAdapter {
 
   disconnect(): Promise<void> {
     return this.connector.disconnect();
+  }
+
+  getPublicKey(): Promise<string> {
+    return this.connector.getPublicKey();
+  }
+
+  async signTransaction(
+    transactionXdr: string,
+    options: SignTransactionOptions,
+  ): Promise<string | SignatureResponse> {
+    return this.connector.signTransaction(transactionXdr, options);
   }
 }
 
