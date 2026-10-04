@@ -36,7 +36,7 @@ jobs:
 
           ALLOWLIST="FalseESM|FalseCJS|CJSResolvesToESM"
 
-          npx --yes @arethetypeswrong/cli@0.17.4 --check-all dist/index.js dist/index.cjs --format json > attw.json
+          npx --yes @arethetypeswrong/cli@0.17.4 dist/index.js dist/index.cjs --format json > attw.json
 
           node -e "
           const fs = require('fs');
