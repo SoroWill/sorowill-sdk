@@ -22,6 +22,10 @@ export interface ReadCacheOptions {
    * from persistence). When omitted, the cache is unbounded.
    */
   maxEntries?: number;
+  /**
+   * Whether to invalidate the cache when the browser locale changes.
+   */
+  invalidateOnLocaleChange?: boolean;
 }
 
 interface CacheEntry {
@@ -142,6 +146,8 @@ export class ReadCache {
    * repopulate the cache once it resolves.
    */
   private clearedBeforeHydration = false;
+  private locale: string | undefined;
+  private localeChangeHandler: (() => void) | undefined;
 
   constructor(options: ReadCacheOptions = {}) {
     const ttlMs = options.ttlMs ?? 60_000;

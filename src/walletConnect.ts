@@ -106,11 +106,8 @@ const DEFAULT_REQUIRED_NAMESPACES: Record<string, WalletConnectSessionNamespace>
 };
 
 const DEFAULT_DISCONNECT_REASON = { code: 6000, message: 'Disconnected by client' };
-const DEFAULT_SIGN_TIMEOUT_MS = 120_000;
-const DEFAULT_CONNECT_TIMEOUT_MS = 300_000;
-
-/** Default connection timeout: 30 seconds. */
-const DEFAULT_CONNECTION_TIMEOUT_MS = 30_000;
+const _DEFAULT_SIGN_TIMEOUT_MS = 120_000;
+const _DEFAULT_CONNECT_TIMEOUT_MS = 300_000;
 
 /**
  * Raised when a WalletConnect session establishment does not complete within
@@ -314,7 +311,7 @@ export class WalletConnectAdapter implements WalletAdapter {
       await this.options.onPairingUri?.(connection.uri);
     }
 
-    const connectTimeoutMs = this.options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
+    const connectTimeoutMs = this.options.connectTimeoutMs ?? _DEFAULT_CONNECT_TIMEOUT_MS;
     let timeoutHandle: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutHandle = setTimeout(
@@ -426,31 +423,21 @@ export class WalletConnectAdapter implements WalletAdapter {
     this.connection = {
       publicKey: (this.options.getPublicKeyFromSession ?? getDefaultPublicKeyFromSession)(session),
       network: (this.options.getNetworkFromSession ?? getDefaultNetwork)(session).network,
+      networkPassphrase: this.resolveNetwork(session).networkPassphrase,
     };
     void this.sessionStore.setSessionTopic(session.topic);
     return this.connection;
   }
 
-  private buildConnection(session: WalletConnectSession): WalletConnection {
-    const publicKey = (this.options.getPublicKeyFromSession ?? getDefaultPublicKeyFromSession)(session);
-    const network = this.resolveNetwork(session);
-
-    return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new SignTransactionTimeoutError(timeoutMs));
-      }, timeoutMs);
-
-      promise.then(
-        (value) => {
-          clearTimeout(timer);
-          resolve(value);
-        },
-        (error) => {
-          clearTimeout(timer);
-          reject(error);
-        },
-      );
-    });
+  private withTimeout<T>(promise: Promise<T>, timeoutMs: number = _DEFAULT_SIGN_TIMEOUT_MS): Promise<T> {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        setTimeout(() => {
+          reject(new SignTransactionTimeoutError(timeoutMs));
+        }, timeoutMs);
+      }),
+    ]);
   }
 
   private resolveNetwork(session: WalletConnectSession): { network: string; networkPassphrase: string } {

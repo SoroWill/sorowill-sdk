@@ -812,15 +812,15 @@ export class ExorbitantFeeError extends Error {
   }
 }
 
-export function registerContractError(code: number, errorFactory: ContractErrorFactory): void {
+export function registerContractError(_code: number, _errorFactory: ContractErrorFactory): void {
   // Stub implementation - actual error registry would be managed elsewhere
 }
 
-export function registerContractErrors(errors: Record<number, ContractErrorFactory>): void {
+export function registerContractErrors(_errors: Record<number, ContractErrorFactory>): void {
   // Stub implementation
 }
 
-export function setContractErrorMap(map: Map<number, ContractErrorFactory>): void {
+export function setContractErrorMap(_map: Map<number, ContractErrorFactory>): void {
   // Stub implementation
 }
 

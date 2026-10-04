@@ -85,6 +85,7 @@ function expandScientificNotation(value: string): string | null {
   }
 
   const [, sign, intPart, fracPart = '', expPart] = match;
+  if (!intPart || !expPart) return null;
   const exponent = Number(expPart);
   const digits = intPart + fracPart;
   // Position of the decimal point relative to `digits` after applying the exponent.
@@ -335,8 +336,14 @@ export function getNextActionableState(
   const isGuardian = will.guardians.includes(connectedAddress);
   const isActive = will.status === WillStatus.Active;
   const isTriggered = will.status === WillStatus.Triggered;
-  const isGracePeriodExpired = will.gracePeriodExpiresAt < Date.now();
-  const isCheckinOverdue = isActive && will.nextCheckinDeadline < Date.now();
+
+  // Compute grace period expiry from trigger time
+  const isGracePeriodExpired = will.triggerTime !== null &&
+    (will.triggerTime.getTime() + will.gracePeriodDays * 86_400_000) < Date.now();
+
+  // Compute check-in deadline from last check-in
+  const nextCheckinDeadline = will.lastCheckin.getTime() + will.checkinPeriodDays * 86_400_000;
+  const isCheckinOverdue = isActive && nextCheckinDeadline < Date.now();
   
   return {
     canCheckIn: isOwner && isActive && !isCheckinOverdue,
@@ -379,5 +386,6 @@ export function formatTokenAmount(
   stroops: bigint | string | number,
   decimals: number = USDC_DECIMALS,
 ): string {
-  return formatUSDC(stroops, decimals);
+  const bigIntValue = typeof stroops === 'bigint' ? stroops : BigInt(stroops);
+  return formatUSDC(bigIntValue, decimals);
 }

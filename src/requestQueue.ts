@@ -254,7 +254,8 @@ const sharedQueueMap = new Map<string, RequestQueue>();
 export function getSharedRequestQueue(account?: string): RequestQueue {
   const key = account ?? '__default__';
   if (!sharedQueueMap.has(key)) {
-    sharedQueueMap.set(key, new RequestQueue({ account }));
+    const opts: RequestQueueOptions = account !== undefined ? { account } : {};
+    sharedQueueMap.set(key, new RequestQueue(opts));
   }
   return sharedQueueMap.get(key)!;
 }
