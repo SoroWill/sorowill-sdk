@@ -56,7 +56,17 @@ export class InFlightTracker {
   }
 
   isInFlight(willId: string | bigint, method: string, clientId?: string): boolean {
-    return this.inFlight.has(this.getKey(willId, method, clientId));
+    const key = this.getKey(willId, method, clientId);
+    const op = this.inFlight.get(key);
+    if (!op) return false;
+
+    // Lazy eviction: check if this entry has expired
+    if (this.isExpired(op)) {
+      this.evict(key, op);
+      return false;
+    }
+
+    return true;
   }
 
   getInFlightPromise<T>(
@@ -64,8 +74,17 @@ export class InFlightTracker {
     method: string,
     clientId?: string,
   ): OperationResult<T> | undefined {
-    const op = this.inFlight.get(this.getKey(willId, method, clientId));
-    return op?.promise as OperationResult<T> | undefined;
+    const key = this.getKey(willId, method, clientId);
+    const op = this.inFlight.get(key);
+    if (!op) return undefined;
+
+    // Lazy eviction: check if this entry has expired
+    if (this.isExpired(op)) {
+      this.evict(key, op);
+      return undefined;
+    }
+
+    return op.promise as OperationResult<T>;
   }
 
   /**
@@ -143,7 +162,7 @@ export class InFlightTracker {
     }
 
     const controller = new AbortController();
-    const entry = { controller } as InFlightOperation<T>;
+    const entry = { controller, createdAt: Date.now() } as InFlightOperation<T>;
     entry.promise = Promise.resolve(operation(controller.signal)).finally(() => {
       // Only remove the entry this call created; a newer track() may own the key now.
       if (this.inFlight.get(key) === entry) {
