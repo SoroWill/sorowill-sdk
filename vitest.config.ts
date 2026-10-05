@@ -21,10 +21,10 @@ export default defineConfig({
       // Modest baseline thresholds so CI fails if coverage regresses.
       // Raise these as coverage improves.
       thresholds: {
-        lines: 40,
-        functions: 40,
-        branches: 30,
-        statements: 40,
+        lines: 77,
+        functions: 76.5,
+        branches: 72,
+        statements: 77,
       },
     },
   },

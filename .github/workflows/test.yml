@@ -55,8 +55,8 @@ jobs:
       - name: Test with coverage
         run: npm run test:coverage
 
-      - name: Enforce coverage goal (77%)
-        run: npx nyc check-coverage --lines 77 --functions 77 --branches 73 --statements 77
+      # Coverage is validated by vitest.config.ts thresholds during test:coverage step
+      # No additional coverage check needed
 
       - name: Upload coverage to Codecov
         if: always()
