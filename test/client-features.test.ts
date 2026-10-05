@@ -100,6 +100,7 @@ describe('batch transactions', () => {
     await expect(client.batch([{ method: 'first_operation', args: {} }])).resolves.toEqual({
       txHash: 'batch-hash',
       createdAt: 1_700_000_000,
+      success: true,
     });
     expect(preparedOperationCount).toBe(1);
   });
@@ -290,7 +291,7 @@ describe('sendTransaction status handling', () => {
 
     await expect(
       client.batch([{ method: 'dummy', args: {} }]),
-    ).resolves.toEqual({ txHash: 'dup-hash', createdAt: 1_700_000_000 });
+    ).resolves.toEqual({ txHash: 'dup-hash', createdAt: 1_700_000_000, success: true });
     expect(pollCalled).toBe(true);
   });
 

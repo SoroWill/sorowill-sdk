@@ -206,7 +206,7 @@ describe('Issue #213: Throwing afterInvoke hook on success path makes invoke() r
     hookManager.onAfterInvoke(throwingHook);
 
     freighterApiMock.signTransaction.mockResolvedValue({
-      signedXDR: 'SIGNED_XDR',
+      envelope_xdr: 'SIGNED_XDR',
       error: undefined,
     });
 
@@ -246,7 +246,7 @@ describe('Issue #213: Throwing afterInvoke hook on success path makes invoke() r
     hookManager.onAfterInvoke(countingHook);
 
     freighterApiMock.signTransaction.mockResolvedValue({
-      signedXDR: 'SIGNED_XDR',
+      envelope_xdr: 'SIGNED_XDR',
       error: undefined,
     });
 
@@ -268,7 +268,7 @@ describe('Issue #213: Throwing afterInvoke hook on success path makes invoke() r
     hookManager.onAfterInvoke(hookSpy);
 
     freighterApiMock.signTransaction.mockResolvedValue({
-      signedXDR: 'SIGNED_XDR',
+      envelope_xdr: 'SIGNED_XDR',
       error: undefined,
     });
 
@@ -296,7 +296,7 @@ describe('Issue #213: Throwing afterInvoke hook on success path makes invoke() r
     hookManager.onAfterInvoke(throwingHook);
 
     freighterApiMock.signTransaction.mockResolvedValue({
-      signedXDR: 'SIGNED_XDR',
+      envelope_xdr: 'SIGNED_XDR',
       error: undefined,
     });
 
@@ -323,7 +323,7 @@ describe('Issue #213: Throwing afterInvoke hook on success path makes invoke() r
     hookManager.onAfterInvoke(secondHook);
 
     freighterApiMock.signTransaction.mockResolvedValue({
-      signedXDR: 'SIGNED_XDR',
+      envelope_xdr: 'SIGNED_XDR',
       error: undefined,
     });
 
