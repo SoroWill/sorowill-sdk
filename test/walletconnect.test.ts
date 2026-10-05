@@ -446,7 +446,8 @@ describe('WalletConnectAdapter – connection timeout', () => {
   it('throws WalletConnectTimeoutError when approval hangs beyond connectionTimeoutMs', async () => {
     vi.useFakeTimers();
 
-    let _disconnectCalled = false;
+    // Unused - would track if disconnect was called
+    // let disconnectCalled = false;
     const hangingClient: WalletConnectClient = {
       async connect() {
         return {
@@ -460,7 +461,7 @@ describe('WalletConnectAdapter – connection timeout', () => {
         };
       },
       async disconnect() {
-        _disconnectCalled = true;
+        // disconnectCalled = true;
       },
       async getSession() {
         return null;

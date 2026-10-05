@@ -40,8 +40,9 @@ describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () 
   }
 
   it('falls back to the secondary endpoint when the primary hangs beyond endpointTimeoutMs', async () => {
-    const _primaryServer = makeMockServer('hang');
-    const _secondaryServer = makeMockServer('fast');
+    // Unused mock servers - test uses serverOverride instead
+    // const primaryServer = makeMockServer('hang');
+    // const secondaryServer = makeMockServer('fast');
 
     // Alternate servers: index 0 → primary (hangs), index 1 → secondary (fast).
     let callIndex = 0;
@@ -161,12 +162,13 @@ describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () 
 
   it('promotes the primary endpoint again after the failover cooldown', async () => {
     let callIndex = 0;
-    const serverOverride = {
-      getHealth: vi.fn(async () => {
-        callIndex++;
-        return { status: 'ok' };
-      }),
-    } as unknown as SoroWillRpcServer;
+    // Unused server override - inline servers used instead
+    // const serverOverride = {
+    //   getHealth: vi.fn(async () => {
+    //     callIndex++;
+    //     return { status: 'ok' };
+    //   }),
+    // } as unknown as SoroWillRpcServer;
 
     const pool = new RpcEndpointPool(
       ['https://primary.example', 'https://secondary.example'],

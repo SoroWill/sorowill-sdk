@@ -15,8 +15,9 @@ import { buildSep7TxUri } from '../src/sep7';
 const STUB_XDR = 'AAAAAAAA';
 
 // Realistic signed XDR for round-trip tests (contains `/`, `+`, `=` — base64 chars)
-const _SIGNED_XDR =
-  'AAAAAgAAAACRoooLdDgVk6TZRpV5IIkmr8itgsiDm3ZENZueuppLOgAAAAAAAAAAAAAAAgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAbqaSzoAAABAX2162UVnup/NxzMRqa9WzkuatQTkJhYahDGd4dP7cjsRs9zozjzpD9PZGp6ZU2FXnG1pyPIzsByNJuC0eE0LCA==';
+// Unused - could be used for future tests
+// const SIGNED_XDR =
+//   'AAAAAgAAAACRoooLdDgVk6TZRpV5IIkmr8itgsiDm3ZENZueuppLOgAAAAAAAAAAAAAAAgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAbqaSzoAAABAX2162UVnup/NxzMRqa9WzkuatQTkJhYahDGd4dP7cjsRs9zozjzpD9PZGp6ZU2FXnG1pyPIzsByNJuC0eE0LCA==';
 
 describe('sep7.ts — issue #495: URL parameter encoding', () => {
   // ── Callback URL with query parameters ────────────────────────────────────
@@ -55,7 +56,8 @@ describe('sep7.ts — issue #495: URL parameter encoding', () => {
 
   it('encodes callback URL containing spaces as %20', () => {
     // While unusual, spaces in URLs should be handled
-    const _callbackWithSpace = 'https://example.com/callback path';
+    // Unused - test uses encoded space version instead
+    // const callbackWithSpace = 'https://example.com/callback path';
     // This will fail URL validation — use encoded space in path instead
     const callbackEncoded = 'https://example.com/callback%20path';
     const uri = buildSep7TxUri(STUB_XDR, { callbackUrl: callbackEncoded });
