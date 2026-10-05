@@ -18,26 +18,27 @@ describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () 
     vi.useRealTimers();
   });
 
-  function makeMockServer(behaviour: 'hang' | 'fast' | 'error'): SoroWillRpcServer {
-    return {
-      getHealth: vi.fn(async () => {
-        if (behaviour === 'hang') {
-          // Never resolves — simulates an unresponsive primary endpoint
-          return new Promise<never>(() => undefined);
-        }
-        if (behaviour === 'error') {
-          throw new Error('fetch failed');
-        }
-        return { status: 'healthy' };
-      }),
-      simulateTransaction: vi.fn(),
-      getAccount: vi.fn(),
-      prepareTransaction: vi.fn(),
-      sendTransaction: vi.fn(),
-      pollTransaction: vi.fn(),
-      getContractWasmByContractId: vi.fn(),
-    } as unknown as SoroWillRpcServer;
-  }
+  // Unused helper - commented out with its callers
+  // function makeMockServer(behaviour: 'hang' | 'fast' | 'error'): SoroWillRpcServer {
+  //   return {
+  //     getHealth: vi.fn(async () => {
+  //       if (behaviour === 'hang') {
+  //         // Never resolves — simulates an unresponsive primary endpoint
+  //         return new Promise<never>(() => undefined);
+  //       }
+  //       if (behaviour === 'error') {
+  //         throw new Error('fetch failed');
+  //       }
+  //       return { status: 'healthy' };
+  //     }),
+  //     simulateTransaction: vi.fn(),
+  //     getAccount: vi.fn(),
+  //     prepareTransaction: vi.fn(),
+  //     sendTransaction: vi.fn(),
+  //     pollTransaction: vi.fn(),
+  //     getContractWasmByContractId: vi.fn(),
+  //   } as unknown as SoroWillRpcServer;
+  // }
 
   it('falls back to the secondary endpoint when the primary hangs beyond endpointTimeoutMs', async () => {
     // Unused mock servers - test uses serverOverride instead
