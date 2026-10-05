@@ -10,9 +10,8 @@ import type { SoroWillRpcServer } from '../src/SoroWillClient';
  * be rotated to the back of the pool so that secondary endpoints are tried.
  */
 describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () => {
-  // Note: These tests use real timers instead of fake timers because Promise.race
-  // with setTimeout doesn't work reliably in Vitest's fake timer environment.
-  // Real timers are used with short timeouts (50ms) to keep tests fast.
+  // Note: Most tests use real timers, but some require fake timers for reliable
+  // endpoint state tracking during timeout/failover sequences.
 
   // Unused helper - commented out with its callers
   // function makeMockServer(behaviour: 'hang' | 'fast' | 'error'): SoroWillRpcServer {
@@ -86,7 +85,10 @@ describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () 
       1, // Only 1 attempt per endpoint to avoid retries with real timers
     );
 
-    await pool.withFailover((server) => (server as any).getHealth());
+    const result = await pool.withFailover((server) => (server as any).getHealth()).catch(() => null);
+
+    // Should have succeeded with the secondary endpoint
+    expect(result).toEqual({ status: 'ok' });
 
     // After the failover the active URL should be the secondary.
     expect(pool.getActiveRpcUrl()).toBe('https://secondary.example');
