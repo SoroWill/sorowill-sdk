@@ -457,7 +457,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
 
     if (result && typeof result === 'object' && 'error' in result && result.error) {
       const errorMessage = typeof result.error === 'object' && result.error !== null && 'message' in result.error
-        ? (result.error as any).message
+        ? String((result.error as Record<string, unknown>).message)
         : String(result.error);
       throw new Error(errorMessage);
     }
