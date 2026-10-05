@@ -49,6 +49,9 @@ vi.mock('@stellar/stellar-sdk', () => {
 
     getContractWasmByContractId = mockState.getContractWasmByContractId;
     prepareTransaction = mockState.prepareTransaction;
+    async getAccount(accountId: string) {
+      return new MockAccount(accountId, '0');
+    }
   }
 
   class MockTransactionBuilder {

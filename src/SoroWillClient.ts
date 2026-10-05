@@ -694,6 +694,7 @@ export class SoroWillClient {
    * stale fees from the previous network (#500).
    */
   private feeStatsCache: Map<string, rpc.Api.GetFeeStatsResponse>;
+  private lastFeeStatsCachedPassphrase: string | undefined;
   private readonly debug: boolean;
   private readonly debugLogger: DebugLogger;
   private readonly autoFeeBumpOnTimeout: boolean;
@@ -2400,8 +2401,8 @@ export class SoroWillClient {
     // Detect network changes: if the wallet reports a different passphrase than
     // the one we last cached stats for, flush the whole cache first (#500).
     const currentPassphrase = await this.resolveCurrentNetworkPassphrase();
-    if (currentPassphrase !== this.networkPassphrase) {
-      // The wallet is on a different network than the client was configured for.
+    if (currentPassphrase !== this.lastFeeStatsCachedPassphrase && this.lastFeeStatsCachedPassphrase !== undefined) {
+      // The wallet is on a different network than when we last cached.
       // Clear every cached entry so nothing stale leaks through.
       this.feeStatsCache.clear();
     }
@@ -2414,6 +2415,7 @@ export class SoroWillClient {
 
     const result = await this.rpc(() => server.getFeeStats!(), options);
     this.feeStatsCache.set(cacheKey, result);
+    this.lastFeeStatsCachedPassphrase = currentPassphrase;
     return result;
   }
 
