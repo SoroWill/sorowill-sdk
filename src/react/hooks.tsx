@@ -73,6 +73,12 @@ export function useSoroWillClient(options: SoroWillClientOptions): SoroWillClien
     }
   }, [client]);
 
+  getReact().useEffect(() => {
+    return () => {
+      client.destroy();
+    };
+  }, [client]);
+
   return client;
 }
 

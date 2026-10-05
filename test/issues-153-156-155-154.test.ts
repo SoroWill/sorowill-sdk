@@ -399,7 +399,7 @@ describe('#154 – FreighterWalletAdapter.signTransaction timeout', () => {
     });
 
     // Advance timers past the timeout.
-    vi.advanceTimersByTime(1_001);
+    await vi.advanceTimersByTimeAsync(1_001);
 
     await expect(signPromise).rejects.toThrow(SignTransactionTimeoutError);
   });
@@ -413,7 +413,7 @@ describe('#154 – FreighterWalletAdapter.signTransaction timeout', () => {
       timeoutMs: 2_000,
     });
 
-    vi.advanceTimersByTime(2_001);
+    await vi.advanceTimersByTimeAsync(2_001);
 
     let thrown: unknown;
     try {
@@ -431,7 +431,7 @@ describe('#154 – FreighterWalletAdapter.signTransaction timeout', () => {
     const adapter = new FreighterWalletAdapter();
     const signPromise = adapter.signTransaction(testXdr, { networkPassphrase, timeoutMs: 500 });
 
-    vi.advanceTimersByTime(501);
+    await vi.advanceTimersByTimeAsync(501);
 
     await expect(signPromise).rejects.toThrow(SoroWillError);
   });
@@ -442,7 +442,7 @@ describe('#154 – FreighterWalletAdapter.signTransaction timeout', () => {
     const adapter = new FreighterWalletAdapter();
     const signPromise = adapter.signTransaction(testXdr, { networkPassphrase, timeoutMs: 500 });
 
-    vi.advanceTimersByTime(501);
+    await vi.advanceTimersByTimeAsync(501);
 
     let thrown: unknown;
     try {
@@ -460,10 +460,10 @@ describe('#154 – FreighterWalletAdapter.signTransaction timeout', () => {
     const signPromise = adapter.signTransaction(testXdr, { networkPassphrase });
 
     // Just before default timeout: should still be pending.
-    vi.advanceTimersByTime(119_999);
+    await vi.advanceTimersByTimeAsync(119_999);
     // Should not have rejected yet (we can't easily assert "still pending" with
     // Promise.race, so we just advance past the threshold and assert it throws).
-    vi.advanceTimersByTime(2);
+    await vi.advanceTimersByTimeAsync(2);
 
     await expect(signPromise).rejects.toThrow(SignTransactionTimeoutError);
   });

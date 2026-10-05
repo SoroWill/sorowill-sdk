@@ -52,7 +52,7 @@ describe('Issue #487 — InFlightTracker TTL and max-size cleanup', () => {
     expect(tracker.size).toBe(1);
 
     // Advance past TTL
-    vi.advanceTimersByTime(2_000);
+    await vi.advanceTimersByTimeAsync(2_000);
 
     // Lazy check removes it
     expect(tracker.isInFlight('will-stuck', 'checkIn')).toBe(false);
@@ -65,7 +65,7 @@ describe('Issue #487 — InFlightTracker TTL and max-size cleanup', () => {
     tracker.track('will-1', 'checkIn', (_signal) => new Promise<string>(() => undefined));
     expect(tracker.getInFlightPromise('will-1', 'checkIn')).toBeDefined();
 
-    vi.advanceTimersByTime(600);
+    await vi.advanceTimersByTimeAsync(600);
 
     expect(tracker.getInFlightPromise('will-1', 'checkIn')).toBeUndefined();
   });
@@ -85,7 +85,7 @@ describe('Issue #487 — InFlightTracker TTL and max-size cleanup', () => {
     expect(callCount).toBe(1);
 
     // Simulate time passing so a hypothetical stuck entry would expire
-    vi.advanceTimersByTime(600);
+    await vi.advanceTimersByTimeAsync(600);
 
     // Second call should start a new operation, not return the old promise
     await makeOp();
@@ -143,7 +143,7 @@ describe('Issue #487 — InFlightTracker TTL and max-size cleanup', () => {
 
   // ─── pruneExpired via track() ─────────────────────────────────────────
 
-  it('pruneExpired clears stale entries when new track() is called', () => {
+  it('pruneExpired clears stale entries when new track() is called', async () => {
     const tracker = new InFlightTracker(1_000, 100);
 
     // Add stuck operations
@@ -152,7 +152,7 @@ describe('Issue #487 — InFlightTracker TTL and max-size cleanup', () => {
     expect(tracker.size).toBe(2);
 
     // Advance past TTL
-    vi.advanceTimersByTime(200);
+    await vi.advanceTimersByTimeAsync(200);
 
     // Adding a new entry triggers pruneExpired internally
     tracker.track('will-new', 'checkIn', (_signal) => new Promise<string>(() => undefined));
@@ -176,7 +176,7 @@ describe('Issue #487 — InFlightTracker TTL and max-size cleanup', () => {
       });
     });
 
-    vi.advanceTimersByTime(200);
+    await vi.advanceTimersByTimeAsync(200);
 
     // Trigger lazy eviction via isInFlight
     tracker.isInFlight('will-1', 'checkIn');
