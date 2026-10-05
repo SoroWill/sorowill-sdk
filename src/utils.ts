@@ -77,7 +77,8 @@ export function formatUSDC(stroops: bigint, decimals = USDC_DECIMALS): string {
   const wholeFormatted = whole.toLocaleString('en-US');
 
   if (decimals <= 0) {
-    return `${negative ? '-' : ''}${wholeFormatted}`;
+    // When decimals <= 0, show .00 (cents format)
+    return `${negative ? '-' : ''}${wholeFormatted}.00`;
   }
 
   const fractionPadded = fraction.toString().padStart(decimals, '0');

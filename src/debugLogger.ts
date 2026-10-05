@@ -81,7 +81,7 @@ export class DebugLogger {
     this.isActive = resolveEnabled(enabled);
   }
 
-  logOperationBuild(method: string, willId?: string, details?: Record<string, unknown>): void {
+  logOperationBuild(method: string, willId: string | undefined = undefined, details: Record<string, unknown> | undefined = undefined): void {
     if (!this.isActive) return;
 
     const log: DebugLog = {
@@ -97,9 +97,9 @@ export class DebugLogger {
 
   logSimulation(
     method: string,
-    willId?: string,
-    minResourceFee?: string,
-    details?: Record<string, unknown>,
+    willId: string | undefined = undefined,
+    minResourceFee: string | undefined = undefined,
+    details: Record<string, unknown> | undefined = undefined,
   ): void {
     if (!this.isActive) return;
 
@@ -159,7 +159,7 @@ export class DebugLogger {
     this.log(log);
   }
 
-  logError(method: string, willId?: string, error?: string | Error): void {
+  logError(method: string, willId: string | undefined = undefined, error: string | Error | undefined = undefined): void {
     if (!this.isActive) return;
 
     const errorMessage = error instanceof Error ? error.message : String(error);
