@@ -81,7 +81,7 @@ describe('#371 polling subscription with a throwing listener', () => {
     ];
     const fetchImpl = vi.fn(async (_url: string, init: { body: string }) => {
       bodies.push(JSON.parse(init.body));
-      return { json: async () => ({ result: pages.shift() ?? { events: [] } }) };
+      return { ok: true, json: async () => ({ result: pages.shift() ?? { events: [] } }) };
     });
     const client = new SoroWillClient({ network: 'testnet', contractId: CONTRACT_ID, fetch: fetchImpl as any });
 
