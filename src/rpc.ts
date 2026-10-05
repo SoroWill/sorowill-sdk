@@ -9,6 +9,22 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Wraps a promise with a timeout; rejects if the promise doesn't settle within ms. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  if (ms <= 0) {
+    return promise;
+  }
+
+  return Promise.race([
+    promise,
+    new Promise<T>((_resolve, reject) => {
+      setTimeout(() => {
+        reject(new Error(`Request timeout after ${ms}ms`));
+      }, ms);
+    }),
+  ]);
+}
+
 export function isRetryableRpcConnectionError(error: unknown): boolean {
   const CONNECTION_FRAGMENTS = [
     'fetch failed',
@@ -243,14 +259,8 @@ export class RpcEndpointPool {
 
     for (let attempt = 0; attempt < this.timeoutMaxAttempts; attempt += 1) {
       try {
-        // Enforce per-endpoint timeout by racing against a timer (unless disabled with 0ms)
-        if (this.timeoutMs > 0) {
-          const timeoutPromise = sleep(this.timeoutMs).then((): never => {
-            throw new Error(`Request timeout after ${this.timeoutMs}ms`);
-          });
-          return await Promise.race([operation(server, rpcUrl), timeoutPromise]);
-        }
-        return await operation(server, rpcUrl);
+        // Enforce per-endpoint timeout
+        return await withTimeout(operation(server, rpcUrl), this.timeoutMs);
       } catch (error) {
         lastError = error;
         const isLastAttempt = attempt === this.timeoutMaxAttempts - 1;
