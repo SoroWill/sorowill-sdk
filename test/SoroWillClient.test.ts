@@ -308,7 +308,7 @@ describe('SoroWillClient', () => {
         token: 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526',
         amount: 1000n,
       }),
-    ).resolves.toEqual({ resourceFee: '1500' });
+    ).resolves.toEqual({ resourceFee: '1500', totalFee: '1600' });
 
     await expect(
       client.previewFee('top_up', {
@@ -316,7 +316,7 @@ describe('SoroWillClient', () => {
         owner: 'GTESTACCOUNT',
         amount: 500n,
       }),
-    ).resolves.toEqual({ resourceFee: '2750' });
+    ).resolves.toEqual({ resourceFee: '2750', totalFee: '2850' });
 
     expect(mockState.sendTransaction).not.toHaveBeenCalled();
   });
