@@ -89,7 +89,7 @@ describe('#371 polling subscription with a throwing listener', () => {
     const onError = vi.fn();
     const subscription = await client.subscribeToEvents(
       (event) => {
-        if (event.id) delivered.push(event.id);
+        delivered.push(event.id);
         if (event.id === 'evt-1') throw new Error('listener failed');
       },
       { transport: 'polling', pollIntervalMs: 5, onError },

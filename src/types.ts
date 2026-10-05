@@ -332,7 +332,7 @@ export interface RequestOptions {
 }
 
 export interface SoroWillEvent {
-  id?: string;
+  id: string;
   type: string;
   cursor: string;
   ledger: number | null;

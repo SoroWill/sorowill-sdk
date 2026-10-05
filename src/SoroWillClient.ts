@@ -557,6 +557,7 @@ interface RawEventRecord {
 function mapEventRecord(record: RawEventRecord, fallbackContractId: string): SoroWillEvent {
   const cursor = record.pagingToken ?? record.id ?? '';
   return {
+    id: record.id ?? cursor,
     cursor,
     ledger: record.ledger ?? null,
     ledgerClosedAt: record.ledgerClosedAt ? new Date(record.ledgerClosedAt) : null,
