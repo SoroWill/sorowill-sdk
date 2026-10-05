@@ -221,7 +221,7 @@ function injectedProvider(): InjectedWalletProvider {
   return {
     connect: vi.fn().mockResolvedValue(connection),
     disconnect: vi.fn().mockResolvedValue(undefined),
-    signTransaction: vi.fn().mockResolvedValue({ envelope_xdr: 'signed-xdr' }),
+    signTransaction: vi.fn().mockResolvedValue({ signedTxXdr: 'signed-xdr' }),
   };
 }
 
