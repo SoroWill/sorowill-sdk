@@ -51,8 +51,8 @@ export class InFlightTracker {
 
   getKey(willId: string | bigint, method: string, clientId?: string): OperationKey {
     const id = typeof willId === 'bigint' ? willId.toString() : willId;
-    const scope = clientId ?? this.scopeId ?? '';
-    return `${scope}:${id}:${method}`;
+    const scope = clientId ?? this.scopeId;
+    return scope ? `${scope}:${id}:${method}` : `${id}:${method}`;
   }
 
   isInFlight(willId: string | bigint, method: string, clientId?: string): boolean {
