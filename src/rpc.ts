@@ -19,7 +19,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
     promise,
     new Promise<T>((_resolve, reject) => {
       setTimeout(() => {
-        reject(new Error(`Request timeout after ${ms}ms`));
+        reject(new Error(`Request timed out after ${ms}ms`));
       }, ms);
     }),
   ]);

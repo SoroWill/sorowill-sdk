@@ -10,13 +10,9 @@ import type { SoroWillRpcServer } from '../src/SoroWillClient';
  * be rotated to the back of the pool so that secondary endpoints are tried.
  */
 describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+  // Note: These tests use real timers instead of fake timers because Promise.race
+  // with setTimeout doesn't work reliably in Vitest's fake timer environment.
+  // Real timers are used with short timeouts (50ms) to keep tests fast.
 
   // Unused helper - commented out with its callers
   // function makeMockServer(behaviour: 'hang' | 'fast' | 'error'): SoroWillRpcServer {
@@ -41,10 +37,6 @@ describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () 
   // }
 
   it('falls back to the secondary endpoint when the primary hangs beyond endpointTimeoutMs', async () => {
-    // Unused mock servers - test uses serverOverride instead
-    // const primaryServer = makeMockServer('hang');
-    // const secondaryServer = makeMockServer('fast');
-
     // Alternate servers: index 0 → primary (hangs), index 1 → secondary (fast).
     let callIndex = 0;
     const serverOverride = {
@@ -58,20 +50,16 @@ describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () 
       }),
     } as unknown as SoroWillRpcServer;
 
-    // Use a very short timeout (50 ms) so the test runs quickly.
+    // Use a very short timeout (50 ms) so the test runs quickly with real timers.
     const pool = new RpcEndpointPool(
       ['https://primary.example', 'https://secondary.example'],
       serverOverride,
       60_000, // failoverCooldownMs
-      50,     // endpointTimeoutMs — short so the test is fast
+      50,     // endpointTimeoutMs
     );
 
-    const operationPromise = pool.withFailover((server) => (server as any).getHealth());
-
-    // Advance fake timers past the per-endpoint timeout.
-    await vi.advanceTimersByTimeAsync(100);
-
-    const result = await operationPromise;
+    // With real timers, the operation will timeout naturally after 50ms
+    const result = await pool.withFailover((server) => (server as any).getHealth());
     expect(result).toEqual({ status: 'healthy' });
     // The hanging call was attempted once, then the secondary was called.
     expect(callIndex).toBe(2);
@@ -97,9 +85,7 @@ describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () 
       50,
     );
 
-    const p = pool.withFailover((server) => (server as any).getHealth());
-    await vi.advanceTimersByTimeAsync(100);
-    await p;
+    await pool.withFailover((server) => (server as any).getHealth());
 
     // After the failover the active URL should be the secondary.
     expect(pool.getActiveRpcUrl()).toBe('https://secondary.example');
@@ -119,10 +105,8 @@ describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () 
       50,
     );
 
-    const p = pool.withFailover((server) => (server as any).getHealth());
-    // Advance past both endpoint timeouts.
-    await vi.advanceTimersByTimeAsync(200);
-    await expect(p).rejects.toThrow(/timed out/i);
+    // Both endpoints will timeout (50ms each + retry delay)
+    await expect(pool.withFailover((server) => (server as any).getHealth())).rejects.toThrow(/timed out/i);
   });
 
   it('does not apply per-endpoint timeout when endpointTimeoutMs is 0 (disabled)', async () => {
@@ -163,7 +147,7 @@ describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () 
 
   it('promotes the primary endpoint again after the failover cooldown', async () => {
     let callIndex = 0;
-    // Unused server override - inline servers used instead
+    // Note: This test cannot use fake timers reliably; cooldown is tested with actual timing
     // const serverOverride = {
     //   getHealth: vi.fn(async () => {
     //     callIndex++;
@@ -185,18 +169,14 @@ describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () 
     );
 
     // First call — primary hangs, secondary takes over.
-    const p = pool.withFailover((server) => (server as any).getHealth());
-    await vi.advanceTimersByTimeAsync(200);
-    await p;
+    await pool.withFailover((server) => (server as any).getHealth());
     expect(pool.getActiveRpcUrl()).toBe('https://secondary.example');
 
-    // Advance past the failover cooldown.
-    await vi.advanceTimersByTimeAsync(200);
+    // Wait past the failover cooldown (100ms).
+    await new Promise(resolve => setTimeout(resolve, 150));
 
     // After cooldown, the next call should re-promote the primary.
-    const p2 = pool.withFailover((server) => (server as any).getHealth());
-    await vi.advanceTimersByTimeAsync(50);
-    await p2;
+    await pool.withFailover((server) => (server as any).getHealth());
     expect(pool.getActiveRpcUrl()).toBe('https://primary.example');
   });
 });
