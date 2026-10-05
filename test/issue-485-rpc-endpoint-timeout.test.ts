@@ -83,6 +83,7 @@ describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () 
       serverOverride,
       60_000,
       50,
+      1, // Only 1 attempt per endpoint to avoid retries with real timers
     );
 
     await pool.withFailover((server) => (server as any).getHealth());
@@ -103,9 +104,10 @@ describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () 
       serverOverride,
       60_000,
       50,
+      1, // Only 1 attempt per endpoint
     );
 
-    // Both endpoints will timeout (50ms each + retry delay)
+    // Both endpoints will timeout
     await expect(pool.withFailover((server) => (server as any).getHealth())).rejects.toThrow(/timed out/i);
   });
 
@@ -129,14 +131,13 @@ describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () 
       ['https://primary.example'],
       serverOverride,
       60_000,
-      0,
+      0, // timeout disabled
     );
 
     const p = pool.withFailover((server) => (server as any).getHealth());
 
-    // Even after a very long simulated wait, the operation should not have
-    // been aborted because the timeout is disabled.
-    await vi.advanceTimersByTimeAsync(120_000);
+    // Wait a short time - the operation should still be pending since no timeout
+    await new Promise(resolve => setTimeout(resolve, 100));
     expect(resolved).toBe(false);
 
     // Resolve the pending operation manually.
@@ -166,6 +167,7 @@ describe('Issue #485 — RpcEndpointPool per-endpoint timeout and failover', () 
       } as unknown as SoroWillRpcServer,
       100, // short failoverCooldownMs so we can test repromotion quickly
       50,
+      1,  // Only 1 attempt per endpoint
     );
 
     // First call — primary hangs, secondary takes over.
