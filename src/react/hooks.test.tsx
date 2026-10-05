@@ -26,7 +26,6 @@ describe('useSoroWillClient', () => {
 
   it('rebuilds the client when retry changes', () => {
     const { result, rerender } = renderHook(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ({ retry }: { retry: unknown }) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return useSoroWillClient({ network: 'testnet', contractId: 'CABC', retry: retry as any });
