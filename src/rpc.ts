@@ -243,6 +243,13 @@ export class RpcEndpointPool {
 
     for (let attempt = 0; attempt < this.timeoutMaxAttempts; attempt += 1) {
       try {
+        // Enforce per-endpoint timeout by racing against a timer (unless disabled with 0ms)
+        if (this.timeoutMs > 0) {
+          const timeoutPromise = sleep(this.timeoutMs).then((): never => {
+            throw new Error(`Request timeout after ${this.timeoutMs}ms`);
+          });
+          return await Promise.race([operation(server, rpcUrl), timeoutPromise]);
+        }
         return await operation(server, rpcUrl);
       } catch (error) {
         lastError = error;
