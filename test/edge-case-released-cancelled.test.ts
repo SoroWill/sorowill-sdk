@@ -42,6 +42,7 @@ const TEST_ACCOUNT = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 
 vi.mock('../src/wallet', () => ({
   getPublicKey: vi.fn(async () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'),
+  normalizeSignatureResponse: vi.fn((resp: unknown) => resp),
   signTransaction: vi.fn(async (tx: string) => tx),
   getDefaultWalletAdapter: vi.fn(() => ({
     isConnected: async () => true,

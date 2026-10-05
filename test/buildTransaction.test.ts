@@ -21,9 +21,11 @@ function makeRealSignedXdr(): string {
 
 vi.mock('../src/wallet', () => ({
   getPublicKey: vi.fn(async () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'),
+  normalizeSignatureResponse: vi.fn((resp: unknown) => resp),
   signTransaction: vi.fn(async (transactionXdr: string) => transactionXdr),
   getDefaultWalletAdapter: vi.fn(() => ({
     getPublicKey: vi.fn(async () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'),
+  normalizeSignatureResponse: vi.fn((resp: unknown) => resp),
     signTransaction: vi.fn(async (transactionXdr: string) => transactionXdr),
     isConnected: vi.fn(async () => true),
     connect: vi.fn(),

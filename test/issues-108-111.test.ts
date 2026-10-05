@@ -46,6 +46,7 @@ vi.mock('@stellar/stellar-sdk', async () => {
 
 vi.mock('../src/wallet', () => ({
   getPublicKey: vi.fn(async () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'),
+  normalizeSignatureResponse: vi.fn((resp: unknown) => resp),
   signTransaction: vi.fn(async (tx: string) => tx),
   getDefaultWalletAdapter: vi.fn(() => ({
     isConnected: async () => true,

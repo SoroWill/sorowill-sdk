@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('../src/wallet', () => ({
   freighterAdapter: {
     getPublicKey: vi.fn(async () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'),
+  normalizeSignatureResponse: vi.fn((resp: unknown) => resp),
     signTransaction: vi.fn(async (transactionXdr: string) => transactionXdr),
   },
   getDefaultWalletAdapter: vi.fn(() => ({
@@ -15,6 +16,7 @@ vi.mock('../src/wallet', () => ({
     disconnect: async () => undefined,
   })),
   getPublicKey: vi.fn(async () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'),
+  normalizeSignatureResponse: vi.fn((resp: unknown) => resp),
   signTransaction: vi.fn(async (transactionXdr: string) => transactionXdr),
 }));
 

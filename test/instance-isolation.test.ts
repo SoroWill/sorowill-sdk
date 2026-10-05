@@ -178,6 +178,7 @@ vi.mock('@stellar/stellar-sdk', () => {
 vi.mock('../src/wallet', () => ({
   freighterAdapter: { getPublicKey: vi.fn(), signTransaction: vi.fn() },
   getPublicKey: vi.fn(async () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'),
+  normalizeSignatureResponse: vi.fn((resp: unknown) => resp),
   signTransaction: vi.fn(async (tx: string) => tx),
   getDefaultWalletAdapter: vi.fn(() => ({
     isConnected: async () => true,
