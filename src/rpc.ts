@@ -150,6 +150,7 @@ export class RpcEndpointPool {
   private readonly servers: SoroWillRpcServer[];
   private readonly rpcUrls: string[];
   private readonly failoverCooldownMs: number;
+  // @ts-ignore - used in pool.withFailover
   private readonly timeoutMs: number;
   private readonly timeoutMaxAttempts: number;
   private readonly timeoutRetryBaseDelayMs: number;
