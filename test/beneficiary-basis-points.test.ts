@@ -215,7 +215,7 @@ describe('contract basis points -> beneficiary percentage (#362)', () => {
     return {
       id: 1n,
       owner: A,
-      token: 'CTOKEN',
+      token: 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526',
       balance: 1_000_000n,
       beneficiaries,
       checkin_period_days: 90n,
@@ -239,7 +239,7 @@ describe('contract basis points -> beneficiary percentage (#362)', () => {
     ];
     const client = makeClient();
     await client.createWill({
-      token: 'CTOKEN',
+      token: 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526',
       amount: '1000000',
       beneficiaries: input,
       checkinPeriodDays: 90,
