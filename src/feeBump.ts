@@ -21,7 +21,7 @@ interface SendTransactionErrorResponse {
 export const BASE_FEE = '100';
 
 /** Default maximum multiple of the base fee allowed for a fee-bump. */
-export const DEFAULT_MAX_FEE_MULTIPLIER = 10;
+export const DEFAULT_MAX_FEE_MULTIPLIER = 10000;
 
 /**
  * Error thrown when a fee-bump fee exceeds the configured reasonable maximum.

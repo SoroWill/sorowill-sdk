@@ -548,8 +548,12 @@ export async function signTransaction(xdr: string, opts: SignTransactionOptions)
 
 export async function isFreighterInstalled(): Promise<boolean> {
   try {
-    await loadFreighterApi();
-    return true;
+    const freighterApi = await loadFreighterApi();
+    const { isConnected, error } = await freighterApi.isConnected();
+    if (error && error.code === FREIGHTER_NOT_INSTALLED_CODE) {
+      return false;
+    }
+    return isConnected && !error;
   } catch {
     return false;
   }

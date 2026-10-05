@@ -132,9 +132,22 @@ describe('signTransaction', () => {
   const testXdr = 'AAAAAgAAAAD...base64xdr...';
   const signedXdr = 'AAAAAgAAAAD...signed...';
   const networkPassphrase = 'Test SDF Network ; September 2015';
+  const testAddress = 'GTESTACCOUNT12345678901234567890123456789012';
 
   beforeEach(() => {
     freighterApiMock.signTransaction.mockReset();
+    freighterApiMock.getAddress.mockReset();
+    freighterApiMock.getNetworkDetails.mockReset();
+    // Set up default mocks for session validation
+    freighterApiMock.getAddress.mockResolvedValue({
+      address: testAddress,
+      error: undefined,
+    });
+    freighterApiMock.getNetworkDetails.mockResolvedValue({
+      network: 'TESTNET',
+      networkPassphrase,
+      error: undefined,
+    });
   });
 
   it('returns the signed transaction XDR on success', async () => {
@@ -249,6 +262,25 @@ describe('FreighterWalletAdapter', () => {
   });
 
   describe('signTransaction', () => {
+    const testAddress = 'GTESTACCOUNT12345678901234567890123456789012';
+    const networkPassphrase = 'Test SDF Network ; September 2015';
+
+    beforeEach(() => {
+      freighterApiMock.signTransaction.mockReset();
+      freighterApiMock.getAddress.mockReset();
+      freighterApiMock.getNetworkDetails.mockReset();
+      // Set up default mocks for session validation
+      freighterApiMock.getAddress.mockResolvedValue({
+        address: testAddress,
+        error: undefined,
+      });
+      freighterApiMock.getNetworkDetails.mockResolvedValue({
+        network: 'TESTNET',
+        networkPassphrase,
+        error: undefined,
+      });
+    });
+
     it('returns signed XDR on success', async () => {
       freighterApiMock.signTransaction.mockResolvedValue({
         envelope_xdr: 'SIGNED_XDR',
@@ -257,7 +289,7 @@ describe('FreighterWalletAdapter', () => {
 
       const adapter = new FreighterWalletAdapter();
       const result = await adapter.signTransaction('RAW_XDR', {
-        networkPassphrase: 'Test SDF Network ; September 2015',
+        networkPassphrase,
       });
 
       expect(result).toBe('SIGNED_XDR');
@@ -272,7 +304,7 @@ describe('FreighterWalletAdapter', () => {
       const adapter = new FreighterWalletAdapter();
       await expect(
         adapter.signTransaction('RAW_XDR', {
-          networkPassphrase: 'Test SDF Network ; September 2015',
+          networkPassphrase,
         }),
       ).rejects.toThrow('Transaction rejected by user');
     });

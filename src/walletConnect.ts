@@ -218,6 +218,15 @@ export function extractSignedTransactionXdr(response: unknown): string {
     return response.signedTxXdr;
   }
 
+  if (
+    response &&
+    typeof response === 'object' &&
+    'envelope_xdr' in response &&
+    typeof response.envelope_xdr === 'string'
+  ) {
+    return response.envelope_xdr;
+  }
+
   throw new Error('WalletConnect signing response did not include a signed transaction XDR');
 }
 
@@ -398,8 +407,20 @@ export class WalletConnectAdapter implements WalletAdapter {
     return resolver(session);
   }
 
-  async signTransaction(xdr: string, _options?: SignTransactionOptions): Promise<string> {
+  async signTransaction(xdr: string, options?: SignTransactionOptions): Promise<string> {
     const session = await this.requireSession();
+
+    // Validate that the requested networkPassphrase matches the session's network
+    if (options?.networkPassphrase) {
+      const sessionNetwork = this.resolveNetwork(session);
+      if (options.networkPassphrase !== sessionNetwork.networkPassphrase) {
+        throw new Error(
+          `WalletConnect session is connected to ${sessionNetwork.networkPassphrase}, ` +
+          `but transaction is for ${options.networkPassphrase}`
+        );
+      }
+    }
+
     const chainId = this.options.requestChainId ?? getDefaultChainId(session);
     const method = this.options.signTransactionMethod ?? 'stellar_signXdr';
 
