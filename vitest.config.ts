@@ -6,6 +6,7 @@ export default defineConfig({
     globals: true,
     testTimeout: 30000,
     exclude: ['src/react/**/*.test.tsx', 'node_modules/**'],
+    setupFiles: ['./vitest.setup.ts'],
     coverage: {
       provider: 'v8',
       // Include all source files so uncovered files are reported, not just
