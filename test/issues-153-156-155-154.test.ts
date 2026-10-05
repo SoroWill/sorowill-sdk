@@ -370,6 +370,8 @@ describe('#154 – FreighterWalletAdapter.signTransaction timeout', () => {
   });
 
   afterEach(() => {
+    // Clear all pending timers and switch back to real timers to avoid
+    // unhandled rejections from timeouts that fired after test completion
     vi.useRealTimers();
   });
 
