@@ -15,14 +15,18 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
     return promise;
   }
 
-  return Promise.race([
+  const TIMEOUT_SYMBOL = Symbol('timeout');
+  return Promise.race<T | typeof TIMEOUT_SYMBOL>([
     promise,
-    new Promise<T>((_resolve, reject) => {
-      setTimeout(() => {
-        reject(new Error(`Request timed out, timeout exceeded ${ms}ms`));
-      }, ms);
+    new Promise<typeof TIMEOUT_SYMBOL>((resolve) => {
+      setTimeout(() => resolve(TIMEOUT_SYMBOL), ms);
     }),
-  ]);
+  ]).then((result) => {
+    if (result === TIMEOUT_SYMBOL) {
+      throw new Error(`Request timed out, timeout exceeded ${ms}ms`);
+    }
+    return result as T;
+  });
 }
 
 export function isRetryableRpcConnectionError(error: unknown): boolean {

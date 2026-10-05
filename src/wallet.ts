@@ -444,7 +444,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
 
     // Race the Freighter call against a timer so that a hung or dismissed
     // popup never leaves the caller's promise pending
-    const result = await Promise.race([
+    const result = await Promise.race<unknown>([
       freighterApiPromise.then((freighterApi) =>
         freighterApi.signTransaction(transactionXdr, {
           networkPassphrase: opts.networkPassphrase,
