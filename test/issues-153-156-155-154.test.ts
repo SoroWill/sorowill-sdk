@@ -375,7 +375,7 @@ describe('#154 – FreighterWalletAdapter.signTransaction timeout', () => {
 
   it('resolves with the signed XDR before the timeout fires', async () => {
     freighterApiMock.signTransaction.mockResolvedValue({
-      signedTxXdr: 'SIGNED_XDR',
+      envelope_xdr: 'SIGNED_XDR',
       error: undefined,
     });
 

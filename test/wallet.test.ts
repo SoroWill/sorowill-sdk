@@ -139,7 +139,7 @@ describe('signTransaction', () => {
 
   it('returns the signed transaction XDR on success', async () => {
     freighterApiMock.signTransaction.mockResolvedValue({
-      signedTxXdr: signedXdr,
+      envelope_xdr: signedXdr,
       error: undefined,
     });
 
@@ -153,7 +153,7 @@ describe('signTransaction', () => {
 
   it('throws when the user rejects the signing request', async () => {
     freighterApiMock.signTransaction.mockResolvedValue({
-      signedTxXdr: '',
+      envelope_xdr: '',
       error: { code: 4, message: 'User rejected the transaction' },
     });
 
@@ -164,7 +164,7 @@ describe('signTransaction', () => {
 
   it('throws when Freighter reports a signing error', async () => {
     freighterApiMock.signTransaction.mockResolvedValue({
-      signedTxXdr: '',
+      envelope_xdr: '',
       error: { code: -1, message: 'Internal signing failure' },
     });
 
@@ -251,7 +251,7 @@ describe('FreighterWalletAdapter', () => {
   describe('signTransaction', () => {
     it('returns signed XDR on success', async () => {
       freighterApiMock.signTransaction.mockResolvedValue({
-        signedTxXdr: 'SIGNED_XDR',
+        envelope_xdr: 'SIGNED_XDR',
         error: undefined,
       });
 
@@ -265,7 +265,7 @@ describe('FreighterWalletAdapter', () => {
 
     it('throws on user rejection', async () => {
       freighterApiMock.signTransaction.mockResolvedValue({
-        signedTxXdr: '',
+        envelope_xdr: '',
         error: { code: 4, message: 'Transaction rejected by user' },
       });
 

@@ -258,7 +258,7 @@ describe('createWill — beneficiary validation fast-fail', () => {
   });
 
   it('does NOT throw for a valid single-beneficiary list summing to 100', async () => {
-    freighterApiMock.signTransaction.mockResolvedValue({ signedTxXdr: 'SIGNED_XDR', error: undefined });
+    freighterApiMock.signTransaction.mockResolvedValue({ envelope_xdr: 'SIGNED_XDR', error: undefined });
     mockState.sendTransaction.mockResolvedValue({ status: 'PENDING', hash: 'TXHASH' });
     mockState.pollTransaction.mockResolvedValue({
       status: 'SUCCESS',
@@ -353,7 +353,7 @@ describe('updateBeneficiaries — beneficiary validation fast-fail', () => {
   });
 
   it('does NOT throw for a valid two-beneficiary list summing to 100', async () => {
-    freighterApiMock.signTransaction.mockResolvedValue({ signedTxXdr: 'SIGNED_XDR2', error: undefined });
+    freighterApiMock.signTransaction.mockResolvedValue({ envelope_xdr: 'SIGNED_XDR2', error: undefined });
     mockState.sendTransaction.mockResolvedValue({ status: 'PENDING', hash: 'TXHASH2' });
     mockState.pollTransaction.mockResolvedValue({
       status: 'SUCCESS',

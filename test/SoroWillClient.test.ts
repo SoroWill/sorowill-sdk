@@ -537,7 +537,7 @@ describe('SoroWillClient', () => {
     const { TransactionBuilder, FeeBumpTransaction } = await import('@stellar/stellar-sdk');
     const origFromXdr = TransactionBuilder.fromXDR;
     TransactionBuilder.fromXDR = vi.fn().mockReturnValue(new FeeBumpTransaction());
-    freighterApiMock.signTransaction.mockResolvedValue({ signedTxXdr: 'SIGNED_TX_XDR', error: undefined });
+    freighterApiMock.signTransaction.mockResolvedValue({ envelope_xdr: 'SIGNED_TX_XDR', error: undefined });
     mockState.simulateTransaction.mockResolvedValue({ result: { retval: undefined } });
 
     try {

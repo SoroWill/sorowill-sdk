@@ -7,7 +7,7 @@ const { freighterApiMock, mockState } = vi.hoisted(() => ({
     requestAccess: vi.fn(),
     getNetworkDetails: vi.fn().mockResolvedValue({ network: 'TESTNET', networkPassphrase: 'TESTNET' }),
     isConnected: vi.fn(),
-    signTransaction: vi.fn(async () => ({ signedTxXdr: 'SIGNED_XDR', error: undefined })),
+    signTransaction: vi.fn(async () => ({ envelope_xdr: 'SIGNED_XDR', error: undefined })),
   },
   mockState: {
     getAccount: vi.fn(async (publicKey: string) => ({ accountId: publicKey, sequence: '1' })),

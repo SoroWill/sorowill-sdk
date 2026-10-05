@@ -112,8 +112,8 @@ describe('parseSep7Callback', () => {
     expect(result.message).toBeUndefined();
   });
 
-  it('parses callback with signedTxXdr parameter', () => {
-    const result = parseSep7Callback(`signedTxXdr=${SIGNED_XDR}`);
+  it('parses callback with envelope_xdr parameter', () => {
+    const result = parseSep7Callback(`envelope_xdr=${SIGNED_XDR}`);
     expect(result.transactionXdr).toBe(SIGNED_XDR);
   });
 
@@ -128,7 +128,7 @@ describe('parseSep7Callback', () => {
   });
 
   it('prioritizes xdr over other transaction parameter names', () => {
-    const result = parseSep7Callback(`xdr=${SIGNED_XDR}&signedTxXdr=XDR2&signed_tx_xdr=XDR3&tx=XDR4`);
+    const result = parseSep7Callback(`xdr=${SIGNED_XDR}&envelope_xdr=XDR2&signed_tx_xdr=XDR3&tx=XDR4`);
     expect(result.transactionXdr).toBe(SIGNED_XDR);
   });
 
@@ -212,7 +212,7 @@ describe('parseSep7Callback', () => {
 
   it('throws error when transaction XDR parameters are empty strings', () => {
     expect(() => {
-      parseSep7Callback('xdr=&signedTxXdr=&signed_tx_xdr=&tx=');
+      parseSep7Callback('xdr=&envelope_xdr=&signed_tx_xdr=&tx=');
     }).toThrow('SEP-7 callback did not include a signed transaction XDR');
   });
 

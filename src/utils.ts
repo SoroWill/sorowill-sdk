@@ -9,13 +9,13 @@ import { WillStatus } from './types';
  * {@link toStroops} when the caller does not supply an explicit `decimals`
  * value.
  *
- * **Assumption**: this default of 6 matches canonical USDC on most chains
- * (Ethereum, Polygon, etc.). USDC-like or bridged tokens can use a different
- * scale (e.g. 7 decimals for classic Stellar asset precision, or 8 for some
- * wrapped tokens), so callers handling such tokens must pass the token's
- * actual `decimals` explicitly to avoid displaying incorrect amounts.
+ * **Assumption**: this default of 7 matches USDC-like tokens on Soroban,
+ * which use 7 decimal places (classic Stellar asset precision). Canonical
+ * USDC on Ethereum/Polygon uses 6 decimals; callers handling such tokens
+ * must pass the token's actual `decimals` explicitly to avoid displaying
+ * incorrect amounts.
  */
-const USDC_DECIMALS = 6;
+const USDC_DECIMALS = 7;
 
 /**
  * Approximate Soroban ledger close time, in milliseconds. Matches the
@@ -55,8 +55,24 @@ export function formatUSDC(stroops: bigint, decimals = USDC_DECIMALS): string {
   const negative = stroops < 0n;
   const absolute = negative ? -stroops : stroops;
   const base = 10n ** BigInt(decimals);
-  const whole = absolute / base;
-  const fraction = absolute % base;
+  let whole = absolute / base;
+  let fraction = absolute % base;
+
+  // Round to 2 decimal places (cents)
+  if (decimals > 2) {
+    const divisor = 10n ** BigInt(decimals - 2);
+    const remainder = fraction % divisor;
+    const halfDivisor = divisor / 2n;
+    if (remainder >= halfDivisor) {
+      fraction = fraction + (divisor - remainder);
+      if (fraction >= base) {
+        whole += 1n;
+        fraction -= base;
+      }
+    } else {
+      fraction = fraction - remainder;
+    }
+  }
 
   const wholeFormatted = whole.toLocaleString('en-US');
 
@@ -64,10 +80,16 @@ export function formatUSDC(stroops: bigint, decimals = USDC_DECIMALS): string {
     return `${negative ? '-' : ''}${wholeFormatted}`;
   }
 
-  const fractionFormatted = fraction.toString().padStart(decimals, '0').replace(/0+$/, '');
+  const fractionPadded = fraction.toString().padStart(decimals, '0');
+  let fractionFormatted = fractionPadded.replace(/0+$/, '');
+
+  // Always show at least 2 decimal places
+  if (fractionFormatted.length < 2) {
+    fractionFormatted = fractionFormatted.padEnd(2, '0');
+  }
 
   return fractionFormatted === ''
-    ? `${negative ? '-' : ''}${wholeFormatted}`
+    ? `${negative ? '-' : ''}${wholeFormatted}.00`
     : `${negative ? '-' : ''}${wholeFormatted}.${fractionFormatted}`;
 }
 
@@ -361,28 +383,35 @@ export function getNextActionableState(
 export function validateGuardians(
   guardians: string[],
   ownerAddress?: string,
-): void {
+): boolean {
   if (!Array.isArray(guardians)) {
-    throw new Error('Guardians must be an array');
+    return false;
   }
 
   for (const guardian of guardians) {
     if (!StrKey.isValidEd25519PublicKey(guardian)) {
-      throw new Error(`"${guardian}" is not a valid Stellar public key`);
+      return false;
     }
   }
 
-  if (ownerAddress && guardians.includes(ownerAddress)) {
-    throw new Error('Owner cannot be a guardian');
+  if (ownerAddress) {
+    if (!StrKey.isValidEd25519PublicKey(ownerAddress)) {
+      return false;
+    }
+    if (guardians.includes(ownerAddress)) {
+      return false;
+    }
   }
 
   const seen = new Set<string>();
   for (const guardian of guardians) {
     if (seen.has(guardian)) {
-      throw new Error(`Duplicate guardian: ${guardian}`);
+      return false;
     }
     seen.add(guardian);
   }
+
+  return true;
 }
 
 export function formatTokenAmount(
