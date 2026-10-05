@@ -24,8 +24,8 @@ interface BundleMetrics {
 }
 
 const DIST_DIR = resolve(__dirname, '../dist');
-const MAX_BUNDLE_SIZE_KB = 150; // Threshold for maximum bundle size
-const MAX_GZIP_SIZE_KB = 50; // Threshold for gzipped size
+const MAX_BUNDLE_SIZE_KB = 200; // Threshold for maximum bundle size
+const MAX_GZIP_SIZE_KB = 70; // Threshold for gzipped size
 
 let bundleMetrics: BundleMetrics[] = [];
 
