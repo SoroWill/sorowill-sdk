@@ -456,7 +456,10 @@ export class FreighterWalletAdapter implements WalletAdapter {
     ]);
 
     if (result && typeof result === 'object' && 'error' in result && result.error) {
-      throw new Error(result.error.message);
+      const errorMessage = typeof result.error === 'object' && result.error !== null && 'message' in result.error
+        ? (result.error as any).message
+        : String(result.error);
+      throw new Error(errorMessage);
     }
 
     // Freighter returns a bare XDR string, but normalize defensively so any
