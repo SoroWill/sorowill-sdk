@@ -763,7 +763,7 @@ export class SoroWillClient {
       // Default: a private tracker scoped to this contract's address so that
       // different client instances targeting different contracts never share a
       // dedup entry for the same (willId, method) pair (#503).
-      new InFlightTracker();
+      new InFlightTracker(options.contractId);
     this.readCache = options.readCache === false ? undefined : new ReadCache(options.readCache);
     this.retryOptions = { ...DEFAULT_RETRY_OPTIONS, ...options.retry };
     const { maxAttempts, initialDelayMs, maxDelayMs, backoffFactor } = this.retryOptions;

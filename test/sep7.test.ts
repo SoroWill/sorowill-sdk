@@ -83,7 +83,7 @@ describe('buildSep7TxUri', () => {
     'rejects invalid callback URL %s',
     (callbackUrl) => {
       expect(() => buildSep7TxUri('AAAAAAAA', { callbackUrl })).toThrow(
-        'SEP-7 callback URL must be an absolute http or https URL',
+        'SEP-7 callback URL must be an absolute https:// URL or a valid deeplink scheme',
       );
     },
   );

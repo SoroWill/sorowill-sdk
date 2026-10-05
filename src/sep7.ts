@@ -106,23 +106,25 @@ export function buildSep7TxUri(transactionXdr: string, options: BuildSep7TxUriOp
   try {
     callbackUrl = new URL(options.callbackUrl.trim());
   } catch {
-    throw new Error('SEP-7 callback URL must be an absolute http or https URL');
+    throw new Error('SEP-7 callback URL must be an absolute https:// URL or a valid deeplink scheme');
+  }
+
+  // Reject http (insecure), data, javascript, and other unsafe schemes
+  if (callbackUrl.protocol === 'http:') {
+    throw new Error('SEP-7 callback URL cannot use http:// (insecure); use https:// or a deeplink scheme like stellar://');
   }
 
   // Allow https and common deeplink schemes (stellar, lobstr, myapp, etc)
-  // Reject http (insecure), data, javascript, and other unsafe schemes
   const isHttps = callbackUrl.protocol === 'https:';
   const isDeeplink = /^[a-z][a-z0-9+.-]*:$/i.test(callbackUrl.protocol) &&
                      callbackUrl.protocol !== 'http:' &&
                      callbackUrl.protocol !== 'data:' &&
-                     callbackUrl.protocol !== 'javascript:';
+                     callbackUrl.protocol !== 'javascript:' &&
+                     callbackUrl.protocol !== 'file:' &&
+                     callbackUrl.protocol !== 'ftp:';
 
   if (!isHttps && !isDeeplink) {
-    throw new Error('SEP-7 callback URL must be an absolute http or https URL');
-  }
-
-  if (callbackUrl.protocol === 'http:') {
-    throw new Error('SEP-7 callback URL cannot use http:// (insecure); use https:// or a deeplink scheme like stellar://');
+    throw new Error('SEP-7 callback URL must be an absolute https:// URL or a valid deeplink scheme');
   }
 
   if (options.message && options.message.length > SEP7_MAX_MESSAGE_LENGTH) {

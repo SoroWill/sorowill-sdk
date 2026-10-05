@@ -351,12 +351,13 @@ export class WalletConnectAdapter implements WalletAdapter {
 
     const topic = await this.sessionStore.getSessionTopic();
     if (!topic) {
-      throw new Error('No WalletConnect session available to reconnect');
+      throw new Error('No WalletConnect session topic is stored');
     }
 
     const session = await this.client.getSession(topic);
     if (!session) {
-      throw new Error('WalletConnect session could not be restored');
+      await this.sessionStore.clearSessionTopic();
+      throw new Error('Stored WalletConnect session no longer exists');
     }
 
     return this.useSession(session);
@@ -422,7 +423,9 @@ export class WalletConnectAdapter implements WalletAdapter {
     }
 
     const chainId = this.options.requestChainId ?? getDefaultChainId(session);
-    const method = this.options.signTransactionMethod ?? 'stellar_signXdr';
+    const method = this.options.signTransactionMethod ?? 'stellar_signXDR';
+    const network = this.resolveNetwork(session);
+    const params = this.options.getSignTransactionParams?.(xdr, network.networkPassphrase) ?? { xdr };
 
     const response = await this.withTimeout(
       this.client.request<unknown>({
@@ -430,7 +433,7 @@ export class WalletConnectAdapter implements WalletAdapter {
         chainId,
         request: {
           method,
-          params: { xdr },
+          params,
         },
       }),
     );

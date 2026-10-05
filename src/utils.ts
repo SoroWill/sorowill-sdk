@@ -373,10 +373,10 @@ export function getNextActionableState(
   return {
     canCheckIn: isOwner && isActive && !isCheckinOverdue,
     canTrigger: isCheckinOverdue && !isTriggered,
-    canEmergencyCheckIn: isOwner && isActive && isCheckinOverdue && !isGracePeriodExpired,
+    canEmergencyCheckIn: isOwner && isTriggered && !isGracePeriodExpired,
     canRelease: isTriggered && isGracePeriodExpired,
     canCancel: isOwner && (isActive || isTriggered),
-    canGuardianVote: isGuardian && isTriggered && !options.guardianAlreadyVoted,
+    canGuardianVote: isGuardian && isActive && !options.guardianAlreadyVoted,
   };
 }
 

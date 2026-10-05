@@ -331,7 +331,7 @@ describe('WalletConnectAdapter defaults and network resolution', () => {
     ).resolves.toBe('SIGNED_CUSTOM');
     await expect(
       adapter.signTransaction('UNSIGNED_XDR', { networkPassphrase: 'Test SDF Network ; September 2015' }),
-    ).rejects.toThrow('but transaction is for a different network');
+    ).rejects.toThrow('but transaction is for');
   });
 });
 

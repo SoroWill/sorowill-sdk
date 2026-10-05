@@ -117,7 +117,7 @@ describe('InFlightTracker — scopeId key isolation (#503)', () => {
 // ─── SoroWillClient integration: default per-instance scoping ────────────────
 
 const CONTRACT_A = 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE';
-const CONTRACT_B = 'CBEZJYAQKRFBSF4XRCIJCQE4IJ2OF43N3VKXMYWZNLRJ5HKIPXV5NEQ';
+const CONTRACT_B = 'CA2PSFZPAUX5V3XLG6LFUMZGUBFIAYX7KCCITEXQQ7LMO3HSD5U3HVQ6';
 
 function makeMinimalServer(): SoroWillRpcServer {
   return {
