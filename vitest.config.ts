@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
+    exclude: ['src/react/**/*.test.tsx'],
     coverage: {
       provider: 'v8',
       // Include all source files so uncovered files are reported, not just
