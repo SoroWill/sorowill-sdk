@@ -155,11 +155,8 @@ export class InFlightTracker {
       this.evict(key, existing);
     }
 
-    // Prune expired entries and enforce the size cap before adding a new one.
+    // Prune expired entries before starting the operation.
     this.pruneExpired();
-    if (this.inFlight.size >= this.maxInFlight) {
-      this.evictOldest();
-    }
 
     const controller = new AbortController();
     const entry = { controller, createdAt: Date.now() } as InFlightOperation<T>;
@@ -167,7 +164,12 @@ export class InFlightTracker {
     try {
       operationPromise = Promise.resolve(operation(controller.signal));
     } catch (error) {
+      controller.abort();
       return Promise.reject(error);
+    }
+
+    if (this.inFlight.size >= this.maxInFlight) {
+      this.evictOldest();
     }
 
     entry.promise = operationPromise.finally(() => {

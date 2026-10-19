@@ -158,6 +158,34 @@ describe('InFlightTracker', () => {
       expect(tracker.isInFlight('will-2', 'checkIn')).toBe(false);
       expect(tracker.size).toBe(0);
     });
+
+    it('does not evict existing active entries at maxInFlight capacity when operation throws synchronously', async () => {
+      const boundedTracker = new InFlightTracker(1);
+      let existingAborted = false;
+      let throwingSignalAborted = false;
+
+      boundedTracker.track('will-existing', 'checkIn', (signal) => {
+        signal.addEventListener('abort', () => {
+          existingAborted = true;
+        });
+        return new Promise<string>(() => undefined);
+      });
+      expect(boundedTracker.size).toBe(1);
+
+      const rejected = boundedTracker.track('will-sync-throw', 'checkIn', (signal) => {
+        signal.addEventListener('abort', () => {
+          throwingSignalAborted = true;
+        });
+        throw new Error('sync boom');
+      });
+
+      await expect(rejected).rejects.toThrow('sync boom');
+      expect(throwingSignalAborted).toBe(true);
+      expect(existingAborted).toBe(false);
+      expect(boundedTracker.isInFlight('will-existing', 'checkIn')).toBe(true);
+      expect(boundedTracker.isInFlight('will-sync-throw', 'checkIn')).toBe(false);
+      expect(boundedTracker.size).toBe(1);
+    });
   });
 
   describe('isInFlight', () => {
