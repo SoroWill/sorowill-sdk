@@ -1279,6 +1279,29 @@ export class SoroWillClient {
     return this.rpcPool.getActiveRpcUrl();
   }
 
+  /**
+   * Reads the full state of a single will by id. Does not require a connected wallet.
+   *
+   * ### Caching and expected call frequency (#526)
+   *
+   * Results are **cached in memory by default**, so it is safe to call
+   * `getWill` freely (e.g. from a UI render or an interval) — each distinct
+   * `willId` hits the RPC at most once per cache TTL, and subsequent calls
+   * within the TTL are served from the cache. The TTL is configurable through
+   * the client's `readCache` option:
+   *
+   * ```ts
+   * const client = new SoroWillClient({
+   *   network: 'testnet',
+   *   contractId: 'C...',
+   *   readCache: { ttlMs: 60_000 }, // default TTL: 60 seconds
+   * });
+   * ```
+   *
+   * Pass `readCache: false` to bypass the cache and force an RPC round-trip on
+   * every call, or supply an `eventSource` so external updates invalidate the
+   * cached entry as soon as they arrive.
+   */
   async getWill(willId: string, options?: RequestOptions): Promise<Will> {
     const canonicalWillId = parseWillId(willId).toString();
     const cacheKey = createReadCacheKey('get_will', { willId: canonicalWillId });
