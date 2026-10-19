@@ -79,9 +79,19 @@ export {
   getDefaultWalletAdapter,
   getPublicKey,
   isFreighterInstalled,
+  isFreighterInstallCheckError,
+  isSignTransactionTimeoutError,
+  isWalletNetworkMismatchError,
+  isWalletSessionError,
   signTransaction,
+  WalletSessionError,
 } from './wallet';
-export type { WalletAdapter, WalletConnection } from './wallet';
+export type {
+  WalletAdapter,
+  WalletAdapterError,
+  WalletConnection,
+  WalletSession,
+} from './wallet';
 
 export { createAlbedoAdapter } from './adapters/albedo';
 export type { AlbedoAdapterOptions } from './adapters/albedo';
