@@ -326,6 +326,13 @@ export interface SoroWillClientOptions {
   maxConcurrentRequests?: number;
   /** Maximum RPC requests started in a rolling one-second window. Defaults to 10. */
   requestsPerSecond?: number;
+  /**
+   * Maximum number of RPC requests allowed to wait in the client's request
+   * queue at once. Defaults to 1000. Requests enqueued while the queue is
+   * full are rejected with a `RequestQueueOverflowError` instead of growing
+   * the queue without bound (#525).
+   */
+  maxQueueSize?: number;
   /** Optional list of RPC endpoints to use with automatic failover. */
   rpcUrls?: string[];
   /**
@@ -768,6 +775,9 @@ export class SoroWillClient {
       ...(options.requestsPerSecond === undefined
         ? {}
         : { requestsPerSecond: options.requestsPerSecond }),
+      ...(options.maxQueueSize === undefined
+        ? {}
+        : { maxQueueSize: options.maxQueueSize }),
     });
     this.inFlightTracker =
       options.inFlightTracker ??

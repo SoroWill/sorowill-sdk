@@ -173,6 +173,7 @@ export {
   NotSameOwnerError,
   OwnerCannotBeGuardianError,
   RequestTimeoutError,
+  RequestQueueOverflowError,
   SameWillIdError,
   SignTransactionTimeoutError,
   SimulationError,
@@ -206,6 +207,7 @@ export {
 export type { ContractErrorFactory } from './errors';
 
 export {
+  DEFAULT_MAX_QUEUE_SIZE,
   RequestQueue,
   RequestPriority,
   getSharedRequestQueue,

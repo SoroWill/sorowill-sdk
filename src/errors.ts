@@ -70,6 +70,28 @@ export class RequestTimeoutError extends SoroWillError {
 }
 
 /**
+ * Raised when a {@link RequestQueue} is asked to enqueue a request beyond its
+ * configured maximum queue size (`maxQueueSize`). The excess request is
+ * rejected without ever being scheduled, so the queue can never grow without
+ * bound when requests are produced faster than the configured concurrency and
+ * rate limits allow them to be processed (#525).
+ */
+export class RequestQueueOverflowError extends SoroWillError {
+  /** The configured maximum number of pending requests that was exceeded. */
+  readonly maxQueueSize: number;
+
+  constructor(maxQueueSize: number, options?: ErrorOptions) {
+    super(
+      `RequestQueue is full: cannot enqueue more than ${maxQueueSize} pending requests. ` +
+        'The queue is processing requests slower than they are being submitted. ' +
+        'Retry shortly, reduce the submission rate, or increase the queue\'s maxQueueSize / concurrency.',
+      options,
+    );
+    this.maxQueueSize = maxQueueSize;
+  }
+}
+
+/**
  * Raised when an operation is submitted while an identical operation (same
  * will id and method) is already in flight and the caller asked for exclusive
  * execution. Unlike the default deduplication behaviour — which coalesces
