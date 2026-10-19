@@ -24,6 +24,7 @@ function makeStubSpec() {
     funcArgsToScVals: () => [] as xdr.ScVal[],
     funcResToNative: (method: string, _value: xdr.ScVal) => {
       switch (method) {
+        case 'get_wills':
         case 'get_wills_by_owner':
         case 'get_wills_by_beneficiary':
           return [rawWill];
@@ -387,5 +388,133 @@ describe('SoroWillClient public methods', () => {
       rpcServer: makeRpcServer() as unknown as SoroWillRpcServer,
     });
     expect(() => client.destroy()).not.toThrow();
+  });
+
+  describe('getWills (batch read)', () => {
+    it('fetches multiple wills in a single RPC simulation call and populates readCache', async () => {
+      let simulateCalls = 0;
+      const capturedArgs: Array<{ method: string; args: Record<string, unknown> }> = [];
+      const batchSpec = {
+        funcArgsToScVals: (method: string, args: Record<string, unknown>) => {
+          capturedArgs.push({ method, args });
+          return [] as xdr.ScVal[];
+        },
+        funcResToNative: (method: string) => {
+          if (method === 'get_wills') {
+            return [
+              {
+                id: 2n,
+                owner: 'GOWNER',
+                token: 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526',
+                balance: 2_000_000n,
+                beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+                checkin_period_days: 90n,
+                grace_period_days: 7n,
+                last_checkin: 1_700_000_000n,
+                trigger_time: undefined,
+                status: 'Active',
+                guardians: [],
+                guardian_votes: 0,
+              },
+              {
+                id: 1n,
+                owner: 'GOWNER',
+                token: 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526',
+                balance: 1_000_000n,
+                beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+                checkin_period_days: 90n,
+                grace_period_days: 7n,
+                last_checkin: 1_700_000_000n,
+                trigger_time: undefined,
+                status: 'Active',
+                guardians: [],
+                guardian_votes: 0,
+              },
+            ];
+          }
+          throw new Error(`Unexpected method: ${method}`);
+        },
+      };
+
+      const client = new SoroWillClient({
+        network: 'testnet',
+        contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+        spec: batchSpec,
+        rpcServer: makeRpcServer(async () => {
+          simulateCalls += 1;
+          return { transactionData: 'AAAA', result: { retval: VOID_SCVAL } };
+        }),
+      });
+
+      const wills = await client.getWills(['1', '2']);
+      expect(simulateCalls).toBe(1);
+      expect(capturedArgs).toEqual([{ method: 'get_wills', args: { will_ids: [1n, 2n] } }]);
+      expect(wills.map((w) => w.id)).toEqual(['1', '2']);
+
+      // Subsequent batch call and individual getWill calls hit readCache with 0 extra RPC calls
+      const cachedBatch = await client.getWills(['1', '2']);
+      const cachedWill1 = await client.getWill('1');
+      const cachedWill2 = await client.getWill('2');
+      expect(simulateCalls).toBe(1);
+      expect(cachedBatch.map((w) => w.id)).toEqual(['1', '2']);
+      expect(cachedWill1.id).toBe('1');
+      expect(cachedWill2.id).toBe('2');
+    });
+
+    it('returns empty array without making an RPC call when willIds is empty', async () => {
+      let simulateCalls = 0;
+      const client = new SoroWillClient({
+        network: 'testnet',
+        contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+        rpcServer: makeRpcServer(async () => {
+          simulateCalls += 1;
+          return { transactionData: 'AAAA', result: { retval: VOID_SCVAL } };
+        }),
+      });
+
+      const wills = await client.getWills([]);
+      expect(wills).toEqual([]);
+      expect(simulateCalls).toBe(0);
+    });
+
+    it('supports pagination options on getWills and rejects malformed willIds upfront', async () => {
+      let simulateCalls = 0;
+      const client = new SoroWillClient({
+        network: 'testnet',
+        contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+        rpcServer: makeRpcServer(async () => {
+          simulateCalls += 1;
+          return { transactionData: 'AAAA', result: { retval: VOID_SCVAL } };
+        }),
+      });
+
+      await expect(client.getWills(['1', 'not-a-will-id'])).rejects.toThrow(/Invalid willId/);
+      expect(simulateCalls).toBe(0);
+
+      const page = await client.getWills(['1'], { pageSize: 1 });
+      expect(page.wills).toHaveLength(1);
+      expect(page.nextCursor).toBeNull();
+      expect(simulateCalls).toBe(1);
+    });
+
+    it('reuses individual getWill cache entries without an extra RPC call when all requested wills are cached', async () => {
+      let simulateCalls = 0;
+      const client = new SoroWillClient({
+        network: 'testnet',
+        contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+        rpcServer: makeRpcServer(async () => {
+          simulateCalls += 1;
+          return { transactionData: 'AAAA', result: { retval: VOID_SCVAL } };
+        }),
+      });
+
+      await client.getWill('1');
+      expect(simulateCalls).toBe(1);
+
+      const wills = await client.getWills(['1']);
+      expect(simulateCalls).toBe(1);
+      expect(wills).toHaveLength(1);
+      expect(wills[0]?.id).toBe('1');
+    });
   });
 });

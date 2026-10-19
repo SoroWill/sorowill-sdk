@@ -1260,6 +1260,77 @@ export class SoroWillClient {
     return will;
   }
 
+  /**
+   * Fetches multiple wills in a single batch read RPC call (`get_wills`).
+   * Does not require a connected wallet.
+   */
+  async getWills(willIds: readonly string[], options?: RequestOptions): Promise<Will[]>;
+  /**
+   * Fetches multiple wills in a single batch read RPC call (`get_wills`),
+   * one client-side page at a time. Does not require a connected wallet.
+   */
+  async getWills(
+    willIds: readonly string[],
+    options: PaginationOptions & RequestOptions,
+  ): Promise<PaginatedWillsResult>;
+  async getWills(
+    willIds: readonly string[],
+    options?: (PaginationOptions & RequestOptions) | RequestOptions,
+  ): Promise<Will[] | PaginatedWillsResult> {
+    const paginationOptions = options as PaginationOptions | undefined;
+    if (paginationOptions?.cursor !== undefined) {
+      parseCursor(paginationOptions.cursor);
+    }
+    if (paginationOptions?.pageSize !== undefined) {
+      normalizePositiveInteger(paginationOptions.pageSize, 'pageSize');
+    }
+    const parsedIds = willIds.map((willId) => parseWillId(willId));
+    if (parsedIds.length === 0) {
+      return this.paginate([], options);
+    }
+    const canonicalWillIds = parsedIds.map((id) => id.toString());
+    const cacheKey = createReadCacheKey('get_wills', { willIds: canonicalWillIds });
+    if (this.readCache) {
+      await this.readCache.ready();
+      const cached = this.readCache.get<Will[]>(cacheKey);
+      if (cached !== undefined) {
+        return this.paginate(cached.map(cloneWill), options);
+      }
+      const individualHits: Will[] = [];
+      let allCached = true;
+      for (const canonicalId of canonicalWillIds) {
+        const singleCached = this.readCache.get<Will>(
+          createReadCacheKey('get_will', { willId: canonicalId }),
+        );
+        if (singleCached === undefined) {
+          allCached = false;
+          break;
+        }
+        individualHits.push(cloneWill(singleCached));
+      }
+      if (allCached) {
+        return this.paginate(sortWillsById(individualHits), options);
+      }
+    }
+    const raw = await this.read<unknown>('get_wills', { will_ids: parsedIds }, options);
+    const wills = mapWillList(raw);
+    if (this.readCache) {
+      this.readCache.set(
+        cacheKey,
+        wills.map(cloneWill),
+        wills.map((will) => will.id),
+      );
+      for (const will of wills) {
+        this.readCache.set(
+          createReadCacheKey('get_will', { willId: will.id }),
+          cloneWill(will),
+          [will.id],
+        );
+      }
+    }
+    return this.paginate(wills, options);
+  }
+
   /** Lists every will owned by `owner`. Does not require a connected wallet. */
   async getWillsByOwner(owner: string, options?: RequestOptions): Promise<Will[]>;
   /** Lists every will owned by `owner`, one client-side page at a time. Does not require a connected wallet. */
