@@ -47,20 +47,30 @@ function serializeCacheValue(value: unknown): string {
   });
 }
 
-function deserializeCacheValue<T>(value: string): T {
+const VALID_CACHE_VALUE_TYPES = new Set(['bigint', 'date']);
+
+export function deserializeCacheValue<T>(value: string): T {
   return JSON.parse(value, (_key, currentValue) => {
     if (
       currentValue &&
       typeof currentValue === 'object' &&
-      '__type' in currentValue &&
-      'value' in currentValue &&
-      typeof currentValue.value === 'string'
+      '__type' in currentValue
     ) {
-      if (currentValue.__type === 'bigint') {
-        return BigInt(currentValue.value);
+      if (
+        typeof currentValue.__type !== 'string' ||
+        !VALID_CACHE_VALUE_TYPES.has(currentValue.__type)
+      ) {
+        throw new Error(
+          `Unknown cache value __type: "${String(currentValue.__type)}". Expected one of: bigint, date`,
+        );
       }
-      if (currentValue.__type === 'date') {
-        return new Date(currentValue.value);
+      if ('value' in currentValue && typeof currentValue.value === 'string') {
+        if (currentValue.__type === 'bigint') {
+          return BigInt(currentValue.value);
+        }
+        if (currentValue.__type === 'date') {
+          return new Date(currentValue.value);
+        }
       }
     }
     return currentValue;
