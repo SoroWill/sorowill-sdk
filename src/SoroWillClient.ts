@@ -1177,10 +1177,12 @@ export class SoroWillClient {
   async waitForTransaction(
     txHash: string,
     options?: RequestOptions,
+    method = 'pollTransaction',
   ): Promise<{ createdAt: number; returnValue: xdr.ScVal | undefined }> {
     const txResponse = await this.rpc(
       () => this.server.pollTransaction(txHash, { attempts: this.pollAttempts }),
       options,
+      method,
     );
 
     if (txResponse.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
@@ -1219,6 +1221,7 @@ export class SoroWillClient {
             return server.getHealth();
           }),
         options,
+        'getHealth',
       );
       return response?.status === 'healthy';
     } catch {
@@ -1465,10 +1468,12 @@ export class SoroWillClient {
           this.contract.call(method, ...spec.funcArgsToScVals(method, args)),
         );
 
+        const batchMethod = operations[0]?.method ?? 'batch';
         const publicKey = await this.getWalletPublicKey();
         const account = await this.rpc(
           () => this.rpcPool.withFailover((server) => server.getAccount(publicKey)),
           options,
+          batchMethod,
         );
         const builder = new TransactionBuilder(account, {
           fee: BASE_FEE,
@@ -1482,6 +1487,7 @@ export class SoroWillClient {
         const prepared = await this.rpc(
           () => this.rpcPool.withFailover((server) => server.prepareTransaction(builtTx)),
           options,
+          batchMethod,
         );
 
         assertPreparedTransactionMatchesIntendedOperation({
@@ -1570,6 +1576,7 @@ export class SoroWillClient {
       const simulation = await this.rpc(
         () => this.rpcPool.withFailover((server) => server.simulateTransaction(tx)),
         options,
+        method,
       );
       if (rpc.Api.isSimulationError(simulation)) {
         throw new SimulationError(method, simulation.error);
@@ -1797,7 +1804,7 @@ export class SoroWillClient {
         }
       } catch (err) {
         if (controller.signal.aborted) {
-          options.onError?.(new RequestTimeoutError(this.timeoutMs));
+          options.onError?.(new RequestTimeoutError(this.timeoutMs, 'getEvents'));
         } else {
           options.onError?.(err instanceof Error ? err : new Error(String(err)));
         }
@@ -1878,6 +1885,7 @@ export class SoroWillClient {
         this.specPromise = this.rpc(
           () => this.server.getContractWasmByContractId(this.contract.contractId()),
           options,
+          'getContractWasmByContractId',
         )
           .then((wasm) => {
             const spec = Spec.fromWasm(Buffer.from(wasm));
@@ -1913,6 +1921,7 @@ export class SoroWillClient {
         this.rpc(
           () => this.rpcPool.withFailover((server) => server.simulateTransaction(tx)),
           options,
+          method,
         ),
       );
       if (rpc.Api.isSimulationError(simulation)) {
@@ -2092,6 +2101,7 @@ export class SoroWillClient {
         account = await this.rpc(
           () => this.rpcPool.withFailover((server) => server.getAccount(publicKey)),
           options,
+          label,
         );
       } catch (getAccountError) {
         // Surface a clear, actionable error when the account is not funded or
@@ -2111,6 +2121,7 @@ export class SoroWillClient {
       const prepared = await this.rpc(
         () => this.rpcPool.withFailover((server) => server.prepareTransaction(builtTx)),
         options,
+        label,
       );
       this.debugLogger.logSimulation(label, undefined, prepared.fee);
 
@@ -2135,6 +2146,7 @@ export class SoroWillClient {
       const sendResponse = await this.rpc(
         () => this.rpcPool.withFailover((server) => server.sendTransaction(signedTx)),
         options,
+        label,
       );
       this.debugLogger.logSubmission(label, undefined, sendResponse.hash);
 
@@ -2165,7 +2177,7 @@ export class SoroWillClient {
       // PENDING and DUPLICATE both proceed to polling.
       let txResponse: { createdAt: number; returnValue: xdr.ScVal | undefined };
       try {
-        txResponse = await this.waitForTransaction(sendResponse.hash, options);
+        txResponse = await this.waitForTransaction(sendResponse.hash, options, label);
       } catch (pollError) {
         // If poll times out and auto fee-bump is enabled, retry with higher fee
         if (this.autoFeeBumpOnTimeout) {
@@ -2186,6 +2198,7 @@ export class SoroWillClient {
           const feeBumpPrepared = await this.rpc(
             () => this.rpcPool.withFailover((server) => server.prepareTransaction(feeBumpTx)),
             options,
+            label,
           );
 
           const feeBumpSignedResponse = await this.wallet.signTransaction(feeBumpPrepared.toXDR(), {
@@ -2205,6 +2218,7 @@ export class SoroWillClient {
           const feeBumpResponse = await this.rpc(
             () => this.rpcPool.withFailover((server) => server.sendTransaction(feeBumpSignedTx)),
             options,
+            label,
           );
 
           if (feeBumpResponse.status === 'ERROR') {
@@ -2219,7 +2233,7 @@ export class SoroWillClient {
 
           this.debugLogger.logSubmission(label, undefined, feeBumpResponse.hash);
 
-          txResponse = await this.waitForTransaction(feeBumpResponse.hash, options);
+          txResponse = await this.waitForTransaction(feeBumpResponse.hash, options, label);
         } else {
           throw pollError;
         }
@@ -2312,11 +2326,13 @@ export class SoroWillClient {
     await this.rpc(
       () => this.rpcPool.withFailover((server) => server.getAccount(publicKey)),
       options,
+      'submitSignedTransaction',
     );
     // Safe to fail over: the identical signed envelope can only be applied once.
     const sendResponse = await this.rpc(
       () => this.rpcPool.withFailover((server) => server.sendTransaction(signedTx)),
       options,
+      'submitSignedTransaction',
     );
 
     if (sendResponse.status === 'ERROR') {
@@ -2336,6 +2352,7 @@ export class SoroWillClient {
           server.pollTransaction(sendResponse.hash, { attempts: this.pollAttempts }),
         ),
       options,
+      'submitSignedTransaction',
     );
 
     if (txResponse.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
@@ -2413,7 +2430,7 @@ export class SoroWillClient {
       return cached;
     }
 
-    const result = await this.rpc(() => server.getFeeStats!(), options);
+    const result = await this.rpc(() => server.getFeeStats!(), options, 'getFeeStats');
     this.feeStatsCache.set(cacheKey, result);
     this.lastFeeStatsCachedPassphrase = currentPassphrase;
     return result;
@@ -2475,9 +2492,15 @@ export class SoroWillClient {
   // -----------------------------------------------------------------------
 
   /** Sends every RPC through the shared FIFO queue with the selected timeout. */
-  private rpc<T>(request: () => Promise<T>, options?: RequestOptions): Promise<T> {
+  private rpc<T>(request: () => Promise<T>, options?: RequestOptions, method?: string): Promise<T> {
     options?.signal?.throwIfAborted();
-    return this.queue.enqueue(request, options?.timeoutMs ?? this.timeoutMs, options?.signal);
+    return this.queue.enqueue(
+      request,
+      options?.timeoutMs ?? this.timeoutMs,
+      options?.signal,
+      undefined,
+      method,
+    );
   }
 
   /**

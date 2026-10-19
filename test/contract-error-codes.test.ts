@@ -121,5 +121,21 @@ describe('RequestTimeoutError — issue #560: request details in timeout error',
     expect(withoutMethod.cause).toBe(cause);
     expect(withoutMethod.message).toBe('SoroWill RPC request timed out after 4000ms');
   });
+
+  it('propagates the operation method name when a RequestQueue request times out', async () => {
+    const { RequestQueue } = await import('../src/requestQueue');
+    const queue = new RequestQueue();
+    let caught: unknown;
+    try {
+      await queue.enqueue(() => new Promise<never>(() => undefined), 15, undefined, undefined, 'get_will');
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(RequestTimeoutError);
+    expect((caught as RequestTimeoutError).method).toBe('get_will');
+    expect((caught as RequestTimeoutError).message).toBe(
+      'SoroWill RPC request (get_will) timed out after 15ms',
+    );
+  });
 });
 
