@@ -218,4 +218,35 @@ describe('topUp amount validation', () => {
       client.topUp('1', '500000'),
     ).resolves.toMatchObject({ txHash: 'abc123' });
   });
+
+  it('rejects non-positive and malformed amounts before querying wallet network or public key', async () => {
+    let walletQueried = false;
+    const wallet = {
+      ...makeWalletAdapter(),
+      async getNetwork() {
+        walletQueried = true;
+        throw new Error('wallet network should not be queried when amount is invalid');
+      },
+      async getPublicKey() {
+        walletQueried = true;
+        throw new Error('wallet public key should not be queried when amount is invalid');
+      },
+    };
+
+    const client = new SoroWillClient({
+      network: 'testnet',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
+      wallet,
+      readCache: false,
+      spec: createSpec({}),
+      rpcServer: createRpcServer(),
+    });
+
+    for (const invalidAmount of ['0', '000', '-1', '-999999', ' 100 ', 'NaN', 'Infinity', 0 as unknown as string, -50 as unknown as string]) {
+      await expect(client.topUp('1', invalidAmount)).rejects.toBeInstanceOf(
+        SoroWillInvalidAmountError,
+      );
+    }
+    expect(walletQueried).toBe(false);
+  });
 });

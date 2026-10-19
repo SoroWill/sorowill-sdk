@@ -599,8 +599,8 @@ function normalizePositiveInteger(value: number | undefined, label: string): num
 function validateAmount(amount: string): bigint {
   // Only decimal digit strings with no leading minus or decimals are valid.
   // Must be at least one character, all digits, and the parsed value > 0.
-  if (!/^\d+$/.test(amount)) {
-    throw new SoroWillInvalidAmountError(amount);
+  if (typeof amount !== 'string' || !/^\d+$/.test(amount)) {
+    throw new SoroWillInvalidAmountError(String(amount));
   }
   const value = BigInt(amount);
   if (value <= 0n) {
@@ -1137,19 +1137,25 @@ export class SoroWillClient {
     return { txHash };
   }
 
-  /** Adds more of the will's token to its locked balance. */
+  /**
+   * Adds more of the will's token to its locked balance.
+   *
+   * @throws {SoroWillInvalidIdError} If `willId` is not a valid non-negative integer string.
+   * @throws {SoroWillInvalidAmountError} If `amount` is not a positive integer string (`> 0`).
+   */
   async topUp(
     willId: string,
     amount: string,
     options?: RequestOptions,
   ): Promise<{ txHash: string }> {
-    parseWillId(willId);
+    const parsedWillId = parseWillId(willId);
+    const validatedAmount = validateAmount(amount);
     await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const owner = await this.getWalletPublicKey();
     const { txHash } = await this.invoke('top_up', {
-      will_id: parseWillId(willId),
+      will_id: parsedWillId,
       owner,
-      amount: validateAmount(amount),
+      amount: validatedAmount,
     }, options);
     return { txHash };
   }
