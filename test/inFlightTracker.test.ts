@@ -128,6 +128,36 @@ describe('InFlightTracker', () => {
       await expect(promise).rejects.toThrow('aborted');
       expect(fetchExecuted).toBe(false);
     });
+
+    it('catches synchronous throws from operation callback and returns a rejected promise without leaving orphaned entries', async () => {
+      const syncError = new Error('sync operation failure');
+
+      let returnedPromise: Promise<string> | undefined;
+      expect(() => {
+        returnedPromise = tracker.track('will-1', 'checkIn', () => {
+          throw syncError;
+        });
+      }).not.toThrow();
+
+      await expect(returnedPromise).rejects.toThrow('sync operation failure');
+      expect(tracker.isInFlight('will-1', 'checkIn')).toBe(false);
+      expect(tracker.getInFlightPromise('will-1', 'checkIn')).toBeUndefined();
+      expect(tracker.size).toBe(0);
+
+      // Subsequent operation for the same key should execute normally
+      const recoveryResult = await tracker.track('will-1', 'checkIn', async () => 'recovered');
+      expect(recoveryResult).toBe('recovered');
+    });
+
+    it('handles synchronous non-Error throws in operation callback cleanly', async () => {
+      const promise = tracker.track('will-2', 'checkIn', () => {
+        throw 'string sync error';
+      });
+
+      await expect(promise).rejects.toBe('string sync error');
+      expect(tracker.isInFlight('will-2', 'checkIn')).toBe(false);
+      expect(tracker.size).toBe(0);
+    });
   });
 
   describe('isInFlight', () => {
