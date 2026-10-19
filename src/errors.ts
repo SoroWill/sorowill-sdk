@@ -62,10 +62,27 @@ export class SoroWillInvalidAmountError extends SoroWillError {
 /** Raised when an RPC call exceeds its configured deadline. */
 export class RequestTimeoutError extends SoroWillError {
   readonly timeoutMs: number;
+  readonly method?: string | undefined;
 
-  constructor(timeoutMs: number, options?: ErrorOptions) {
-    super(`SoroWill RPC request timed out after ${timeoutMs}ms`, options);
+  constructor(
+    timeoutMs: number,
+    methodOrOptions?: string | ErrorOptions,
+    options?: ErrorOptions,
+  ) {
+    const method =
+      typeof methodOrOptions === 'string' && methodOrOptions.trim().length > 0
+        ? methodOrOptions.trim()
+        : undefined;
+    const resolvedOptions =
+      typeof methodOrOptions === 'object' && methodOrOptions !== null
+        ? methodOrOptions
+        : options;
+    const message = method
+      ? `SoroWill RPC request (${method}) timed out after ${timeoutMs}ms`
+      : `SoroWill RPC request timed out after ${timeoutMs}ms`;
+    super(message, resolvedOptions);
     this.timeoutMs = timeoutMs;
+    this.method = method;
   }
 }
 

@@ -18,6 +18,7 @@ import {
   MergeWouldExceedLimitsError,
   NotSameOwnerError,
   OwnerCannotBeGuardianError,
+  RequestTimeoutError,
   SameWillIdError,
   TooManyIdsError,
   TooManyWillsError,
@@ -85,3 +86,40 @@ describe('mapContractError — contract error codes 13-37', () => {
     }
   });
 });
+
+describe('RequestTimeoutError — issue #560: request details in timeout error', () => {
+  it('formats default timeout message when method is omitted', () => {
+    const err = new RequestTimeoutError(5000);
+    expect(err.timeoutMs).toBe(5000);
+    expect(err.method).toBeUndefined();
+    expect(err.message).toBe('SoroWill RPC request timed out after 5000ms');
+  });
+
+  it('includes the method name in the error message and property when provided', () => {
+    const err = new RequestTimeoutError(3000, 'getWill');
+    expect(err.timeoutMs).toBe(3000);
+    expect(err.method).toBe('getWill');
+    expect(err.message).toBe('SoroWill RPC request (getWill) timed out after 3000ms');
+  });
+
+  it('ignores blank or whitespace-only method names', () => {
+    const err = new RequestTimeoutError(2500, '   ');
+    expect(err.timeoutMs).toBe(2500);
+    expect(err.method).toBeUndefined();
+    expect(err.message).toBe('SoroWill RPC request timed out after 2500ms');
+  });
+
+  it('preserves ErrorOptions cause both with and without method name', () => {
+    const cause = new Error('socket hang up');
+    const withMethod = new RequestTimeoutError(4000, 'create_will', { cause });
+    expect(withMethod.method).toBe('create_will');
+    expect(withMethod.cause).toBe(cause);
+    expect(withMethod.message).toContain('create_will');
+
+    const withoutMethod = new RequestTimeoutError(4000, { cause });
+    expect(withoutMethod.method).toBeUndefined();
+    expect(withoutMethod.cause).toBe(cause);
+    expect(withoutMethod.message).toBe('SoroWill RPC request timed out after 4000ms');
+  });
+});
+
