@@ -1,4 +1,5 @@
 import type FreighterApi from '@stellar/freighter-api';
+import { xdr } from '@stellar/stellar-sdk';
 
 import { FreighterInstallCheckError, SignTransactionTimeoutError, WalletNetworkMismatchError } from './errors';
 
@@ -65,6 +66,33 @@ export interface SignatureResponse {
  * if it were a string silently fails downstream, so we validate the shape here
  * and throw a clear error for anything malformed.
  */
+const BASE64_XDR_REGEX = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+function assertValidSignedXdrFormat(xdrString: string): string {
+  const trimmed = xdrString.trim();
+  if (trimmed.length === 0) {
+    throw new Error('Wallet signer returned an empty signed XDR string.');
+  }
+  if (typeof xdr?.TransactionEnvelope?.fromXDR === 'function') {
+    let decoded: unknown;
+    try {
+      decoded = xdr.TransactionEnvelope.fromXDR(trimmed, 'base64');
+    } catch (cause) {
+      throw new Error(
+        'Wallet signer returned a malformed XDR string: expected a valid base64-encoded Stellar TransactionEnvelope XDR.',
+        { cause },
+      );
+    }
+    const roundTrip = (decoded as { toXDR?: (format?: string) => unknown } | null)?.toXDR?.('base64');
+    if (typeof roundTrip === 'string' && (!BASE64_XDR_REGEX.test(trimmed) || roundTrip !== trimmed)) {
+      throw new Error(
+        'Wallet signer returned a malformed XDR string: expected a valid base64-encoded Stellar TransactionEnvelope XDR.',
+      );
+    }
+  }
+  return trimmed;
+}
+
 export function normalizeSignatureResponse(
   result: string | SignatureResponse,
 ): string {
@@ -72,13 +100,13 @@ export function normalizeSignatureResponse(
     if (result.length === 0) {
       throw new Error('Wallet signer returned an empty signed XDR string.');
     }
-    return result;
+    return assertValidSignedXdrFormat(result);
   }
 
   if (result && typeof result === 'object') {
     const { envelope_xdr } = result as SignatureResponse;
-    if (typeof envelope_xdr === 'string' && envelope_xdr.length > 0) {
-      return envelope_xdr;
+    if (typeof envelope_xdr === 'string' && envelope_xdr.trim().length > 0) {
+      return assertValidSignedXdrFormat(envelope_xdr);
     }
     throw new Error(
       'Wallet signer returned a SignatureResponse without a valid `envelope_xdr` string.',

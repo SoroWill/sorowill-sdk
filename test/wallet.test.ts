@@ -1,3 +1,4 @@
+import { Account, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const freighterApiMock = vi.hoisted(() => ({
@@ -17,6 +18,7 @@ import {
   FreighterWalletAdapter,
   getPublicKey,
   isFreighterInstalled,
+  normalizeSignatureResponse,
   signTransaction,
 } from '../src/wallet';
 
@@ -330,3 +332,68 @@ describe('FreighterWalletAdapter', () => {
     });
   });
 });
+
+describe('normalizeSignatureResponse', () => {
+  function buildValidEnvelopeXdr(): string {
+    const account = new Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '1');
+    return new TransactionBuilder(account, {
+      fee: '100',
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(Operation.manageData({ name: 'sorowill', value: 'payload' }))
+      .setTimeout(30)
+      .build()
+      .toXDR();
+  }
+
+  it('returns a valid bare signed XDR string', () => {
+    const validXdr = buildValidEnvelopeXdr();
+    expect(normalizeSignatureResponse(validXdr)).toBe(validXdr);
+  });
+
+  it('extracts and returns a valid envelope_xdr from a SignatureResponse object', () => {
+    const validXdr = buildValidEnvelopeXdr();
+    expect(normalizeSignatureResponse({ envelope_xdr: validXdr, hash: 'abc123' })).toBe(validXdr);
+  });
+
+  it('rejects empty and whitespace-only XDR strings', () => {
+    expect(() => normalizeSignatureResponse('')).toThrow(
+      'Wallet signer returned an empty signed XDR string.',
+    );
+    expect(() => normalizeSignatureResponse('   ')).toThrow(
+      'Wallet signer returned an empty signed XDR string.',
+    );
+  });
+
+  it('rejects SignatureResponse objects with missing, empty, or whitespace-only envelope_xdr', () => {
+    expect(() => normalizeSignatureResponse({ envelope_xdr: '' })).toThrow(
+      'Wallet signer returned a SignatureResponse without a valid `envelope_xdr` string.',
+    );
+    expect(() => normalizeSignatureResponse({ envelope_xdr: '   ' })).toThrow(
+      'Wallet signer returned a SignatureResponse without a valid `envelope_xdr` string.',
+    );
+    expect(() => normalizeSignatureResponse({} as never)).toThrow(
+      'Wallet signer returned a SignatureResponse without a valid `envelope_xdr` string.',
+    );
+  });
+
+  it('rejects malformed XDR strings (non-base64, arbitrary base64, truncated XDR, and trailing garbage)', () => {
+    const validXdr = buildValidEnvelopeXdr();
+    const truncatedXdr = validXdr.slice(0, 24);
+    const trailingGarbageXdr = `${validXdr}!!!`;
+
+    for (const malformed of ['not-valid-xdr', 'dGVzdA==', 'AAAA', truncatedXdr, trailingGarbageXdr]) {
+      expect(() => normalizeSignatureResponse(malformed)).toThrow(/malformed XDR string/i);
+      expect(() => normalizeSignatureResponse({ envelope_xdr: malformed })).toThrow(
+        /malformed XDR string/i,
+      );
+    }
+  });
+
+  it('rejects non-string and non-object values', () => {
+    expect(() => normalizeSignatureResponse(null as never)).toThrow(/unexpected value/i);
+    expect(() => normalizeSignatureResponse(undefined as never)).toThrow(/unexpected value/i);
+    expect(() => normalizeSignatureResponse(42 as never)).toThrow(/unexpected value/i);
+  });
+});
+
