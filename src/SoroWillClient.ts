@@ -1902,43 +1902,52 @@ export class SoroWillClient {
     args: Record<string, unknown>,
     options?: RequestOptions,
   ): Promise<T> {
-    try {
-      const spec = await this.getSpec(options);
-      const scArgs = spec.funcArgsToScVals(method, args);
-      const operation = this.contract.call(method, ...scArgs);
+    const run = async (): Promise<T> => {
+      try {
+        const spec = await this.getSpec(options);
+        const scArgs = spec.funcArgsToScVals(method, args);
+        const operation = this.contract.call(method, ...scArgs);
 
-      const tx = this.buildInvocationEnvelope([operation], new Account(NULL_ACCOUNT, '0'));
+        const tx = this.buildInvocationEnvelope([operation], new Account(NULL_ACCOUNT, '0'));
 
-      const simulation = await this.withRetry(() =>
-        this.rpc(
-          () => this.rpcPool.withFailover((server) => server.simulateTransaction(tx)),
-          options,
-        ),
-      );
-      if (rpc.Api.isSimulationError(simulation)) {
-        throw new SimulationError(method, simulation.error);
-      }
-      if (rpc.Api.isSimulationRestore(simulation)) {
-        throw new SoroWillRestoreRequiredError(
-          `SoroWill simulation for ${method} requires ledger-entry restoration before this call can proceed. ` +
-            'Build and submit a restoreFootprint operation using the restore preamble on this error, then retry.',
-          simulation,
+        const simulation = await this.withRetry(() =>
+          this.rpc(
+            () => this.rpcPool.withFailover((server) => server.simulateTransaction(tx)),
+            options,
+          ),
         );
-      }
-      if (!simulation.result) {
-        throw new SoroWillError(`SoroWill simulation for ${method} returned no result`);
-      }
-      if (simulation.result.retval === undefined || simulation.result.retval === null) {
-        throw new SoroWillError(
-          `SoroWill simulation for ${method} returned a malformed result: retval is missing. ` +
-            'This usually means the RPC node returned an unexpected response shape.',
-        );
-      }
+        if (rpc.Api.isSimulationError(simulation)) {
+          throw new SimulationError(method, simulation.error);
+        }
+        if (rpc.Api.isSimulationRestore(simulation)) {
+          throw new SoroWillRestoreRequiredError(
+            `SoroWill simulation for ${method} requires ledger-entry restoration before this call can proceed. ` +
+              'Build and submit a restoreFootprint operation using the restore preamble on this error, then retry.',
+            simulation,
+          );
+        }
+        if (!simulation.result) {
+          throw new SoroWillError(`SoroWill simulation for ${method} returned no result`);
+        }
+        if (simulation.result.retval === undefined || simulation.result.retval === null) {
+          throw new SoroWillError(
+            `SoroWill simulation for ${method} returned a malformed result: retval is missing. ` +
+              'This usually means the RPC node returned an unexpected response shape.',
+          );
+        }
 
-      return spec.funcResToNative(method, simulation.result.retval) as T;
-    } catch (error) {
-      throw mapContractError(error);
+        return spec.funcResToNative(method, simulation.result.retval) as T;
+      } catch (error) {
+        throw mapContractError(error);
+      }
+    };
+
+    if (options?.signal) {
+      return run();
     }
+
+    const dedupKey = createReadCacheKey(method, args);
+    return this.inFlightTracker.track(dedupKey, method, run);
   }
 
   /** Builds, simulates, signs, and submits a state-changing contract call. */
