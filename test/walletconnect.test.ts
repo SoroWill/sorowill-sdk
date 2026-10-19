@@ -678,3 +678,180 @@ describe.skip('WalletConnectAdapter – connection timeout', () => {
     vi.useRealTimers();
   });
 });
+
+describe('WalletConnectAdapter – session namespace methods validation (#583)', () => {
+  function createMockClient(session: WalletConnectSession): WalletConnectClient {
+    return {
+      async connect() {
+        return {
+          uri: 'wc:test',
+          async approval() {
+            return session;
+          },
+        };
+      },
+      async disconnect() {},
+      async getSession(topic) {
+        return topic === session.topic ? session : null;
+      },
+      async request<T>() {
+        return { envelope_xdr: 'SIGNED_XDR' } as T;
+      },
+    };
+  }
+
+  it('throws when session.namespaces is undefined or empty on connect', async () => {
+    const noNamespacesAdapter = new WalletConnectAdapter(
+      createMockClient({ topic: 'topic-no-ns' }),
+    );
+    await expect(noNamespacesAdapter.connect()).rejects.toThrow(
+      'WalletConnect session does not contain any namespaces',
+    );
+
+    const emptyNamespacesAdapter = new WalletConnectAdapter(
+      createMockClient({ topic: 'topic-empty-ns', namespaces: {} }),
+    );
+    await expect(emptyNamespacesAdapter.connect()).rejects.toThrow(
+      'WalletConnect session does not contain any namespaces',
+    );
+  });
+
+  it('throws when stellar namespace methods is undefined or empty on connect', async () => {
+    const undefinedMethodsAdapter = new WalletConnectAdapter(
+      createMockClient({
+        topic: 'topic-undef-methods',
+        namespaces: {
+          stellar: {
+            accounts: ['stellar:testnet:GABC123'],
+            events: [],
+          },
+        },
+      }),
+    );
+    await expect(undefinedMethodsAdapter.connect()).rejects.toThrow(
+      'WalletConnect session namespace does not contain any supported methods',
+    );
+
+    const emptyMethodsAdapter = new WalletConnectAdapter(
+      createMockClient({
+        topic: 'topic-empty-methods',
+        namespaces: {
+          stellar: {
+            accounts: ['stellar:testnet:GABC123'],
+            methods: [],
+            events: [],
+          },
+        },
+      }),
+    );
+    await expect(emptyMethodsAdapter.connect()).rejects.toThrow(
+      'WalletConnect session namespace does not contain any supported methods',
+    );
+  });
+
+  it('throws when default signTransactionMethod is not in supported methods', async () => {
+    const adapter = new WalletConnectAdapter(
+      createMockClient({
+        topic: 'topic-wrong-method',
+        namespaces: {
+          stellar: {
+            accounts: ['stellar:testnet:GABC123'],
+            methods: ['stellar_otherMethod'],
+            events: [],
+          },
+        },
+      }),
+    );
+
+    await expect(adapter.connect()).rejects.toThrow(
+      'WalletConnect session does not support required signing method "stellar_signXDR"',
+    );
+  });
+
+  it('validates custom signTransactionMethod against session supported methods', async () => {
+    const clientWithDefaultMethodOnly = createMockClient({
+      topic: 'topic-default-only',
+      namespaces: {
+        stellar: {
+          accounts: ['stellar:testnet:GABC123'],
+          methods: ['stellar_signXDR'],
+          events: [],
+        },
+      },
+    });
+    const failingAdapter = new WalletConnectAdapter(clientWithDefaultMethodOnly, {
+      signTransactionMethod: 'stellar_signTransaction',
+    });
+    await expect(failingAdapter.connect()).rejects.toThrow(
+      'WalletConnect session does not support required signing method "stellar_signTransaction"',
+    );
+
+    const clientWithCustomMethod = createMockClient({
+      topic: 'topic-custom',
+      namespaces: {
+        stellar: {
+          accounts: ['stellar:testnet:GABC123'],
+          methods: ['stellar_signTransaction'],
+          events: [],
+        },
+      },
+    });
+    const passingAdapter = new WalletConnectAdapter(clientWithCustomMethod, {
+      signTransactionMethod: 'stellar_signTransaction',
+    });
+    const connection = await passingAdapter.connect();
+    expect(connection.publicKey).toBe('GABC123');
+  });
+
+  it('validates requiredNamespaces methods and rejects sessions missing required methods on reconnect and signTransaction', async () => {
+    const invalidStoredSession: WalletConnectSession = {
+      topic: 'topic-stored-invalid',
+      namespaces: {
+        stellar: {
+          accounts: ['stellar:testnet:GABC123'],
+          methods: [],
+          events: [],
+        },
+      },
+    };
+    const store = new MemoryWalletConnectSessionStore();
+    await store.setSessionTopic(invalidStoredSession.topic);
+
+    const adapter = new WalletConnectAdapter(createMockClient(invalidStoredSession), {
+      sessionStore: store,
+    });
+
+    await expect(adapter.reconnect()).rejects.toThrow(
+      'WalletConnect session namespace does not contain any supported methods',
+    );
+    await expect(adapter.signTransaction('UNSIGNED_XDR')).rejects.toThrow(
+      'WalletConnect session namespace does not contain any supported methods',
+    );
+
+    const missingExtraRequiredMethodSession: WalletConnectSession = {
+      topic: 'topic-missing-req',
+      namespaces: {
+        stellar: {
+          accounts: ['stellar:testnet:GABC123'],
+          methods: ['stellar_signXDR'],
+          events: [],
+        },
+      },
+    };
+    const strictAdapter = new WalletConnectAdapter(
+      createMockClient(missingExtraRequiredMethodSession),
+      {
+        requiredNamespaces: {
+          stellar: {
+            methods: ['stellar_signXDR', 'stellar_signAuthEntry'],
+            chains: ['stellar:testnet'],
+            events: [],
+          },
+        },
+      },
+    );
+    await expect(strictAdapter.connect()).rejects.toThrow(
+      'WalletConnect session namespace "stellar" does not support required method "stellar_signAuthEntry"',
+    );
+  });
+});

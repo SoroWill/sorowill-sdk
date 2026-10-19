@@ -392,6 +392,7 @@ export class WalletConnectAdapter implements WalletAdapter {
       throw new Error('WalletConnect session could not be found. Reconnect required.');
     }
 
+    this.validateSessionMethods(session);
     this.session = session;
     return session;
   }
@@ -410,6 +411,7 @@ export class WalletConnectAdapter implements WalletAdapter {
 
   async signTransaction(xdr: string, options?: SignTransactionOptions): Promise<string> {
     const session = await this.requireSession();
+    this.validateSessionMethods(session);
 
     // Validate that the requested networkPassphrase matches the session's network
     if (options?.networkPassphrase) {
@@ -442,13 +444,73 @@ export class WalletConnectAdapter implements WalletAdapter {
     return extractor(response);
   }
 
+  private validateSessionMethods(session: WalletConnectSession): void {
+    const namespaces = session.namespaces;
+    if (!namespaces || typeof namespaces !== 'object' || Object.keys(namespaces).length === 0) {
+      throw new Error('WalletConnect session does not contain any namespaces');
+    }
+
+    const stellarNamespace = namespaces['stellar'];
+    const targetNamespaces = stellarNamespace ? [stellarNamespace] : Object.values(namespaces);
+
+    const supportedMethods = new Set<string>();
+    for (const ns of targetNamespaces) {
+      if (ns && Array.isArray(ns.methods)) {
+        for (const m of ns.methods) {
+          if (typeof m === 'string' && m.trim().length > 0) {
+            supportedMethods.add(m);
+          }
+        }
+      }
+    }
+
+    if (supportedMethods.size === 0) {
+      throw new Error('WalletConnect session namespace does not contain any supported methods');
+    }
+
+    const signMethod = this.options.signTransactionMethod ?? 'stellar_signXDR';
+    const hasSignMethod =
+      supportedMethods.has(signMethod) ||
+      (this.options.signTransactionMethod === undefined &&
+        signMethod === 'stellar_signXDR' &&
+        supportedMethods.has('stellar_signXdr'));
+
+    if (!hasSignMethod) {
+      throw new Error(
+        `WalletConnect session does not support required signing method "${signMethod}"`,
+      );
+    }
+
+    if (this.options.requiredNamespaces) {
+      for (const [nsKey, reqNs] of Object.entries(this.options.requiredNamespaces)) {
+        const requiredMethods = reqNs?.methods ?? [];
+        if (requiredMethods.length === 0) continue;
+        const sessionNsMethods = namespaces[nsKey]?.methods;
+        if (!Array.isArray(sessionNsMethods) || sessionNsMethods.length === 0) {
+          throw new Error(
+            `WalletConnect session namespace "${nsKey}" does not contain required methods: ${requiredMethods.join(', ')}`,
+          );
+        }
+        for (const reqMethod of requiredMethods) {
+          if (!sessionNsMethods.includes(reqMethod)) {
+            throw new Error(
+              `WalletConnect session namespace "${nsKey}" does not support required method "${reqMethod}"`,
+            );
+          }
+        }
+      }
+    }
+  }
+
   private useSession(session: WalletConnectSession): WalletConnection {
-    this.session = session;
-    this.connection = {
+    this.validateSessionMethods(session);
+    const connection: WalletConnection = {
       publicKey: (this.options.getPublicKeyFromSession ?? getDefaultPublicKeyFromSession)(session),
       network: (this.options.getNetworkFromSession ?? getDefaultNetwork)(session).network,
       networkPassphrase: this.resolveNetwork(session).networkPassphrase,
     };
+    this.session = session;
+    this.connection = connection;
     void this.sessionStore.setSessionTopic(session.topic);
     return this.connection;
   }
