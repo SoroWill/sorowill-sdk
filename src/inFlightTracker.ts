@@ -186,14 +186,15 @@ export class InFlightTracker {
     willId: string | bigint,
     method: string,
     operation: (signal: AbortSignal) => PromiseLike<T>,
+    clientId?: string,
   ): Promise<T> | undefined {
-    const key = this.getKey(willId, method);
+    const key = this.getKey(willId, method, clientId);
 
     if (!this.inFlight.has(key)) {
       return undefined;
     }
 
-    return this.track(willId, method, operation);
+    return this.track(willId, method, operation, clientId);
   }
 
   clear(): void {

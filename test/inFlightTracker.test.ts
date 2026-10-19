@@ -262,4 +262,93 @@ describe('InFlightTracker', () => {
       expect(key1).toBe('123:checkIn');
     });
   });
+
+  describe('trackIfPending', () => {
+    it('returns undefined when no operation is pending for the key', () => {
+      const result = tracker.trackIfPending('will-1', 'checkIn', async () => 'follow-up');
+      expect(result).toBeUndefined();
+    });
+
+    it('returns the pending operation promise when an operation is in flight without clientId', async () => {
+      let resolveInitial!: (value: string) => void;
+      const initialOp = (_signal: AbortSignal) =>
+        new Promise<string>((resolve) => {
+          resolveInitial = resolve;
+        });
+
+      const inFlightPromise = tracker.track('will-1', 'checkIn', initialOp);
+      const pendingPromise = tracker.trackIfPending('will-1', 'checkIn', async () => 'ignored');
+
+      expect(pendingPromise).toBe(inFlightPromise);
+      resolveInitial('completed');
+      await expect(pendingPromise).resolves.toBe('completed');
+    });
+
+    it('scopes lookup and tracking by clientId so different clients do not interfere', async () => {
+      let resolveClientA!: (value: string) => void;
+      const clientAOp = (_signal: AbortSignal) =>
+        new Promise<string>((resolve) => {
+          resolveClientA = resolve;
+        });
+
+      const clientAPromise = tracker.track('will-1', 'checkIn', clientAOp, 'client-a');
+
+      // Client B has no pending operation for will-1:checkIn
+      const clientBPending = tracker.trackIfPending(
+        'will-1',
+        'checkIn',
+        async () => 'client-b-follow-up',
+        'client-b',
+      );
+      expect(clientBPending).toBeUndefined();
+      expect(tracker.isInFlight('will-1', 'checkIn', 'client-b')).toBe(false);
+
+      // Unscoped lookup also does not match client-a's scoped operation
+      const unscopedPending = tracker.trackIfPending('will-1', 'checkIn', async () => 'unscoped');
+      expect(unscopedPending).toBeUndefined();
+
+      // Client A finds its own pending operation and deduplicates against it
+      const clientAPending = tracker.trackIfPending(
+        'will-1',
+        'checkIn',
+        async () => 'client-a-follow-up',
+        'client-a',
+      );
+      expect(clientAPending).toBe(clientAPromise);
+
+      // If Client B starts its own operation, both remain isolated
+      let resolveClientB!: (value: string) => void;
+      const clientBPromise = tracker.track(
+        'will-1',
+        'checkIn',
+        (_signal: AbortSignal) =>
+          new Promise<string>((resolve) => {
+            resolveClientB = resolve;
+          }),
+        'client-b',
+      );
+
+      const clientBPendingNow = tracker.trackIfPending(
+        'will-1',
+        'checkIn',
+        async () => 'client-b-follow-up-2',
+        'client-b',
+      );
+      expect(clientBPendingNow).toBe(clientBPromise);
+      expect(clientBPendingNow).not.toBe(clientAPromise);
+
+      resolveClientA('done-a');
+      resolveClientB('done-b');
+      await expect(clientAPending).resolves.toBe('done-a');
+      await expect(clientBPendingNow).resolves.toBe('done-b');
+
+      // Once settled, trackIfPending returns undefined for both clients
+      expect(
+        tracker.trackIfPending('will-1', 'checkIn', async () => 'after-a', 'client-a'),
+      ).toBeUndefined();
+      expect(
+        tracker.trackIfPending('will-1', 'checkIn', async () => 'after-b', 'client-b'),
+      ).toBeUndefined();
+    });
+  });
 });
