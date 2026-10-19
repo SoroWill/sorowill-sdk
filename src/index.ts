@@ -130,6 +130,7 @@ export {
   ConfirmationWindowExpiredError,
   DuplicateBeneficiaryError,
   DuplicateGuardianError,
+  DuplicateOperationError,
   ExorbitantFeeError,
   FixedAmountExceedsBalanceError,
   FreighterInstallCheckError,

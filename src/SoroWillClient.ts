@@ -379,6 +379,16 @@ interface RawWill {
 const DEFAULT_POLL_ATTEMPTS = 30;
 
 /**
+ * Contract methods for which two concurrent invocations targeting the same
+ * will must never both be submitted — each would send its own transaction
+ * on-chain. Invocations of these methods are registered through
+ * {@link InFlightTracker.trackExclusive}, so a duplicate arriving while the
+ * first is still in flight is rejected with a `DuplicateOperationError`
+ * instead of silently issuing a second transaction (#523).
+ */
+const EXCLUSIVE_INVOKE_METHODS: ReadonlySet<string> = new Set(['check_in']);
+
+/**
  * How long `subscribeToEvents` waits for a WebSocket to fire `onopen` before
  * giving up and falling back to HTTP polling. Guards against a server that
  * accepts the TCP/TLS connection but never completes the WebSocket handshake
@@ -1001,7 +1011,22 @@ export class SoroWillClient {
     return { willId, txHash };
   }
 
-  /** Resets the check-in countdown for `willId`. */
+  /** Resets the check-in countdown for `willId`.
+   *
+   * Only one `check_in` transaction per will may be in flight at a time: if a
+   * previous `checkIn()` call for the same will has not yet settled, the new
+   * call is rejected immediately instead of submitting a duplicate
+   * transaction on-chain (#523).
+   *
+   * @throws {DuplicateOperationError} If a `checkIn()` for the same will id is
+   *   already in flight. Await the original call (or retry after it settles)
+   *   before submitting another one.
+   * @throws {WalletNetworkMismatchError} If the connected wallet is on a different network.
+   * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout.
+   * @throws {WillNotFoundError} If the will does not exist.
+   * @throws {CheckinNotDueError} If a check-in is not currently due.
+   * @throws {Error} If the wallet is not connected or fails to sign.
+   */
   async checkIn(
     willId: string,
     options?: RequestOptions,
@@ -2033,9 +2058,18 @@ export class SoroWillClient {
     }
     };
 
-    return willId === undefined
-      ? run()
-      : this.inFlightTracker.track(willId, method, run) as Promise<{
+    if (willId === undefined) {
+      return run();
+    }
+    // Some state-changing methods must never run two concurrent invocations
+    // for the same will: a duplicate would submit a second transaction
+    // on-chain. Those are routed through trackExclusive so the duplicate is
+    // rejected with a DuplicateOperationError instead of being coalesced
+    // onto the in-flight promise (#523).
+    const tracked = EXCLUSIVE_INVOKE_METHODS.has(method)
+      ? this.inFlightTracker.trackExclusive(willId, method, run)
+      : this.inFlightTracker.track(willId, method, run);
+    return tracked as Promise<{
           txHash: string;
           createdAt: number;
           returnValue: ScVal | undefined;

@@ -70,6 +70,33 @@ export class RequestTimeoutError extends SoroWillError {
 }
 
 /**
+ * Raised when an operation is submitted while an identical operation (same
+ * will id and method) is already in flight and the caller asked for exclusive
+ * execution. Unlike the default deduplication behaviour — which coalesces
+ * concurrent duplicates onto the in-flight promise — exclusive operations
+ * reject the duplicate immediately so it can never issue a second, duplicate
+ * transaction on-chain (#523). The original in-flight operation is unaffected
+ * and continues to completion.
+ */
+export class DuplicateOperationError extends SoroWillError {
+  /** The will id whose operation was already in flight. */
+  readonly willId: string;
+  /** The contract method that was already in flight for {@link willId}. */
+  readonly method: string;
+
+  constructor(willId: string | bigint, method: string, options?: ErrorOptions) {
+    const id = typeof willId === 'bigint' ? willId.toString() : willId;
+    super(
+      `A "${method}" operation for will ${id} is already in flight. ` +
+        'Wait for the in-flight operation to settle before submitting another one.',
+      options,
+    );
+    this.willId = id;
+    this.method = method;
+  }
+}
+
+/**
  * Raised when Freighter's `isConnected()` API reports an error other than
  * the extension simply being absent — e.g. it was called outside a browser,
  * or Freighter itself hit an internal error. Distinguishing this from "not
