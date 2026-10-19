@@ -184,6 +184,26 @@ export class HookManager {
     }
   }
 
+  /**
+   * Executes registered hooks for the given context (or phase and context)
+   * with recursion detection.
+   */
+  async execute(ctx: BeforeInvokeContext): Promise<boolean>;
+  async execute(phase: 'beforeInvoke', ctx: BeforeInvokeContext): Promise<boolean>;
+  async execute(phase: 'afterInvoke', ctx: AfterInvokeContext): Promise<void>;
+  async execute(
+    phaseOrCtx: BeforeInvokeContext | 'beforeInvoke' | 'afterInvoke',
+    maybeCtx?: BeforeInvokeContext | AfterInvokeContext,
+  ): Promise<boolean | void> {
+    if (phaseOrCtx === 'afterInvoke') {
+      return this.runAfterInvoke(maybeCtx as AfterInvokeContext);
+    }
+    if (phaseOrCtx === 'beforeInvoke') {
+      return this.runBeforeInvoke(maybeCtx as BeforeInvokeContext);
+    }
+    return this.runBeforeInvoke(phaseOrCtx);
+  }
+
   /** The number of registered beforeInvoke hooks. */
   get beforeInvokeCount(): number {
     return this.registry.beforeInvoke.length;

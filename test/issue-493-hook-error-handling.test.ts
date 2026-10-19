@@ -287,5 +287,18 @@ describe('HookManager — issue #493: hook error handling', () => {
     expect(normalBefore).toHaveBeenCalledTimes(1);
     expect(normalAfter).toHaveBeenCalledTimes(1);
   });
+
+  it('prevents recursive execution via HookManager.execute and throws HookExecutionError', async () => {
+    const hooks = new HookManager();
+    let invocations = 0;
+
+    hooks.onBeforeInvoke(async (ctx) => {
+      invocations++;
+      await hooks.execute(ctx);
+    });
+
+    await expect(hooks.execute(makeBeforeCtx())).rejects.toThrow(HookExecutionError);
+    expect(invocations).toBe(1);
+  });
 });
 
