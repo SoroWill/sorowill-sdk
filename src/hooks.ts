@@ -73,6 +73,8 @@ export class HookManager {
     beforeInvoke: [],
     afterInvoke: [],
   };
+  private isExecutingBeforeInvoke = false;
+  private isExecutingAfterInvoke = false;
 
   /** Register a hook that runs before every contract invocation. */
   onBeforeInvoke(hook: BeforeInvokeHook): void {
@@ -109,21 +111,40 @@ export class HookManager {
   }
 
   /** @internal Run all beforeInvoke hooks. Returns `false` if any hook aborted.
-   * If any hook throws, the error is wrapped in a `HookExecutionError` and
-   * re-thrown immediately. The transaction is not built or submitted when a
-   * hook throws — the client state is unchanged.
+   * If any hook throws or triggers recursive `runBeforeInvoke` execution, the
+   * error is wrapped in a `HookExecutionError` and re-thrown immediately. The
+   * transaction is not built or submitted when a hook throws — the client
+   * state is unchanged.
    */
   async runBeforeInvoke(ctx: BeforeInvokeContext): Promise<boolean> {
-    for (const hook of this.registry.beforeInvoke) {
-      let result: boolean | void;
-      try {
-        result = await hook(ctx);
-      } catch (err) {
-        throw new HookExecutionError('beforeInvoke', err);
-      }
-      if (result === false) return false;
+    if (this.isExecutingBeforeInvoke || this.isExecutingAfterInvoke) {
+      throw new HookExecutionError(
+        'beforeInvoke',
+        new Error(
+          `Recursive beforeInvoke hook execution detected while invoking "${ctx.method}". ` +
+            'A hook must not trigger another operation on the same HookManager.',
+        ),
+      );
     }
-    return true;
+
+    this.isExecutingBeforeInvoke = true;
+    try {
+      for (const hook of this.registry.beforeInvoke) {
+        let result: boolean | void;
+        try {
+          result = await hook(ctx);
+        } catch (err) {
+          if (err instanceof HookExecutionError) {
+            throw err;
+          }
+          throw new HookExecutionError('beforeInvoke', err);
+        }
+        if (result === false) return false;
+      }
+      return true;
+    } finally {
+      this.isExecutingBeforeInvoke = false;
+    }
   }
 
   /**
@@ -132,14 +153,34 @@ export class HookManager {
    * side effects, and a broken one must never convert an otherwise-successful
    * (or already-failed) invocation into a different outcome for the caller.
    * Every hook still runs exactly once, in order, even if an earlier one throws.
+   * Re-entrant hook execution from within an `afterInvoke` hook is rejected
+   * with a `HookExecutionError` to prevent infinite recursion.
    */
   async runAfterInvoke(ctx: AfterInvokeContext): Promise<void> {
-    for (const hook of this.registry.afterInvoke) {
-      try {
-        await hook(ctx);
-      } catch {
-        // Intentionally ignored — see method doc.
+    if (this.isExecutingAfterInvoke || this.isExecutingBeforeInvoke) {
+      throw new HookExecutionError(
+        'afterInvoke',
+        new Error(
+          `Recursive afterInvoke hook execution detected while invoking "${ctx.method}". ` +
+            'A hook must not trigger another operation on the same HookManager.',
+        ),
+      );
+    }
+
+    this.isExecutingAfterInvoke = true;
+    try {
+      for (const hook of this.registry.afterInvoke) {
+        try {
+          await hook(ctx);
+        } catch (err) {
+          if (err instanceof HookExecutionError) {
+            throw err;
+          }
+          // Intentionally ignored — see method doc.
+        }
       }
+    } finally {
+      this.isExecutingAfterInvoke = false;
     }
   }
 

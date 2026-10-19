@@ -218,4 +218,74 @@ describe('HookManager — issue #493: hook error handling', () => {
     expect(err.message).toContain('just a string');
     expect(err.cause).toBe('just a string');
   });
+
+  // ── issue #566: recursive hook execution prevention ──────────────────────
+
+  it('prevents recursive runBeforeInvoke execution and throws HookExecutionError', async () => {
+    const hooks = new HookManager();
+    let invocations = 0;
+
+    hooks.onBeforeInvoke(async (ctx) => {
+      invocations++;
+      await hooks.runBeforeInvoke(ctx);
+    });
+
+    await expect(hooks.runBeforeInvoke(makeBeforeCtx())).rejects.toThrow(HookExecutionError);
+    expect(invocations).toBe(1);
+  });
+
+  it('prevents recursive runAfterInvoke execution and throws HookExecutionError', async () => {
+    const hooks = new HookManager();
+    let invocations = 0;
+
+    hooks.onAfterInvoke(async (ctx) => {
+      invocations++;
+      await hooks.runAfterInvoke(ctx);
+    });
+
+    await expect(hooks.runAfterInvoke(makeAfterCtx())).rejects.toThrow(HookExecutionError);
+    expect(invocations).toBe(1);
+  });
+
+  it('prevents an afterInvoke hook from triggering a new beforeInvoke cycle', async () => {
+    const hooks = new HookManager();
+    const beforeSpy = vi.fn();
+    hooks.onBeforeInvoke(beforeSpy);
+    hooks.onAfterInvoke(async () => {
+      await hooks.runBeforeInvoke(makeBeforeCtx('create_will'));
+    });
+
+    await expect(hooks.runAfterInvoke(makeAfterCtx())).rejects.toThrow(HookExecutionError);
+    expect(beforeSpy).not.toHaveBeenCalled();
+  });
+
+  it('resets recursion guards after a recursive error so subsequent calls succeed', async () => {
+    const hooks = new HookManager();
+    const recursiveBefore = async (ctx: BeforeInvokeContext) => {
+      await hooks.runBeforeInvoke(ctx);
+    };
+    const recursiveAfter = async (ctx: AfterInvokeContext) => {
+      await hooks.runAfterInvoke(ctx);
+    };
+
+    hooks.onBeforeInvoke(recursiveBefore);
+    hooks.onAfterInvoke(recursiveAfter);
+
+    await expect(hooks.runBeforeInvoke(makeBeforeCtx())).rejects.toBeInstanceOf(HookExecutionError);
+    await expect(hooks.runAfterInvoke(makeAfterCtx())).rejects.toBeInstanceOf(HookExecutionError);
+
+    hooks.offBeforeInvoke(recursiveBefore);
+    hooks.offAfterInvoke(recursiveAfter);
+
+    const normalBefore = vi.fn();
+    const normalAfter = vi.fn();
+    hooks.onBeforeInvoke(normalBefore);
+    hooks.onAfterInvoke(normalAfter);
+
+    await expect(hooks.runBeforeInvoke(makeBeforeCtx())).resolves.toBe(true);
+    await expect(hooks.runAfterInvoke(makeAfterCtx())).resolves.toBeUndefined();
+    expect(normalBefore).toHaveBeenCalledTimes(1);
+    expect(normalAfter).toHaveBeenCalledTimes(1);
+  });
 });
+
