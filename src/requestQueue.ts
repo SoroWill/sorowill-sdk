@@ -54,6 +54,18 @@ interface PendingRequest<T> {
  * created for the same account delegate to the same {@link QueueCore}, which
  * guarantees their operations are serialized against one another.
  */
+function validatePositiveInteger(value: number, name: string): void {
+  if (
+    typeof value !== 'number' ||
+    Number.isNaN(value) ||
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    value < 1
+  ) {
+    throw new RangeError(`${name} must be a positive integer (>= 1), received ${String(value)}`);
+  }
+}
+
 class QueueCore {
   readonly maxConcurrent: number;
   readonly requestsPerSecond: number;
@@ -64,6 +76,8 @@ class QueueCore {
   refCount = 0;
 
   constructor(maxConcurrent: number, requestsPerSecond: number) {
+    validatePositiveInteger(maxConcurrent, 'maxConcurrent');
+    validatePositiveInteger(requestsPerSecond, 'requestsPerSecond');
     this.maxConcurrent = maxConcurrent;
     this.requestsPerSecond = requestsPerSecond;
   }
@@ -84,14 +98,10 @@ export class RequestQueue {
   private released = false;
 
   constructor(options: RequestQueueOptions = {}) {
-    const maxConcurrent = options.maxConcurrent ?? 4;
-    const requestsPerSecond = options.requestsPerSecond ?? 10;
-    if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1) {
-      throw new RangeError('maxConcurrent must be a positive integer');
-    }
-    if (!Number.isInteger(requestsPerSecond) || requestsPerSecond < 1) {
-      throw new RangeError('requestsPerSecond must be a positive integer');
-    }
+    const maxConcurrent = options.maxConcurrent === undefined ? 4 : options.maxConcurrent;
+    const requestsPerSecond = options.requestsPerSecond === undefined ? 10 : options.requestsPerSecond;
+    validatePositiveInteger(maxConcurrent, 'maxConcurrent');
+    validatePositiveInteger(requestsPerSecond, 'requestsPerSecond');
     this.account = options.account;
     if (this.account !== undefined) {
       let core = sharedCores.get(this.account);

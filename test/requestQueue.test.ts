@@ -248,16 +248,36 @@ describe('RequestQueue', () => {
   });
 
   describe('constructor', () => {
-    it('rejects invalid maxConcurrent', () => {
+    it('rejects invalid maxConcurrent (0, negative, NaN, non-finite, fractional, null)', () => {
       expect(() => new RequestQueue({ maxConcurrent: 0 })).toThrow(RangeError);
       expect(() => new RequestQueue({ maxConcurrent: -1 })).toThrow(RangeError);
+      expect(() => new RequestQueue({ maxConcurrent: -100 })).toThrow(RangeError);
+      expect(() => new RequestQueue({ maxConcurrent: Number.NaN })).toThrow(RangeError);
+      expect(() => new RequestQueue({ maxConcurrent: Number.POSITIVE_INFINITY })).toThrow(RangeError);
+      expect(() => new RequestQueue({ maxConcurrent: Number.NEGATIVE_INFINITY })).toThrow(RangeError);
       expect(() => new RequestQueue({ maxConcurrent: 1.5 })).toThrow(RangeError);
+      expect(() => new RequestQueue({ maxConcurrent: null as unknown as number })).toThrow(RangeError);
+    });
+
+    it('rejects invalid maxConcurrent even when account core already exists', () => {
+      const valid = new RequestQueue({ account: 'GVALID_SHARED_CORE', maxConcurrent: 2 });
+      try {
+        expect(() => new RequestQueue({ account: 'GVALID_SHARED_CORE', maxConcurrent: 0 })).toThrow(RangeError);
+        expect(() => new RequestQueue({ account: 'GVALID_SHARED_CORE', maxConcurrent: -1 })).toThrow(RangeError);
+        expect(() => new RequestQueue({ account: 'GVALID_SHARED_CORE', maxConcurrent: Number.NaN })).toThrow(RangeError);
+      } finally {
+        valid.release();
+      }
     });
 
     it('rejects invalid requestsPerSecond', () => {
       expect(() => new RequestQueue({ requestsPerSecond: 0 })).toThrow(RangeError);
       expect(() => new RequestQueue({ requestsPerSecond: -1 })).toThrow(RangeError);
+      expect(() => new RequestQueue({ requestsPerSecond: Number.NaN })).toThrow(RangeError);
+      expect(() => new RequestQueue({ requestsPerSecond: Number.POSITIVE_INFINITY })).toThrow(RangeError);
+      expect(() => new RequestQueue({ requestsPerSecond: Number.NEGATIVE_INFINITY })).toThrow(RangeError);
       expect(() => new RequestQueue({ requestsPerSecond: 2.5 })).toThrow(RangeError);
+      expect(() => new RequestQueue({ requestsPerSecond: null as unknown as number })).toThrow(RangeError);
     });
 
     it('accepts valid options', () => {
