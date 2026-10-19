@@ -43,14 +43,18 @@ function makeStubSpec() {
 
 const stubSpec = makeStubSpec();
 
-// Mock Spec.fromWasm to avoid needing a real WASM binary
+// Mock Spec.fromWasm to avoid needing a real WASM binary while preserving the real Spec constructor
 vi.mock('@stellar/stellar-sdk', async () => {
-  const actual = await vi.importActual('@stellar/stellar-sdk');
+  const actual = await vi.importActual<typeof import('@stellar/stellar-sdk')>('@stellar/stellar-sdk');
+  const RealSpec = actual.contract.Spec;
+  class PatchedSpec extends RealSpec {
+    static override fromWasm = vi.fn(() => stubSpec as unknown as InstanceType<typeof RealSpec>);
+  }
   return {
-    ...(actual as Record<string, unknown>),
+    ...actual,
     contract: {
-      ...((actual as Record<string, unknown>).contract as Record<string, unknown>),
-      Spec: { fromWasm: vi.fn(() => stubSpec) },
+      ...actual.contract,
+      Spec: PatchedSpec,
     },
   };
 });
@@ -71,8 +75,9 @@ vi.mock('../src/wallet', () => ({
   })),
 }));
 
-import { SoroWillClient, type SoroWillRpcServer } from '../src/SoroWillClient';
-import { SoroWillError, SoroWillRestoreRequiredError } from '../src/errors';
+import { SoroWillClient, SoroWillInvalidIdError, type SoroWillRpcServer } from '../src/SoroWillClient';
+import { SoroWillError, SoroWillRestoreRequiredError, TooManyIdsError } from '../src/errors';
+import { contract as stellarContract } from '@stellar/stellar-sdk';
 
 const WASM_BINARY = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]);
 
@@ -448,7 +453,7 @@ describe('SoroWillClient public methods', () => {
 
       const wills = await client.getWills(['1', '2']);
       expect(simulateCalls).toBe(1);
-      expect(capturedArgs).toEqual([{ method: 'get_wills', args: { will_ids: [1n, 2n] } }]);
+      expect(capturedArgs).toEqual([{ method: 'get_wills', args: { ids: [1n, 2n] } }]);
       expect(wills.map((w) => w.id)).toEqual(['1', '2']);
 
       // Subsequent batch call and individual getWill calls hit readCache with 0 extra RPC calls
@@ -459,6 +464,57 @@ describe('SoroWillClient public methods', () => {
       expect(cachedBatch.map((w) => w.id)).toEqual(['1', '2']);
       expect(cachedWill1.id).toBe('1');
       expect(cachedWill2.id).toBe('2');
+    });
+
+    it('encodes ids argument through a real @stellar/stellar-sdk contract.Spec for get_wills(ids: Vec<u64>)', async () => {
+      const getWillsFnSpec = xdr.ScSpecEntry.scSpecEntryFunctionV0(
+        new xdr.ScSpecFunctionV0({
+          doc: '',
+          name: 'get_wills',
+          inputs: [
+            new xdr.ScSpecFunctionInputV0({
+              doc: '',
+              name: 'ids',
+              type: xdr.ScSpecTypeDef.scSpecTypeVec(
+                new xdr.ScSpecTypeVec({ elementType: xdr.ScSpecTypeDef.scSpecTypeU64() }),
+              ),
+            }),
+          ],
+          outputs: [xdr.ScSpecTypeDef.scSpecTypeVal()],
+        }),
+      );
+      const realSpec = new stellarContract.Spec([getWillsFnSpec.toXDR('base64')]);
+      const encodedArgsSpy = vi.spyOn(realSpec, 'funcArgsToScVals');
+      vi.spyOn(realSpec, 'funcResToNative').mockReturnValue([
+        {
+          id: 1n,
+          owner: 'GOWNER',
+          token: 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526',
+          balance: 1_000_000n,
+          beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+          checkin_period_days: 90n,
+          grace_period_days: 7n,
+          last_checkin: 1_700_000_000n,
+          trigger_time: undefined,
+          status: 'Active',
+          guardians: [],
+          guardian_votes: 0,
+        },
+      ]);
+
+      const client = new SoroWillClient({
+        network: 'testnet',
+        contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+        spec: realSpec,
+        rpcServer: makeRpcServer(async () => ({
+          transactionData: 'AAAA',
+          result: { retval: VOID_SCVAL },
+        })),
+      });
+
+      const wills = await client.getWills(['1', '2']);
+      expect(wills.map((w) => w.id)).toEqual(['1']);
+      expect(encodedArgsSpy).toHaveBeenCalledWith('get_wills', { ids: [1n, 2n] });
     });
 
     it('returns empty array without making an RPC call when willIds is empty', async () => {
@@ -477,7 +533,7 @@ describe('SoroWillClient public methods', () => {
       expect(simulateCalls).toBe(0);
     });
 
-    it('supports pagination options on getWills and rejects malformed willIds upfront', async () => {
+    it('supports pagination options on getWills and rejects malformed or excessive willIds upfront', async () => {
       let simulateCalls = 0;
       const client = new SoroWillClient({
         network: 'testnet',
@@ -488,7 +544,14 @@ describe('SoroWillClient public methods', () => {
         }),
       });
 
-      await expect(client.getWills(['1', 'not-a-will-id'])).rejects.toThrow(/Invalid willId/);
+      await expect(client.getWills(['1', 'not-a-will-id'])).rejects.toBeInstanceOf(
+        SoroWillInvalidIdError,
+      );
+      await expect(client.getWills(null as unknown as string[])).rejects.toBeInstanceOf(
+        SoroWillInvalidIdError,
+      );
+      const fiftyOneIds = Array.from({ length: 51 }, (_, index) => String(index + 1));
+      await expect(client.getWills(fiftyOneIds)).rejects.toBeInstanceOf(TooManyIdsError);
       expect(simulateCalls).toBe(0);
 
       const page = await client.getWills(['1'], { pageSize: 1 });
@@ -515,6 +578,43 @@ describe('SoroWillClient public methods', () => {
       expect(simulateCalls).toBe(1);
       expect(wills).toHaveLength(1);
       expect(wills[0]?.id).toBe('1');
+    });
+
+    it('invalidates cached getWills batch when an event arrives for a requested willId that was initially missing', async () => {
+      let simulateCalls = 0;
+      let eventListener: ((event: { type: string; willId: string }) => void) | undefined;
+      const client = new SoroWillClient({
+        network: 'testnet',
+        contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+        eventSource: {
+          subscribe(listener) {
+            eventListener = listener;
+            return () => {
+              eventListener = undefined;
+            };
+          },
+        },
+        rpcServer: makeRpcServer(async () => {
+          simulateCalls += 1;
+          return { transactionData: 'AAAA', result: { retval: VOID_SCVAL } };
+        }),
+      });
+
+      // stubSpec returns only will '1' for get_wills; requested will '2' is initially absent
+      const firstFetch = await client.getWills(['1', '2']);
+      expect(firstFetch.map((w) => w.id)).toEqual(['1']);
+      expect(simulateCalls).toBe(1);
+
+      // Cached hit before event
+      await client.getWills(['1', '2']);
+      expect(simulateCalls).toBe(1);
+
+      // Event for will '2' invalidates the ['1', '2'] batch cache entry
+      eventListener?.({ type: 'will.created', willId: '2' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      await client.getWills(['1', '2']);
+      expect(simulateCalls).toBe(2);
     });
   });
 });

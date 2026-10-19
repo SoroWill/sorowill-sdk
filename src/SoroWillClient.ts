@@ -57,6 +57,7 @@ import {
   SoroWillInvalidAmountError,
   SoroWillRestoreRequiredError,
   TooManyGuardiansError,
+  TooManyIdsError,
   UnsupportedBatchSizeError,
   WalletNetworkMismatchError,
   WebSocketNotConfiguredError,
@@ -1263,11 +1264,17 @@ export class SoroWillClient {
   /**
    * Fetches multiple wills in a single batch read RPC call (`get_wills`).
    * Does not require a connected wallet.
+   *
+   * @throws {SoroWillInvalidIdError} If `willIds` is not an array or contains a malformed will ID.
+   * @throws {TooManyIdsError} If `willIds` contains more than 50 entries (`MAX_GET_WILLS_IDS`).
    */
   async getWills(willIds: readonly string[], options?: RequestOptions): Promise<Will[]>;
   /**
    * Fetches multiple wills in a single batch read RPC call (`get_wills`),
    * one client-side page at a time. Does not require a connected wallet.
+   *
+   * @throws {SoroWillInvalidIdError} If `willIds` is not an array or contains a malformed will ID.
+   * @throws {TooManyIdsError} If `willIds` contains more than 50 entries (`MAX_GET_WILLS_IDS`).
    */
   async getWills(
     willIds: readonly string[],
@@ -1284,12 +1291,18 @@ export class SoroWillClient {
     if (paginationOptions?.pageSize !== undefined) {
       normalizePositiveInteger(paginationOptions.pageSize, 'pageSize');
     }
+    if (!Array.isArray(willIds)) {
+      throw new SoroWillInvalidIdError(willIds);
+    }
     const parsedIds = willIds.map((willId) => parseWillId(willId));
+    if (parsedIds.length > 50) {
+      throw new TooManyIdsError();
+    }
     if (parsedIds.length === 0) {
       return this.paginate([], options);
     }
     const canonicalWillIds = parsedIds.map((id) => id.toString());
-    const cacheKey = createReadCacheKey('get_wills', { willIds: canonicalWillIds });
+    const cacheKey = createReadCacheKey('get_wills', { ids: canonicalWillIds });
     if (this.readCache) {
       await this.readCache.ready();
       const cached = this.readCache.get<Will[]>(cacheKey);
@@ -1312,14 +1325,14 @@ export class SoroWillClient {
         return this.paginate(sortWillsById(individualHits), options);
       }
     }
-    const raw = await this.read<unknown>('get_wills', { will_ids: parsedIds }, options);
+    const raw = await this.read<unknown>('get_wills', { ids: parsedIds }, options);
     const wills = mapWillList(raw);
     if (this.readCache) {
-      this.readCache.set(
-        cacheKey,
-        wills.map(cloneWill),
-        wills.map((will) => will.id),
-      );
+      const trackedWillIds = new Set<string>([
+        ...canonicalWillIds,
+        ...wills.map((will) => will.id),
+      ]);
+      this.readCache.set(cacheKey, wills.map(cloneWill), trackedWillIds);
       for (const will of wills) {
         this.readCache.set(
           createReadCacheKey('get_will', { willId: will.id }),
