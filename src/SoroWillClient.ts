@@ -572,14 +572,65 @@ function mapEventRecord(record: RawEventRecord, fallbackContractId: string): Sor
   };
 }
 
-function parseCursor(cursor: string | undefined): number {
+/**
+ * Validates and decodes a will-list pagination cursor. Cursors produced by
+ * the SDK are the canonical base-10 string of a non-negative safe integer
+ * offset (e.g. `"0"`, `"25"`), so anything else — non-strings, empty
+ * strings, signs, decimals, leading zeros, or values beyond
+ * `Number.MAX_SAFE_INTEGER` — is rejected client-side with an
+ * {@link InvalidCursorError} before any RPC call is made.
+ */
+function parseCursor(cursor: unknown): number {
   if (cursor === undefined) {
     return 0;
   }
-  if (!/^\d+$/.test(cursor)) {
-    throw new InvalidCursorError(cursor);
+  if (typeof cursor !== 'string') {
+    throw new InvalidCursorError(String(cursor), `expected a string, received ${typeof cursor}`);
   }
-  return Number(cursor);
+  if (cursor.length === 0) {
+    throw new InvalidCursorError(cursor, 'cursor must not be empty');
+  }
+  if (!/^(0|[1-9]\d*)$/.test(cursor)) {
+    throw new InvalidCursorError(
+      cursor,
+      'expected a non-negative integer offset with no sign, decimals, whitespace, or leading zeros',
+    );
+  }
+  const offset = Number(cursor);
+  if (!Number.isSafeInteger(offset)) {
+    throw new InvalidCursorError(cursor, 'cursor offset exceeds Number.MAX_SAFE_INTEGER');
+  }
+  return offset;
+}
+
+/** Maximum accepted length of an event-stream cursor (RPC paging token). */
+const MAX_EVENT_CURSOR_LENGTH = 256;
+
+/**
+ * Validates an event-subscription cursor (an opaque RPC paging token) before
+ * it is forwarded to the RPC node or WebSocket stream. Paging tokens are
+ * short alphanumeric strings (e.g. `"0004294967296-0000000001"`), so the
+ * SDK only accepts non-empty strings of letters, digits, `-` and `_`.
+ */
+function validateEventCursor(cursor: unknown): void {
+  if (cursor === undefined) {
+    return;
+  }
+  if (typeof cursor !== 'string') {
+    throw new InvalidCursorError(String(cursor), `expected a string, received ${typeof cursor}`);
+  }
+  if (cursor.length === 0) {
+    throw new InvalidCursorError(cursor, 'cursor must not be empty');
+  }
+  if (cursor.length > MAX_EVENT_CURSOR_LENGTH) {
+    throw new InvalidCursorError(
+      cursor,
+      `cursor must be at most ${MAX_EVENT_CURSOR_LENGTH} characters`,
+    );
+  }
+  if (!/^[A-Za-z0-9_-]+$/.test(cursor)) {
+    throw new InvalidCursorError(cursor, 'cursor may only contain letters, digits, "-" and "_"');
+  }
 }
 
 function normalizePositiveInteger(value: number | undefined, label: string): number | null {
@@ -1264,7 +1315,11 @@ export class SoroWillClient {
 
   /** Lists every will owned by `owner`. Does not require a connected wallet. */
   async getWillsByOwner(owner: string, options?: RequestOptions): Promise<Will[]>;
-  /** Lists every will owned by `owner`, one client-side page at a time. Does not require a connected wallet. */
+  /**
+   * Lists every will owned by `owner`, one client-side page at a time. Does not require a connected wallet.
+   *
+   * @throws {InvalidCursorError} If `options.cursor` is malformed; checked before any RPC call.
+   */
   async getWillsByOwner(
     owner: string,
     options: PaginationOptions & RequestOptions,
@@ -1299,7 +1354,11 @@ export class SoroWillClient {
     beneficiary: string,
     options?: RequestOptions,
   ): Promise<Will[]>;
-  /** Lists every will `beneficiary` is named in, one client-side page at a time. Does not require a connected wallet. */
+  /**
+   * Lists every will `beneficiary` is named in, one client-side page at a time. Does not require a connected wallet.
+   *
+   * @throws {InvalidCursorError} If `options.cursor` is malformed; checked before any RPC call.
+   */
   async getWillsByBeneficiary(
     beneficiary: string,
     options: PaginationOptions & RequestOptions,
@@ -1597,11 +1656,13 @@ export class SoroWillClient {
    * polling if `webSocketFactory`/`eventStreamUrl` aren't configured.
    *
    * @returns A handle that can be used to close the subscription.
+   * @throws {InvalidCursorError} If `options.cursor` is not a well-formed paging token.
    */
   async subscribeToEvents(
     listener: (event: SoroWillEvent) => void,
     options: EventSubscriptionOptions = {},
   ): Promise<EventSubscription> {
+    validateEventCursor(options.cursor);
     const wantsWebSocket = options.transport !== 'polling';
     const canUseWebSocket = wantsWebSocket && !!this.webSocketFactory && !!this.eventStreamUrl;
 

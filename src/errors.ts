@@ -663,10 +663,13 @@ export class InvalidCursorError extends SoroWillError {
    * untrusted before logging.
    */
   readonly cursor: string;
+  /** Human-readable explanation of why the cursor was rejected, if known. */
+  readonly reason: string | undefined;
 
-  constructor(cursor: string, options?: ErrorOptions) {
-    super('Invalid pagination cursor', options);
+  constructor(cursor: string, reason?: string, options?: ErrorOptions) {
+    super(reason ? `Invalid pagination cursor: ${reason}` : 'Invalid pagination cursor', options);
     this.cursor = cursor;
+    this.reason = reason;
   }
 }
 
