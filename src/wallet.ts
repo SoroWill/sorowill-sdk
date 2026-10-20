@@ -10,6 +10,27 @@ export class WalletSessionError extends Error {
 }
 
 /**
+ * Raised before a transaction is handed to the wallet for signing when the
+ * wallet's session has passed its {@link WalletSession.expiresAt} timestamp
+ * and could not be refreshed. Catching this lets applications prompt the user
+ * to reconnect instead of surfacing an opaque wallet/relay failure.
+ */
+export class WalletSessionExpiredError extends WalletSessionError {
+  /** The expiry timestamp (ms since epoch) of the stale session. */
+  readonly expiresAt: number;
+
+  constructor(expiresAt: number, cause?: unknown) {
+    super(
+      `The wallet session expired at ${new Date(expiresAt).toISOString()}. ` +
+        'Reconnect the wallet and try again.',
+      cause,
+    );
+    this.name = 'WalletSessionExpiredError';
+    this.expiresAt = expiresAt;
+  }
+}
+
+/**
  * Represents a wallet session token used for transaction signing.
  */
 export interface WalletSession {
@@ -279,6 +300,54 @@ export async function ensureValidSession(
   }
 
   return refreshed.token;
+}
+
+/**
+ * Verifies that the wallet's session (if the adapter exposes one) has not
+ * expired before a transaction is sent to it for signing.
+ *
+ * - Adapters without `getSession`, sessions that are absent, and sessions
+ *   without an `expiresAt` are treated as non-expiring and pass through.
+ * - When `expiresAt <= now`, the session is refreshed via `refreshSession`
+ *   if the adapter supports it; otherwise — or if the refreshed session is
+ *   still expired — a {@link WalletSessionExpiredError} is thrown.
+ */
+export async function assertWalletSessionActive(
+  wallet: WalletAdapter,
+  now: number = Date.now(),
+): Promise<void> {
+  if (!wallet.getSession) {
+    return;
+  }
+
+  let session: WalletSession | undefined;
+  try {
+    session = await wallet.getSession();
+  } catch (err) {
+    throw new WalletSessionError(
+      'Failed to read the wallet session. Reconnect the wallet and try again.',
+      err,
+    );
+  }
+
+  if (!session || session.expiresAt === undefined || session.expiresAt > now) {
+    return;
+  }
+
+  if (!wallet.refreshSession) {
+    throw new WalletSessionExpiredError(session.expiresAt);
+  }
+
+  let refreshed: WalletSession;
+  try {
+    refreshed = await wallet.refreshSession();
+  } catch (err) {
+    throw new WalletSessionExpiredError(session.expiresAt, err);
+  }
+
+  if (!refreshed || (refreshed.expiresAt !== undefined && refreshed.expiresAt <= now)) {
+    throw new WalletSessionExpiredError(refreshed?.expiresAt ?? session.expiresAt);
+  }
 }
 
 /**

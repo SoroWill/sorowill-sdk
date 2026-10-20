@@ -74,6 +74,9 @@ export { WillStatus, WillErrorCode } from './types';
 
 export {
   FreighterWalletAdapter,
+  WalletSessionError,
+  WalletSessionExpiredError,
+  assertWalletSessionActive,
   connectWallet,
   freighterAdapter,
   getDefaultWalletAdapter,
@@ -81,7 +84,7 @@ export {
   isFreighterInstalled,
   signTransaction,
 } from './wallet';
-export type { WalletAdapter, WalletConnection } from './wallet';
+export type { WalletAdapter, WalletConnection, WalletSession } from './wallet';
 
 export { createAlbedoAdapter } from './adapters/albedo';
 export type { AlbedoAdapterOptions } from './adapters/albedo';
