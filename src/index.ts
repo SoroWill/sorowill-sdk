@@ -90,6 +90,7 @@ export {
   MemoryWalletConnectSessionStore,
   WalletConnectAdapter,
   WalletConnectTimeoutError,
+  WalletConnectUnsupportedMethodError,
 } from './walletConnect';
 export type {
   WalletConnectAdapterOptions,
