@@ -331,6 +331,14 @@ export interface RequestOptions {
   timeoutMs?: number;
 }
 
+/** Options for emergency check-in, optionally providing guardian signatures. */
+export interface EmergencyCheckInOptions extends RequestOptions {
+  /** Optional guardian signature approving the emergency check-in. */
+  guardianSignature?: string;
+  /** Optional list of guardian signatures approving the emergency check-in. */
+  guardianSignatures?: string[];
+}
+
 export interface SoroWillEvent {
   id: string;
   type: string;

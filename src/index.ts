@@ -7,7 +7,12 @@
  * re-exported and may change in any release. Import raw Soroban types from
  * `@stellar/stellar-sdk` directly if you need them.
  */
-export { SoroWillClient, parseWillId, SoroWillInvalidIdError } from './SoroWillClient';
+export {
+  SoroWillClient,
+  parseWillId,
+  SoroWillInvalidIdError,
+  validateGuardianSignature,
+} from './SoroWillClient';
 export type {
   EventSubscription,
   EventSubscriptionOptions,
@@ -63,6 +68,7 @@ export type {
   BatchResult,
   Beneficiary,
   CreateWillParams,
+  EmergencyCheckInOptions,
   PaginatedWillsResult,
   PaginationOptions,
   RequestOptions,
@@ -106,6 +112,8 @@ export {
   MemoryCachePersistenceAdapter,
   ReadCache,
   createReadCacheKey,
+  escapeCacheKeyComponent,
+  escapeKeyComponent,
 } from './cache';
 export type { CachePersistenceAdapter, PersistedCacheEntry, ReadCacheOptions } from './cache';
 
@@ -140,6 +148,7 @@ export {
   InsufficientBalanceError,
   InvalidContractIdError,
   InvalidDayCountError,
+  InvalidGuardianSignatureError,
   InvalidGuardianThresholdError,
   InvalidPaginationOptionsError,
   InvalidPercentageError,
