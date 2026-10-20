@@ -49,6 +49,7 @@ import {
   InvalidContractIdError,
   InvalidCursorError,
   InvalidPaginationOptionsError,
+  InvalidPublicKeyError,
   InvokeFailedError,
   RequestTimeoutError,
   mapContractError,
@@ -656,6 +657,16 @@ function getDefaultEnv(): EnvSource {
  * TypeScript. Read methods (`getWill`, `getWillsByOwner`,
  * `getWillsByBeneficiary`) work without a connected wallet. All other
  * methods sign and submit a transaction via the configured wallet adapter.
+ *
+ * Transaction source addresses must be valid Stellar account public keys and
+ * already funded with XLM on the selected network to cover the minimum account
+ * reserve and transaction fees. Unfunded wallets can raise
+ * {@link AccountNotFundedError}. On testnet, use
+ * {@link https://friendbot.stellar.org | Friendbot} for free test XLM.
+ * On mainnet, transfer real XLM to the address before submitting transactions.
+ * Invalid keys raise {@link InvalidPublicKeyError} before signing or account lookup.
+ *
+ * @see https://developers.stellar.org/docs/learn/fundamentals/lumens
  */
 export class SoroWillClient {
   private readonly server: SoroWillRpcServer;
@@ -1460,12 +1471,12 @@ export class SoroWillClient {
     let error: string | null = null;
     try {
       return await this.serializeWrite(async () => {
+        const publicKey = await this.getWalletPublicKey();
         const spec = await this.getSpec(options);
         const contractOperations = operations.map(({ method, args }) =>
           this.contract.call(method, ...spec.funcArgsToScVals(method, args)),
         );
 
-        const publicKey = await this.getWalletPublicKey();
         const account = await this.rpc(
           () => this.rpcPool.withFailover((server) => server.getAccount(publicKey)),
           options,
@@ -2265,8 +2276,9 @@ export class SoroWillClient {
    *
    * @param method - The contract method name (e.g. `'create_will'`, `'check_in'`)
    * @param args - Arguments to the method as a record of name-value pairs
-   * @param sourcePublicKey - Optional source account public key; defaults to the connected wallet
+   * @param sourcePublicKey - Optional XLM-funded source account public key; defaults to the connected wallet
    * @returns An unsigned, unprepared transaction XDR
+   * @throws {InvalidPublicKeyError} If the source or wallet key is not a valid Stellar account public key
    * @throws {SimulationError} If the method name or arguments are invalid (during XDR encoding)
    * @throws {AccountNotFundedError} If the source account does not exist on the ledger
    * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout
@@ -2532,11 +2544,14 @@ export class SoroWillClient {
     args: Record<string, unknown>,
     sourcePublicKey?: string,
   ): Promise<Transaction> {
+    const publicKey = sourcePublicKey ?? (await this.getWalletPublicKey());
+    if (!StrKey.isValidEd25519PublicKey(publicKey)) {
+      throw new InvalidPublicKeyError('sourcePublicKey');
+    }
     const spec = await this.getSpec();
     const scArgs = spec.funcArgsToScVals(method, args);
     const operation = this.contract.call(method, ...scArgs);
 
-    const publicKey = sourcePublicKey ?? (await this.getWalletPublicKey());
     const account = await this.rpcPool.withFailover((server) => server.getAccount(publicKey));
     return this.buildInvocationEnvelope([operation], account);
   }
@@ -2569,7 +2584,11 @@ export class SoroWillClient {
   }
 
   private async getWalletPublicKey(): Promise<string> {
-    return this.wallet.getPublicKey();
+    const publicKey = await this.wallet.getPublicKey();
+    if (!StrKey.isValidEd25519PublicKey(publicKey)) {
+      throw new InvalidPublicKeyError('publicKey');
+    }
+    return publicKey;
   }
 
   /**

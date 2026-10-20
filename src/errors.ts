@@ -607,11 +607,16 @@ export class TransactionSubmissionError extends SoroWillError {
  * Raised when the account returned by `getAccount()` is not found or has
  * never been funded on the current network. A common situation for brand-new
  * testnet addresses or mainnet addresses that have not yet received the
- * minimum XLM reserve.
+ * minimum XLM reserve. Source accounts need XLM for the reserve and transaction
+ * fees before submitting transactions. Use
+ * {@link https://friendbot.stellar.org | Friendbot} for free testnet XLM;
+ * mainnet accounts must receive real XLM.
  *
  * The `publicKey` is stored as a structured property rather than being
  * embedded in the message so callers can decide how to handle it (e.g.
  * redacting or hashing it before forwarding to an error-tracking service).
+ *
+ * @see https://developers.stellar.org/docs/learn/fundamentals/lumens
  */
 export class AccountNotFundedError extends SoroWillError {
   /** The Stellar public key whose account could not be loaded. */
@@ -620,7 +625,9 @@ export class AccountNotFundedError extends SoroWillError {
   constructor(publicKey: string, options?: ErrorOptions) {
     super(
       `The Stellar account for the connected wallet has not been funded on this network. ` +
-        `Fund the account with the minimum XLM reserve before submitting transactions.`,
+        `Fund the account with XLM for the minimum reserve and transaction fees before submitting transactions. ` +
+        `For free testnet XLM, visit https://friendbot.stellar.org (testnet only). ` +
+        `On mainnet, transfer real XLM to the account. See https://developers.stellar.org/docs/learn/fundamentals/lumens.`,
       options,
     );
     this.publicKey = publicKey;

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { freighterApiMock, mockState } = vi.hoisted(() => ({
   freighterApiMock: {
-    getAddress: vi.fn(async () => ({ address: 'GTESTACCOUNT', error: undefined })),
+    getAddress: vi.fn(async () => ({ address: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', error: undefined })),
     requestAccess: vi.fn(),
     getNetworkDetails: vi.fn().mockResolvedValue({ network: 'TESTNET', networkPassphrase: 'TESTNET' }),
     isConnected: vi.fn(),
@@ -304,7 +304,7 @@ describe('SoroWillClient', () => {
 
     await expect(
       client.previewFee('create_will', {
-        owner: 'GTESTACCOUNT',
+        owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
         token: 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526',
         amount: 1000n,
       }),
@@ -313,7 +313,7 @@ describe('SoroWillClient', () => {
     await expect(
       client.previewFee('top_up', {
         will_id: 1n,
-        owner: 'GTESTACCOUNT',
+        owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
         amount: 500n,
       }),
     ).resolves.toEqual({ resourceFee: '2750', totalFee: '2850' });
