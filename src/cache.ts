@@ -132,6 +132,13 @@ export class ReadCache {
   private readonly maxEntries: number | undefined;
   private readonly readyPromise: Promise<void>;
   /**
+   * Will-ID to cache-key index. Maps each will ID to the set of cache keys
+   * whose entries reference that will ID, so reads and invalidations address
+   * the same entries and eviction can clean up associated references
+   * instead of leaking them.
+   */
+  private readonly willIdToKeys = new Map<string, Set<string>>();
+  /**
    * Keys written or deleted after construction but before hydration completes.
    * Hydration must not overwrite these with older persisted values.
    */
@@ -205,6 +212,15 @@ export class ReadCache {
     };
 
     this.touchedKeys.add(key);
+    // Index the key under each will ID so invalidation by will ID can find it.
+    for (const willId of entry.willIds) {
+      let keys = this.willIdToKeys.get(willId);
+      if (!keys) {
+        keys = new Set();
+        this.willIdToKeys.set(willId, keys);
+      }
+      keys.add(key);
+    }
     // Delete before set so an updated key moves to the most-recent position.
     this.entries.delete(key);
     this.entries.set(key, entry);
@@ -236,10 +252,9 @@ export class ReadCache {
     await this.readyPromise;
 
     const keysToDelete: string[] = [];
-    for (const [key, entry] of this.entries) {
-      if (entry.willIds.has(willId)) {
-        keysToDelete.push(key);
-      }
+    const keys = this.willIdToKeys.get(willId);
+    if (keys) {
+      keys.forEach((key) => keysToDelete.push(key));
     }
 
     await Promise.all(keysToDelete.map((key) => this.delete(key)));
@@ -248,6 +263,7 @@ export class ReadCache {
   clear(): void {
     this.clearedBeforeHydration = true;
     this.entries.clear();
+    this.willIdToKeys.clear();
     void this.persistence?.clear().catch(() => {
       // Silently ignore persistence failures to prevent unhandled rejections
       // The cache is cleared in-memory; only durability guarantee is lost
@@ -267,6 +283,13 @@ export class ReadCache {
 
       this.entries.delete(oldestKey);
       this.touchedKeys.add(oldestKey);
+      // Clean up the will-ID index for the evicted key.
+      for (const [willId, keys] of this.willIdToKeys) {
+        keys.delete(oldestKey);
+        if (keys.size === 0) {
+          this.willIdToKeys.delete(willId);
+        }
+      }
       void this.persistence?.delete(oldestKey).catch(() => {
         // Silently ignore persistence failures to prevent unhandled rejections
         // The entry is evicted in-memory; only durability guarantee is lost
@@ -277,6 +300,13 @@ export class ReadCache {
   private async delete(key: string): Promise<void> {
     this.touchedKeys.add(key);
     this.entries.delete(key);
+    // Remove the key from the will-ID index so references don't leak.
+    for (const [willId, keys] of this.willIdToKeys) {
+      keys.delete(key);
+      if (keys.size === 0) {
+        this.willIdToKeys.delete(willId);
+      }
+    }
     await this.persistence?.delete(key);
   }
 
@@ -307,12 +337,24 @@ export class ReadCache {
         continue;
       }
 
-      this.entries.set(persistedEntry.key, {
+      const entry: CacheEntry = {
         key: persistedEntry.key,
         value: deserializeCacheValue(persistedEntry.value),
         expiresAt: persistedEntry.expiresAt,
         willIds: new Set(persistedEntry.willIds),
-      });
+      };
+
+      // Rebuild the will-ID index from persisted entries.
+      for (const willId of entry.willIds) {
+        let keys = this.willIdToKeys.get(willId);
+        if (!keys) {
+          keys = new Set();
+          this.willIdToKeys.set(willId, keys);
+        }
+        keys.add(persistedEntry.key);
+      }
+
+      this.entries.set(persistedEntry.key, entry);
     }
 
     this.evictIfNeeded();

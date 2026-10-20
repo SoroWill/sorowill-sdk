@@ -329,6 +329,16 @@ export interface RequestOptions {
   retries?: number;
   timeout?: number;
   timeoutMs?: number;
+  /**
+   * When `true`, skips the client-side will-existence pre-check (e.g.
+   * `getWill()`) before submitting a state-changing transaction. Use only when
+   * the caller has already confirmed the will exists, to avoid an extra RPC
+   * round-trip. Methods that require the will's on-chain state for their
+   * return value (e.g. `checkIn`'s `nextDeadline`) may return a best-effort
+   * value when this is set.
+   * @default false
+   */
+  skipExistenceCheck?: boolean;
 }
 
 export interface SoroWillEvent {

@@ -57,6 +57,7 @@ import {
   SoroWillInvalidAmountError,
   SoroWillRestoreRequiredError,
   TooManyGuardiansError,
+  TooManyIdsError,
   UnsupportedBatchSizeError,
   WalletNetworkMismatchError,
   WebSocketNotConfiguredError,
@@ -1113,7 +1114,21 @@ export class SoroWillClient {
     return { txHash, refundAmount: will.balance };
   }
 
-  /** Replaces the beneficiary list for a will before it has been triggered. */
+  /**
+   * Replaces the beneficiary list for a will before it has been triggered.
+   *
+   * The will's existence is validated via `getWill()` before submission. If
+   * the will does not exist, a {@link WillNotFoundError} is thrown before any
+   * transaction is built, avoiding wasted gas and fees.
+   *
+   * @returns The transaction hash.
+   * @throws {BeneficiaryValidationError} If the beneficiary list fails client-side validation.
+   * @throws {SoroWillError} If the transaction simulation/submission fails.
+   * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout.
+   * @throws {WillNotFoundError} If the will does not exist (unless
+   * `options.skipExistenceCheck` is `true`).
+   * @throws {Error} If the wallet is not connected or fails to sign.
+   */
   async updateBeneficiaries(
     params: UpdateBeneficiariesParams,
     options?: RequestOptions,
@@ -1126,6 +1141,12 @@ export class SoroWillClient {
       throw new BeneficiaryValidationError(
         'Invalid beneficiaries: list must be 1–10 entries, every percentage must be a positive integer, and percentages must sum to exactly 100.',
       );
+    }
+    // Validate will existence before submitting, to avoid wasting gas on a
+    // non-existent will. Callers that have already confirmed existence can set
+    // `skipExistenceCheck` to skip the extra RPC round-trip.
+    if (!options?.skipExistenceCheck) {
+      await this.getWill(params.willId, options);
     }
     await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const owner = await this.getWalletPublicKey();
@@ -1258,6 +1279,103 @@ export class SoroWillClient {
     const will = mapWill(raw);
     this.readCache?.set(cacheKey, cloneWill(will), [canonicalWillId]);
     return will;
+  }
+
+  /**
+   * Fetches multiple wills in a single batch read RPC call (`get_wills`).
+   * Does not require a connected wallet.
+   *
+   * Will IDs are validated client-side: a non-array or malformed ID throws
+   * {@link SoroWillInvalidIdError}, and more than 50 IDs throws
+   * {@link TooManyIdsError}. When `options.cursor` or `options.pageSize` is
+   * provided, results are paginated client-side (cursor must be a non-negative
+   * integer string; pageSize must be a positive integer).
+   *
+   * @param willIds - The will IDs to fetch (max 50).
+   * @param options - Optional request and pagination options.
+   * @throws {SoroWillInvalidIdError} If `willIds` is not an array or contains a malformed will ID.
+   * @throws {TooManyIdsError} If `willIds` contains more than 50 entries.
+   * @throws {InvalidCursorError} If `options.cursor` is not a non-negative integer string.
+   * @throws {InvalidPaginationOptionsError} If `options.pageSize` is not a positive integer.
+   */
+  async getWills(willIds: readonly string[], options?: RequestOptions): Promise<Will[]>;
+  /**
+   * Fetches multiple wills in a single batch read RPC call (`get_wills`),
+   * one client-side page at a time. Does not require a connected wallet.
+   *
+   * @param willIds - The will IDs to fetch (max 50).
+   * @param options - Pagination and request options.
+   * @throws {SoroWillInvalidIdError} If `willIds` is not an array or contains a malformed will ID.
+   * @throws {TooManyIdsError} If `willIds` contains more than 50 entries.
+   * @throws {InvalidCursorError} If `options.cursor` is not a non-negative integer string.
+   * @throws {InvalidPaginationOptionsError} If `options.pageSize` is not a positive integer.
+   */
+  async getWills(
+    willIds: readonly string[],
+    options: PaginationOptions & RequestOptions,
+  ): Promise<PaginatedWillsResult>;
+  async getWills(
+    willIds: readonly string[],
+    options?: (PaginationOptions & RequestOptions) | RequestOptions,
+  ): Promise<Will[] | PaginatedWillsResult> {
+    const paginationOptions = options as PaginationOptions | undefined;
+    if (paginationOptions?.cursor !== undefined) {
+      parseCursor(paginationOptions.cursor);
+    }
+    if (paginationOptions?.pageSize !== undefined) {
+      normalizePositiveInteger(paginationOptions.pageSize, 'pageSize');
+    }
+    if (!Array.isArray(willIds)) {
+      throw new SoroWillInvalidIdError(willIds);
+    }
+    const parsedIds = willIds.map((willId) => parseWillId(willId));
+    if (parsedIds.length > 50) {
+      throw new TooManyIdsError();
+    }
+    if (parsedIds.length === 0) {
+      return this.paginate([], options);
+    }
+    const canonicalWillIds = parsedIds.map((id) => id.toString());
+    const cacheKey = createReadCacheKey('get_wills', { ids: canonicalWillIds });
+    if (this.readCache) {
+      await this.readCache.ready();
+      const cached = this.readCache.get<Will[]>(cacheKey);
+      if (cached !== undefined) {
+        return this.paginate(cached.map(cloneWill), options);
+      }
+      const individualHits: Will[] = [];
+      let allCached = true;
+      for (const canonicalId of canonicalWillIds) {
+        const singleCached = this.readCache.get<Will>(
+          createReadCacheKey('get_will', { willId: canonicalId }),
+        );
+        if (singleCached === undefined) {
+          allCached = false;
+          break;
+        }
+        individualHits.push(cloneWill(singleCached));
+      }
+      if (allCached) {
+        return this.paginate(sortWillsById(individualHits), options);
+      }
+    }
+    const raw = await this.read<unknown>('get_wills', { ids: parsedIds }, options);
+    const wills = mapWillList(raw);
+    if (this.readCache) {
+      const trackedWillIds = new Set<string>([
+        ...canonicalWillIds,
+        ...wills.map((will) => will.id),
+      ]);
+      this.readCache.set(cacheKey, wills.map(cloneWill), trackedWillIds);
+      for (const will of wills) {
+        this.readCache.set(
+          createReadCacheKey('get_will', { willId: will.id }),
+          cloneWill(will),
+          [will.id],
+        );
+      }
+    }
+    return this.paginate(wills, options);
   }
 
   /** Lists every will owned by `owner`. Does not require a connected wallet. */
@@ -2254,11 +2372,16 @@ export class SoroWillClient {
    * footprint and resource fee estimates that Soroban simulation adds. Signing and submitting
    * this transaction directly will fail for any Soroban invocation that needs these estimates.
    *
-   * To use this for a custom signing flow:
-   * 1. Call this method to build the unsigned transaction XDR
-   * 2. Convert to XDR with `.toXDR()` and pass to your signing mechanism
-   * 3. After signing, call `prepareTransaction()` on the signed XDR to simulate and add fees
-   * 4. Submit the prepared transaction with `submitSignedTransaction()`
+   * Required preparation order (all four steps are required for state-changing calls):
+   * 1. Call `buildTransaction(method, args, sourcePublicKey)` to build the unsigned,
+   *    unprepared transaction XDR.
+   * 2. Call `prepareTransaction(unsignedTx)` on the unsigned XDR to simulate and add
+   *    footprint/resource-fee estimates.
+   * 3. Sign the prepared XDR with your external signing mechanism.
+   * 4. Call `submitSignedTransaction(signedPreparedXdr)` to submit and poll for finality.
+   *
+   * Skipping step 2 (preparation) will cause on-chain submission to fail, because Soroban
+   * transactions require simulated resource fees and footprint entries.
    *
    * Alternatively, use the higher-level state-changing methods (e.g. `createWill()`) which
    * handle building, simulating, signing, and submitting atomically.
@@ -2289,6 +2412,10 @@ export class SoroWillClient {
    * 2. `prepareTransaction()` on the unsigned XDR to simulate and add fees
    * 3. Sign the prepared XDR with your signing mechanism
    * 4. Call this method with the signed XDR to submit and poll
+   *
+   * The signed envelope passed here must already be prepared — submitting an unprepared
+   * Soroban transaction will fail on-chain because it lacks simulated resource fees and
+   * footprint entries.
    *
    * @param signedTxXdr - A signed, prepared transaction XDR string
    * @param options - Optional per-call timeout and abort signal
