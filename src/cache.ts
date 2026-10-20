@@ -101,9 +101,18 @@ function stableStringify(value: unknown): string {
  *
  * This guarantees that switching languages mid-app does not return stale data
  * formatted for the previous locale.
+ *
+ * The method name and arguments are serialized together as a single JSON
+ * array rather than joined with a delimiter. JSON string escaping guarantees
+ * the boundary between the method name and its arguments is unambiguous, so a
+ * method name containing `:`, `::`, quotes, or JSON-like text can never
+ * produce the same key as a different method/argument pair.
  */
 export function createReadCacheKey(method: string, args: Record<string, unknown>): string {
-  return `${method}:${stableStringify(args)}`;
+  if (typeof method !== 'string') {
+    throw new TypeError(`createReadCacheKey: method must be a string, received ${typeof method}`);
+  }
+  return stableStringify([method, args]);
 }
 
 /**
