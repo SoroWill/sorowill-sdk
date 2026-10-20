@@ -60,6 +60,10 @@ export type {
 
 export type {
   BatchOperation,
+  BatchOperationResult,
+  BatchOperationStatus,
+  BatchQueueOptions,
+  BatchQueueResult,
   BatchResult,
   Beneficiary,
   CreateWillParams,

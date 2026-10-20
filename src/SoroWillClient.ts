@@ -23,6 +23,9 @@ import {
 } from './events';
 import type {
   BatchOperation,
+  BatchOperationResult,
+  BatchQueueOptions,
+  BatchQueueResult,
   BatchResult,
   Beneficiary,
   CreateWillParams,
@@ -59,6 +62,7 @@ import {
   TooManyGuardiansError,
   UnsupportedBatchSizeError,
   WalletNetworkMismatchError,
+  WillContractError,
   WebSocketNotConfiguredError,
 } from './errors';
 import { hasDuplicateBeneficiaries, MAX_GUARDIANS, validateBeneficiaries } from './utils';
@@ -1440,7 +1444,8 @@ export class SoroWillClient {
    *
    * Soroban transactions may contain only a single `InvokeHostFunction` operation, so a batch
    * must contain exactly one operation; multiple calls cannot be combined into one atomic
-   * transaction and must be submitted separately.
+   * transaction and must be submitted separately — use {@link batchSequential} to submit a
+   * queue of calls with per-operation failure handling.
    *
    * @returns The transaction hash and creation timestamp.
    * @throws {RangeError} If the batch contains zero operations.
@@ -1534,6 +1539,109 @@ export class SoroWillClient {
         });
       }
     }
+  }
+
+  /**
+   * Submits a queue of contract calls one after another, each as its own
+   * transaction (Soroban allows one contract invocation per transaction, see
+   * {@link batch}), and reports a per-operation outcome instead of throwing on
+   * the first failure.
+   *
+   * Partial failures are handled explicitly rather than leaving later
+   * operations queued against stale state:
+   * - A failing operation is retried up to `maxRetries` times. Contract errors
+   *   and wallet network mismatches are deterministic and are not retried.
+   * - With `onFailure: 'stop'` (the default), every operation after a failure
+   *   is marked `skipped` and never submitted. With `'continue'`, the rest of
+   *   the queue still runs.
+   * - Cached reads for every will touched by the queue are invalidated, so a
+   *   subsequent read reflects whatever actually landed on-chain.
+   * - Aborting `options.signal` marks every not-yet-submitted operation `skipped`.
+   *
+   * Operations that already succeeded are not rolled back — Soroban
+   * transactions are final once they land.
+   *
+   * @returns A {@link BatchQueueResult} with one entry per operation, in queue order.
+   * @throws {RangeError} If the queue is empty or `maxRetries` is not a non-negative integer.
+   */
+  async batchSequential(
+    operations: readonly BatchOperation[],
+    options: BatchQueueOptions = {},
+  ): Promise<BatchQueueResult> {
+    if (operations.length === 0) {
+      throw new RangeError('A batch must contain at least one operation');
+    }
+    const { onFailure = 'stop', maxRetries = 0, ...requestOptions } = options;
+    if (!Number.isInteger(maxRetries) || maxRetries < 0) {
+      throw new RangeError('maxRetries must be a non-negative integer');
+    }
+
+    const results: BatchOperationResult[] = [];
+    let halted: Error | undefined;
+
+    for (const [index, { method, args }] of operations.entries()) {
+      if (!halted && requestOptions.signal?.aborted) {
+        halted = new SoroWillError('Batch aborted before this operation was submitted', {
+          cause: requestOptions.signal.reason,
+        });
+      }
+      if (halted) {
+        results.push({ index, method, status: 'skipped', error: halted, attempts: 0 });
+        continue;
+      }
+
+      let attempts = 0;
+      let lastError: Error | undefined;
+      while (attempts <= maxRetries) {
+        attempts++;
+        try {
+          const { txHash } = await this.invoke(method, args, requestOptions);
+          results.push({ index, method, status: 'success', txHash, attempts });
+          lastError = undefined;
+          break;
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+          if (
+            err instanceof WillContractError ||
+            err instanceof WalletNetworkMismatchError ||
+            requestOptions.signal?.aborted
+          ) {
+            break;
+          }
+        }
+      }
+
+      if (lastError) {
+        results.push({ index, method, status: 'failed', error: lastError, attempts });
+        if (onFailure === 'stop') {
+          halted = new SoroWillError(
+            `Skipped because operation ${index} (${method}) failed: ${lastError.message}`,
+            { cause: lastError },
+          );
+        }
+      }
+    }
+
+    if (this.readCache) {
+      const willIds = new Set(
+        operations
+          .map(({ args }) => args.will_id)
+          .filter((willId) => willId !== undefined && willId !== null)
+          .map((willId) => String(willId)),
+      );
+      await Promise.all([...willIds].map((willId) => this.readCache!.invalidateByWillId(willId)));
+    }
+
+    const count = (status: BatchOperationResult['status']): number =>
+      results.filter((result) => result.status === status).length;
+    const succeededCount = count('success');
+    return {
+      success: succeededCount === operations.length,
+      results,
+      succeededCount,
+      failedCount: count('failed'),
+      skippedCount: count('skipped'),
+    };
   }
 
   /**
