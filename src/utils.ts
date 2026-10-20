@@ -1,6 +1,10 @@
 import { StrKey } from '@stellar/stellar-sdk';
 
-import { BeneficiaryValidationError } from './errors';
+import {
+  BeneficiaryValidationError,
+  InvalidStellarAddressError,
+  type InvalidStellarAddressReason,
+} from './errors';
 import type { Beneficiary, Will } from './types';
 import { WillStatus } from './types';
 
@@ -421,4 +425,87 @@ export function formatTokenAmount(
 ): string {
   const bigIntValue = typeof stroops === 'bigint' ? stroops : BigInt(stroops);
   return formatUSDC(bigIntValue, decimals);
+}
+
+/** Options controlling which StrKey address types {@link isValidStellarAddress} accepts. */
+export interface StellarAddressValidationOptions {
+  /** Accept Soroban contract addresses (`C...`). Defaults to `false`. */
+  allowContract?: boolean;
+  /** Accept muxed account addresses (`M...`). Defaults to `false`. */
+  allowMuxed?: boolean;
+}
+
+const ED25519_ADDRESS_LENGTH = 56;
+const MUXED_ADDRESS_LENGTH = 69;
+const STRKEY_BASE32 = /^[A-Z2-7]+$/;
+
+/**
+ * Returns why `address` is not an acceptable Stellar address, or `null` when
+ * it is. Validation is done with `StrKey`, so the version byte and CRC16
+ * checksum are verified — not just the length and alphabet.
+ */
+export function getStellarAddressError(
+  address: unknown,
+  options: StellarAddressValidationOptions = {},
+): InvalidStellarAddressReason | null {
+  if (typeof address !== 'string') {
+    return 'not_a_string';
+  }
+  if (address.length === 0) {
+    return 'empty';
+  }
+  if (address.trim() !== address || /\s/.test(address)) {
+    return 'whitespace';
+  }
+
+  const prefix = address[0];
+  const isMuxed = prefix === 'M';
+  const expectedLength = isMuxed ? MUXED_ADDRESS_LENGTH : ED25519_ADDRESS_LENGTH;
+  if (address.length !== expectedLength) {
+    return 'wrong_length';
+  }
+  if (!STRKEY_BASE32.test(address)) {
+    return 'invalid_characters';
+  }
+
+  switch (prefix) {
+    case 'G':
+      return StrKey.isValidEd25519PublicKey(address) ? null : 'invalid_checksum';
+    case 'C':
+      if (!options.allowContract) return 'unsupported_type';
+      return StrKey.isValidContract(address) ? null : 'invalid_checksum';
+    case 'M':
+      if (!options.allowMuxed) return 'unsupported_type';
+      return StrKey.isValidMed25519PublicKey(address) ? null : 'invalid_checksum';
+    default:
+      return 'unsupported_type';
+  }
+}
+
+/**
+ * Returns whether `address` is a well-formed Stellar StrKey address. By
+ * default only account public keys (`G...`) are accepted; contract (`C...`)
+ * and muxed (`M...`) addresses can be enabled through `options`.
+ */
+export function isValidStellarAddress(
+  address: unknown,
+  options: StellarAddressValidationOptions = {},
+): address is string {
+  return getStellarAddressError(address, options) === null;
+}
+
+/**
+ * Throws an {@link InvalidStellarAddressError} naming `field` when `address`
+ * is not a well-formed Stellar StrKey address. Use this to reject malformed
+ * input before it is forwarded to the RPC.
+ */
+export function assertValidStellarAddress(
+  address: unknown,
+  field: string,
+  options: StellarAddressValidationOptions = {},
+): asserts address is string {
+  const reason = getStellarAddressError(address, options);
+  if (reason !== null) {
+    throw new InvalidStellarAddressError(field, address, reason);
+  }
 }

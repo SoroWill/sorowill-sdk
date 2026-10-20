@@ -62,7 +62,12 @@ import {
   WalletNetworkMismatchError,
   WebSocketNotConfiguredError,
 } from './errors';
-import { hasDuplicateBeneficiaries, MAX_GUARDIANS, validateBeneficiaries } from './utils';
+import {
+  assertValidStellarAddress,
+  hasDuplicateBeneficiaries,
+  MAX_GUARDIANS,
+  validateBeneficiaries,
+} from './utils';
 import { RequestQueue } from './requestQueue';
 import { InFlightTracker } from './inFlightTracker';
 import { RpcEndpointPool } from './rpc';
@@ -1314,11 +1319,16 @@ export class SoroWillClient {
     return will;
   }
 
-  /** Lists every will owned by `owner`. Does not require a connected wallet. */
+  /**
+   * Lists every will owned by `owner`. Does not require a connected wallet.
+   *
+   * @throws {InvalidStellarAddressError} If `owner` is not a valid `G...`/`C...` address; checked before any RPC call.
+   */
   async getWillsByOwner(owner: string, options?: RequestOptions): Promise<Will[]>;
   /**
    * Lists every will owned by `owner`, one client-side page at a time. Does not require a connected wallet.
    *
+   * @throws {InvalidStellarAddressError} If `owner` is not a valid `G...`/`C...` address; checked before any RPC call.
    * @throws {InvalidCursorError} If `options.cursor` is malformed; checked before any RPC call.
    */
   async getWillsByOwner(
@@ -1329,6 +1339,8 @@ export class SoroWillClient {
     owner: string,
     options?: (PaginationOptions & RequestOptions) | RequestOptions,
   ): Promise<Will[] | PaginatedWillsResult> {
+    // #612: reject malformed addresses before they reach the cache key or RPC.
+    assertValidStellarAddress(owner, 'owner', { allowContract: true });
     const paginationOptions = options as PaginationOptions | undefined;
     if (paginationOptions?.cursor !== undefined) {
       parseCursor(paginationOptions.cursor);
@@ -1350,7 +1362,11 @@ export class SoroWillClient {
     return this.paginate(wills, options);
   }
 
-  /** Lists every will `beneficiary` is named in. Does not require a connected wallet. */
+  /**
+   * Lists every will `beneficiary` is named in. Does not require a connected wallet.
+   *
+   * @throws {InvalidStellarAddressError} If `beneficiary` is not a valid `G...`/`C...` address; checked before any RPC call.
+   */
   async getWillsByBeneficiary(
     beneficiary: string,
     options?: RequestOptions,
@@ -1358,6 +1374,7 @@ export class SoroWillClient {
   /**
    * Lists every will `beneficiary` is named in, one client-side page at a time. Does not require a connected wallet.
    *
+   * @throws {InvalidStellarAddressError} If `beneficiary` is not a valid `G...`/`C...` address; checked before any RPC call.
    * @throws {InvalidCursorError} If `options.cursor` is malformed; checked before any RPC call.
    */
   async getWillsByBeneficiary(
@@ -1368,6 +1385,8 @@ export class SoroWillClient {
     beneficiary: string,
     options?: (PaginationOptions & RequestOptions) | RequestOptions,
   ): Promise<Will[] | PaginatedWillsResult> {
+    // #612: reject malformed addresses before they reach the cache key or RPC.
+    assertValidStellarAddress(beneficiary, 'beneficiary', { allowContract: true });
     const paginationOptions = options as PaginationOptions | undefined;
     if (paginationOptions?.cursor !== undefined) {
       parseCursor(paginationOptions.cursor);

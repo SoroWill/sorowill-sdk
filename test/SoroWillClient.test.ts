@@ -240,11 +240,11 @@ describe('SoroWillClient', () => {
     });
 
     const client = new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
-    const firstPage = await client.getWillsByOwner('GOWNER', { pageSize: 2 });
+    const firstPage = await client.getWillsByOwner('GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', { pageSize: 2 });
     if (Array.isArray(firstPage)) throw new Error('Expected paginated result');
     const secondPageOpts: Record<string, unknown> = { pageSize: 2 };
     if (firstPage.nextCursor) secondPageOpts.cursor = firstPage.nextCursor;
-    const secondPage = await client.getWillsByOwner('GOWNER', secondPageOpts as never);
+    const secondPage = await client.getWillsByOwner('GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', secondPageOpts as never);
     if (Array.isArray(secondPage)) throw new Error('Expected paginated result');
 
     expect(firstPage.wills.map((will: { id: string }) => will.id)).toEqual(['1', '2']);
@@ -259,11 +259,11 @@ describe('SoroWillClient', () => {
     });
 
     const client = new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
-    const firstPage = await client.getWillsByBeneficiary('GBEN', { pageSize: 1 });
+    const firstPage = await client.getWillsByBeneficiary('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', { pageSize: 1 });
     if (Array.isArray(firstPage)) throw new Error('Expected paginated result');
     const secondPageOptsB: Record<string, unknown> = { pageSize: 1 };
     if (firstPage.nextCursor) secondPageOptsB.cursor = firstPage.nextCursor;
-    const secondPage = await client.getWillsByBeneficiary('GBEN', secondPageOptsB as never);
+    const secondPage = await client.getWillsByBeneficiary('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', secondPageOptsB as never);
     if (Array.isArray(secondPage)) throw new Error('Expected paginated result');
 
     expect(firstPage.wills.map((will: { id: string }) => will.id)).toEqual(['4']);
@@ -278,7 +278,7 @@ describe('SoroWillClient', () => {
     });
 
     const client = new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
-    const wills = await client.getWillsByOwner('GNEWWALLET');
+    const wills = await client.getWillsByOwner('GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG');
 
     expect(wills).toEqual([]);
   });
@@ -289,7 +289,7 @@ describe('SoroWillClient', () => {
     });
 
     const client = new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
-    const wills = await client.getWillsByBeneficiary('GNEWWALLET');
+    const wills = await client.getWillsByBeneficiary('GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG');
 
     expect(wills).toEqual([]);
   });

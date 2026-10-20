@@ -153,6 +153,7 @@ export {
   InvalidPublicKeyError,
   InvalidSecretKeyError,
   InvalidSplitError,
+  InvalidStellarAddressError,
   InvalidTokenError,
   InvalidTransactionXdrError,
   InvokeFailedError,
@@ -196,7 +197,7 @@ export {
   UnsupportedBatchSizeError,
   UnknownContractErrorCodeError,
 } from './errors';
-export type { ContractErrorFactory } from './errors';
+export type { ContractErrorFactory, InvalidStellarAddressReason } from './errors';
 
 export {
   RequestQueue,
@@ -228,21 +229,24 @@ export type {
 export {
   MAX_BENEFICIARIES,
   MAX_GUARDIANS,
+  assertValidStellarAddress,
   calculateShares,
   formatDeadline,
   formatTokenAmount,
   formatUSDC,
   getNextActionableState,
+  getStellarAddressError,
   getTimeUntilCheckin,
   hasDuplicateBeneficiaries,
   isBeneficiary,
   isCheckinDue,
   isGuardian,
+  isValidStellarAddress,
   toStroops,
   validateBeneficiaries,
   validateGuardians,
 } from './utils';
-export type { NextActionableState } from './utils';
+export type { NextActionableState, StellarAddressValidationOptions } from './utils';
 
 export {
   DEFAULT_NETWORK,
