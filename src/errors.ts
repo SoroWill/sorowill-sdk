@@ -86,6 +86,28 @@ export class FreighterInstallCheckError extends SoroWillError {
 }
 
 /**
+ * Raised by {@link FreighterWalletAdapter} when the Freighter extension has
+ * still not injected itself into the page (`window.freighter` /
+ * `window.stellar`) after every configured retry. Usually means Freighter is
+ * not installed, is disabled, or the page loaded before the extension could
+ * attach.
+ */
+export class FreighterNotAvailableError extends SoroWillError {
+  /** Number of injection checks performed before giving up. */
+  readonly attempts: number;
+
+  constructor(attempts: number, options?: ErrorOptions) {
+    super(
+      `Freighter is not available: the extension was not injected into the page after ${attempts} attempts. ` +
+        'Make sure Freighter is installed and enabled, then reload the page.',
+      options,
+    );
+    this.name = new.target.name;
+    this.attempts = attempts;
+  }
+}
+
+/**
  * Raised when the `contractId` passed to the {@link SoroWillClient} constructor
  * is not a syntactically valid Stellar contract address (wrong length, wrong
  * StrKey version byte, or not valid base32). Thrown synchronously before any

@@ -1,6 +1,11 @@
 import type FreighterApi from '@stellar/freighter-api';
 
-import { FreighterInstallCheckError, SignTransactionTimeoutError, WalletNetworkMismatchError } from './errors';
+import {
+  FreighterInstallCheckError,
+  FreighterNotAvailableError,
+  SignTransactionTimeoutError,
+  WalletNetworkMismatchError,
+} from './errors';
 
 export class WalletSessionError extends Error {
   constructor(message: string, cause?: unknown) {
@@ -33,6 +38,56 @@ function loadFreighterApi(): Promise<typeof FreighterApi> {
     freighterApiPromise = import('@stellar/freighter-api').then((mod) => mod.default);
   }
   return freighterApiPromise;
+}
+
+/** Default number of times to check for Freighter's window injection. */
+export const DEFAULT_FREIGHTER_INJECTION_RETRIES = 10;
+
+/** Default delay (ms) between Freighter window-injection checks. */
+export const DEFAULT_FREIGHTER_INJECTION_RETRY_DELAY_MS = 100;
+
+/**
+ * Reports whether the Freighter extension has injected its global into the
+ * page. Older Freighter builds expose `window.freighter`; newer ones (and the
+ * Stellar wallet standard) use `window.stellar`.
+ */
+function isFreighterInjected(): boolean {
+  const win = (globalThis as { window?: Record<string, unknown> }).window;
+  return Boolean(win && (win.freighter || win.stellar));
+}
+
+/**
+ * Waits for the Freighter extension to inject itself into the page.
+ *
+ * Browser extensions inject their content scripts asynchronously, so a page
+ * that calls into Freighter immediately on load can race the injection: the
+ * `@stellar/freighter-api` module import resolves, but `window.freighter` /
+ * `window.stellar` is still undefined and the first API call fails. This
+ * polls for the injected global, retrying up to `retries` times with
+ * `delayMs` between checks, and throws a {@link FreighterNotAvailableError}
+ * if it never appears.
+ *
+ * Outside a browser (no `window`) there is nothing to wait for, so this
+ * resolves immediately and leaves the "not installed" handling to
+ * Freighter's own API responses.
+ */
+export async function waitForFreighterInjection(
+  retries: number = DEFAULT_FREIGHTER_INJECTION_RETRIES,
+  delayMs: number = DEFAULT_FREIGHTER_INJECTION_RETRY_DELAY_MS,
+): Promise<void> {
+  if (typeof (globalThis as { window?: unknown }).window === 'undefined') {
+    return;
+  }
+  const attempts = Math.max(1, Math.floor(retries));
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (isFreighterInjected()) {
+      return;
+    }
+    if (attempt < attempts) {
+      await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw new FreighterNotAvailableError(attempts);
 }
 
 /** Default timeout (ms) for a wallet signTransaction call. */
@@ -292,16 +347,48 @@ export async function ensureValidSession(
  */
 export interface FreighterWalletAdapterOptions {
   expectedNetworkPassphrase?: string;
+  /**
+   * How many times to check for Freighter's window injection before failing
+   * with a {@link FreighterNotAvailableError}. Defaults to
+   * {@link DEFAULT_FREIGHTER_INJECTION_RETRIES}.
+   */
+  injectionRetries?: number;
+  /**
+   * Delay in milliseconds between injection checks. Defaults to
+   * {@link DEFAULT_FREIGHTER_INJECTION_RETRY_DELAY_MS}.
+   */
+  injectionRetryDelayMs?: number;
 }
 
 export class FreighterWalletAdapter implements WalletAdapter {
   private readonly expectedNetworkPassphrase?: string;
+  private readonly injectionRetries: number;
+  private readonly injectionRetryDelayMs: number;
   private session?: WalletSession;
 
   constructor(options: FreighterWalletAdapterOptions = {}) {
     if (options.expectedNetworkPassphrase !== undefined) {
       this.expectedNetworkPassphrase = options.expectedNetworkPassphrase;
     }
+    this.injectionRetries = options.injectionRetries ?? DEFAULT_FREIGHTER_INJECTION_RETRIES;
+    if (!Number.isInteger(this.injectionRetries) || this.injectionRetries <= 0) {
+      throw new RangeError('injectionRetries must be a positive integer');
+    }
+    this.injectionRetryDelayMs = options.injectionRetryDelayMs ?? DEFAULT_FREIGHTER_INJECTION_RETRY_DELAY_MS;
+    if (!Number.isFinite(this.injectionRetryDelayMs) || this.injectionRetryDelayMs < 0) {
+      throw new RangeError('injectionRetryDelayMs must be a finite, non-negative number');
+    }
+  }
+
+  /**
+   * Loads the Freighter API and waits for the extension to be injected into
+   * the page, so the returned API is safe to call. Throws a
+   * {@link FreighterNotAvailableError} if Freighter never injects.
+   */
+  private async loadInjectedFreighterApi(): Promise<typeof FreighterApi> {
+    const freighterApi = await loadFreighterApi();
+    await waitForFreighterInjection(this.injectionRetries, this.injectionRetryDelayMs);
+    return freighterApi;
   }
 
   /**
@@ -340,7 +427,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
   }
 
   async connect(): Promise<WalletConnection> {
-    const freighterApi = await loadFreighterApi();
+    const freighterApi = await this.loadInjectedFreighterApi();
     const access = await freighterApi.requestAccess();
     if (access.error) {
       throw new Error(access.error.message);
@@ -363,7 +450,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
 
   async reconnect(): Promise<WalletConnection> {
     const publicKey = await this.getPublicKey();
-    const freighterApi = await loadFreighterApi();
+    const freighterApi = await this.loadInjectedFreighterApi();
     const networkDetails = await freighterApi.getNetworkDetails();
     if (networkDetails?.error) {
       throw new Error(networkDetails.error.message);
@@ -386,7 +473,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
 
   /** Reports the network Freighter is currently set to, without prompting the user. */
   async getNetwork(): Promise<{ network: string; networkPassphrase: string }> {
-    const freighterApi = await loadFreighterApi();
+    const freighterApi = await this.loadInjectedFreighterApi();
     const networkDetails = await freighterApi.getNetworkDetails();
     if (networkDetails?.error) {
       throw new Error(networkDetails.error.message);
@@ -398,7 +485,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
   }
 
   async getPublicKey(): Promise<string> {
-    const freighterApi = await loadFreighterApi();
+    const freighterApi = await this.loadInjectedFreighterApi();
     const { address, error } = await freighterApi.getAddress();
     if (error) {
       throw new Error(error.message);
@@ -440,7 +527,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
     // Kicked off synchronously (not awaited yet) so the timeout below is
     // still registered before this function's first `await`, regardless of
     // how long the dynamic import takes to resolve.
-    const freighterApiPromise = loadFreighterApi();
+    const freighterApiPromise = this.loadInjectedFreighterApi();
 
     // Race the Freighter call against a timer so that a hung or dismissed
     // popup never leaves the caller's promise pending
