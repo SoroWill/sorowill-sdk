@@ -298,12 +298,29 @@ export class WalletNetworkMismatchError extends SoroWillError {
 
   constructor(expectedNetworkPassphrase: string, actualNetworkPassphrase: string, options?: ErrorOptions) {
     super(
-      `The connected wallet is on network "${actualNetworkPassphrase}", but this client is configured for "${expectedNetworkPassphrase}". Switch the wallet's network or reconfigure the client before signing.`,
+      `The connected wallet is on network ${describeNetworkPassphrase(actualNetworkPassphrase)}, but this client is configured for ${describeNetworkPassphrase(expectedNetworkPassphrase)}. Switch the wallet's network or reconfigure the client before signing.`,
       options,
     );
+    this.name = new.target.name;
     this.expectedNetworkPassphrase = expectedNetworkPassphrase;
     this.actualNetworkPassphrase = actualNetworkPassphrase;
   }
+}
+
+/** Well-known Stellar network passphrases, mapped to a readable name. */
+const KNOWN_NETWORK_NAMES: Record<string, string> = {
+  'Public Global Stellar Network ; September 2015': 'mainnet',
+  'Test SDF Network ; September 2015': 'testnet',
+  'Test SDF Future Network ; October 2022': 'futurenet',
+};
+
+/** Renders a passphrase for an error message, naming well-known networks. */
+function describeNetworkPassphrase(passphrase: string): string {
+  if (!passphrase) {
+    return '(unknown — the wallet did not report a network)';
+  }
+  const name = KNOWN_NETWORK_NAMES[passphrase];
+  return name ? `${name} ("${passphrase}")` : `"${passphrase}"`;
 }
 
 /** Base class for typed errors returned by the SoroWill contract. */

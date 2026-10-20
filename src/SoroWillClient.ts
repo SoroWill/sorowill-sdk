@@ -358,6 +358,13 @@ export interface SoroWillClientOptions {
    * `buildInvocationTransaction()` call made by this client.
    */
   transactionTimeoutSeconds?: number;
+  /**
+   * When `true`, every state-changing operation refuses to proceed if the
+   * wallet adapter cannot report its network (i.e. it does not implement
+   * `getNetwork`). Defaults to `false`, in which case such wallets are not
+   * checked and the network is only verified for adapters that can report it.
+   */
+  requireWalletNetwork?: boolean;
 }
 
 /** The raw, snake_case shape of a `Will` as decoded straight off the contract spec. */
@@ -699,6 +706,7 @@ export class SoroWillClient {
   private readonly debugLogger: DebugLogger;
   private readonly autoFeeBumpOnTimeout: boolean;
   private readonly transactionTimeoutSeconds: number;
+  private readonly requireWalletNetwork: boolean;
   /**
    * How long (in milliseconds) the lazily-fetched contract spec is considered
    * fresh. After this TTL elapses the next call will re-fetch the spec from the
@@ -731,6 +739,7 @@ export class SoroWillClient {
     this.network = options.network;
     this.hooks = options.hooks ?? new HookManager();
     this.wallet = options.wallet ?? getDefaultWalletAdapter();
+    this.requireWalletNetwork = options.requireWalletNetwork ?? false;
     this.pollAttempts = options.pollAttempts ?? DEFAULT_POLL_ATTEMPTS;
     if (!Number.isInteger(this.pollAttempts) || this.pollAttempts <= 0) {
       throw new RangeError('pollAttempts must be a positive integer');
@@ -959,6 +968,7 @@ export class SoroWillClient {
     if (!StrKey.isValidContract(params.token)) {
       throw new InvalidContractIdError(params.token);
     }
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const owner = await this.getWalletPublicKey();
     const seenGuardians = new Set<string>();
     for (const guardian of params.guardians) {
@@ -2429,14 +2439,6 @@ export class SoroWillClient {
   }
 
   /**
-   * Verifies the wallet is on the expected network before signing.
-   *
-   * - Wallets that do not implement `getNetwork` are not checked (explicit opt-out).
-   * - If `getNetwork` rejects, a {@link SoroWillError} is thrown with the original error as `cause`.
-   * - An empty or missing passphrase cannot be verified and is treated as a mismatch
-   *   ({@link WalletNetworkMismatchError} with an empty `actualNetworkPassphrase`).
-   */
-  /**
    * Inclusion fee for a replacement transaction: the network's p90 Soroban inclusion
    * fee (from fee stats) per operation, but never below the 10x multiplier stellar-core
    * requires to replace a pending transaction with the same sequence number.
@@ -2453,8 +2455,30 @@ export class SoroWillClient {
     }
   }
 
-  async assertWalletNetwork(network: { networkPassphrase: string }): Promise<void> {
+  /**
+   * Verifies the wallet is on the expected network before signing. Called as a
+   * pre-flight check by every state-changing operation, so a wallet switched to
+   * a different network than the client is configured for can never sign a
+   * cross-network transaction.
+   *
+   * - Wallets that do not implement `getNetwork` are not checked, unless the
+   *   client was constructed with `requireWalletNetwork: true`, in which case
+   *   a {@link SoroWillError} is thrown.
+   * - If `getNetwork` rejects, a {@link SoroWillError} is thrown with the original error as `cause`.
+   * - An empty or missing passphrase cannot be verified and is treated as a mismatch
+   *   ({@link WalletNetworkMismatchError} with an empty `actualNetworkPassphrase`).
+   *
+   * @throws {WalletNetworkMismatchError} If the wallet reports a different network.
+   */
+  async assertWalletNetwork(
+    network: { networkPassphrase: string } = { networkPassphrase: this.networkPassphrase },
+  ): Promise<void> {
     if (!this.wallet.getNetwork) {
+      if (this.requireWalletNetwork) {
+        throw new SoroWillError(
+          'The wallet adapter cannot report its network (no getNetwork method), and requireWalletNetwork is enabled; refusing to sign',
+        );
+      }
       return;
     }
 
