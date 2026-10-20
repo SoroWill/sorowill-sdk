@@ -43,6 +43,7 @@ import {
 } from './wallet';
 import {
   AccountNotFundedError,
+  BatchNetworkMismatchError,
   BeneficiaryValidationError,
   GuardianValidationError,
   InvalidDayCountError,
@@ -1415,6 +1416,47 @@ export class SoroWillClient {
   }
 
   /**
+   * Validates that every operation in a batch targets the same Stellar network
+   * and that this network is the one the client is configured for (#550).
+   *
+   * Operations that omit `network` inherit the client's network. Any operation
+   * that declares a different network — or two operations that declare
+   * *different* networks — is rejected with a {@link BatchNetworkMismatchError}
+   * before any transaction is built, signed, or submitted.
+   */
+  private assertBatchNetworks(operations: readonly BatchOperation[]): void {
+    let declaredNetwork: SoroWillNetwork | undefined;
+    let declaredIndex = -1;
+
+    operations.forEach((operation, index) => {
+      const network = operation.network;
+      if (network === undefined) {
+        // Inherits the client's network — always compatible.
+        return;
+      }
+      if (declaredNetwork !== undefined && declaredNetwork !== network) {
+        throw new BatchNetworkMismatchError(this.network, network, index, {
+          operationIndex: declaredIndex,
+          network: declaredNetwork,
+        });
+      }
+      declaredNetwork = network;
+      declaredIndex = index;
+    });
+
+    // Every declared network agrees with itself — now check they also agree
+    // with the network this client is configured for.
+    if (declaredNetwork !== undefined && declaredNetwork !== this.network) {
+      throw new BatchNetworkMismatchError(
+        this.network,
+        declaredNetwork,
+        declaredIndex,
+        undefined,
+      );
+    }
+  }
+
+  /**
    * Simulates, signs, and submits a raw contract call given by its native method name and arguments.
    * Arguments use the native names and values accepted by the deployed contract spec.
    *
@@ -1425,6 +1467,8 @@ export class SoroWillClient {
    * @returns The transaction hash and creation timestamp.
    * @throws {RangeError} If the batch contains zero operations.
    * @throws {UnsupportedBatchSizeError} If the batch contains more than one operation.
+   * @throws {BatchNetworkMismatchError} If the operations target different networks, or a
+   *   network other than the one the client is configured for (#550).
    * @throws {SoroWillError} If the transaction simulation/submission fails.
    * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout.
    * @throws {WillContractError} Mapped contract-level errors from any operation in the batch.
@@ -1437,6 +1481,13 @@ export class SoroWillClient {
     if (operations.length === 0) {
       throw new RangeError('A batch must contain at least one operation');
     }
+    // #550: every operation must target the same network, and that network
+    // must be the one the client is configured for. This runs before any
+    // transaction is built, signed, or submitted so a batch can never mix
+    // testnet and mainnet operations. It is checked before the batch-size
+    // limit so a mixed-network batch reports the network problem rather
+    // than the size problem.
+    this.assertBatchNetworks(operations);
     if (operations.length > 1) {
       throw new UnsupportedBatchSizeError(operations.length);
     }
@@ -1681,7 +1732,17 @@ export class SoroWillClient {
         try {
           const payload = JSON.parse(event.data) as { result?: { events?: RawEventRecord[] } };
           for (const raw of payload.result?.events ?? []) {
-            listener(mapEventRecord(raw, this.getContractId()));
+            if (closed) break;
+            // Isolate listener failures per event so a throwing listener neither
+            // stalls the rest of the batch nor tears down the subscription.
+            try {
+              listener(mapEventRecord(raw, this.getContractId()));
+            } catch (listenerError) {
+              const eventId = raw.id ?? raw.pagingToken ?? 'unknown';
+              options.onError?.(
+                new SoroWillError(`Event listener threw for event ${eventId}`, { cause: listenerError }),
+              );
+            }
           }
         } catch (err) {
           options.onError?.(err instanceof Error ? err : new Error(String(err)));

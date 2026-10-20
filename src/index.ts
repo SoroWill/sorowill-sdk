@@ -124,6 +124,7 @@ export {
   AccountNotFundedError,
   AlreadyClaimedError,
   AlreadyVotedError,
+  BatchNetworkMismatchError,
   BeneficiaryNotFoundError,
   BeneficiaryValidationError,
   CheckinNotDueError,

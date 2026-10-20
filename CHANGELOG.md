@@ -16,8 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unit tests for `cancelWill` `refundAmount` correctness, including the primary (contract-returned value) and fallback (pre-call `getWill` balance) paths; the known race with a concurrent `topUp` is documented as a known limitation (closes #118).
 - `MIGRATION.md` added to the repository root: documents every breaking change to public interfaces with before/after examples and step-by-step migration instructions (closes #501).
 - `flushFeeStatsCache()` method on `SoroWillClient` for manually invalidating the per-network fee-stats cache (closes #500).
+- `BatchOperation.network` optional field (`'testnet' | 'mainnet'`) declaring the Stellar network an operation targets. `SoroWillClient.batch()` validates it before any transaction is built, signed, or submitted: operations that omit `network` inherit the client's network, all declared networks must agree with each other, and they must match the client's configured network (closes #550).
+- `BatchNetworkMismatchError` thrown by `SoroWillClient.batch()` when the operations target different networks, or a network other than the one the client is configured for. Exposes `clientNetwork`, `operationNetwork`, `operationIndex`, and — for a conflicting batch — `conflictingOperationIndex` and `conflictingNetwork` (closes #550).
+- Documented single-handler semantics for `EventSubscription`: a subscription delivers each event to exactly one listener, events are delivered in stream order and strictly sequentially, and a throwing listener is isolated to its own event (the subscription stays open, remaining events are still delivered, and the failure is reported through `EventSubscriptionOptions.onError`) (closes #548).
 
 ### Changed
+
+- The WebSocket event transport now isolates listener failures per event, matching the polling transport: a listener that throws no longer aborts the remaining events in the same message batch and no longer tears down the subscription (closes #548).
 
 - `getNetworkFeeStats()` now caches results per network passphrase rather than in a single global entry. If the connected wallet switches networks mid-session (e.g. Freighter toggled from testnet to mainnet), the cache is automatically flushed and fresh stats are fetched from the correct RPC endpoint (closes #500).
 - `Beneficiary` and `Will` interfaces in `src/types.ts` now carry JSDoc `@since` version tags and **Change history** tables so consumers can determine at a glance which SDK version introduced each field or breaking change (closes #501).
