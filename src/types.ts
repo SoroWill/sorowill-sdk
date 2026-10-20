@@ -314,13 +314,67 @@ export type TransactionSigner<T = void> = (
 
 /* … truncated 2578 chars — edit only what you need near the top … */
 
-export interface BatchOperation {
-  method: string;
-  args: Record<string, unknown>;
+/**
+ * A single raw contract call submitted through {@link SoroWillClient.batch}.
+ *
+ * The type parameters are inferred from the literal passed to `batch()`, so
+ * the method name, argument shape and decoded return type flow through to
+ * the matching entry of {@link BatchResult.results}.
+ *
+ * @typeParam TMethod - The contract method name.
+ * @typeParam TArgs - The native arguments accepted by the method.
+ * @typeParam TReturn - The value produced by `decode`, if supplied.
+ */
+export interface BatchOperation<
+  TMethod extends string = string,
+  TArgs extends Record<string, unknown> = Record<string, unknown>,
+  TReturn = unknown,
+> {
+  method: TMethod;
+  args: TArgs;
+  /**
+   * Optional decoder applied to the operation's native return value (as
+   * produced by the contract spec). Its return type becomes the type of the
+   * corresponding {@link BatchOperationResult.returnValue}.
+   */
+  decode?: (value: unknown) => TReturn;
 }
 
-export interface BatchResult {
+/** Extracts the decoded return type of a {@link BatchOperation}. */
+export type BatchOperationReturn<TOperation extends BatchOperation> =
+  TOperation extends BatchOperation<string, Record<string, unknown>, infer TReturn> ? TReturn : unknown;
+
+/** The outcome of one operation in a {@link BatchResult}, typed from the operation that produced it. */
+export interface BatchOperationResult<TOperation extends BatchOperation = BatchOperation> {
+  method: TOperation['method'];
+  args: TOperation['args'];
+  /**
+   * The operation's return value: decoded via `decode` when supplied,
+   * otherwise the spec-native value (or `undefined` if the call returned
+   * nothing).
+   */
+  returnValue: BatchOperationReturn<TOperation>;
+}
+
+/** Maps a tuple of operations to a tuple of their typed results, preserving order and length. */
+export type BatchOperationResults<TOperations extends readonly BatchOperation[]> = {
+  -readonly [K in keyof TOperations]: TOperations[K] extends BatchOperation
+    ? BatchOperationResult<TOperations[K]>
+    : never;
+};
+
+/**
+ * Result of a successful {@link SoroWillClient.batch} submission. `results`
+ * has one entry per submitted operation, each typed from its operation.
+ */
+export interface BatchResult<
+  TOperations extends readonly BatchOperation[] = readonly BatchOperation[],
+> {
   success: boolean;
+  txHash: string;
+  /** Ledger close time of the submitted transaction, in Unix seconds. */
+  createdAt: number;
+  results: BatchOperationResults<TOperations>;
   error?: Error;
 }
 

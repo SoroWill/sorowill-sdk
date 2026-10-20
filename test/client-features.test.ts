@@ -76,6 +76,7 @@ describe('batch transactions', () => {
     let preparedOperationCount = 0;
     const fakeSpec = {
       funcArgsToScVals: () => [] as xdr.ScVal[],
+      funcResToNative: () => null,
     };
     const fakeServer = {
       getAccount: async (publicKey: string) => new Account(publicKey, '0'),
@@ -101,6 +102,7 @@ describe('batch transactions', () => {
       txHash: 'batch-hash',
       createdAt: 1_700_000_000,
       success: true,
+      results: [{ method: 'first_operation', args: {}, returnValue: null }],
     });
     expect(preparedOperationCount).toBe(1);
   });
@@ -125,6 +127,7 @@ describe('batch transactions', () => {
   it('runs invoke hooks for the operation', async () => {
     const fakeSpec = {
       funcArgsToScVals: () => [] as xdr.ScVal[],
+      funcResToNative: () => null,
     };
     const fakeServer = {
       getAccount: async (publicKey: string) => new Account(publicKey, '0'),
@@ -243,6 +246,7 @@ describe('sendTransaction status handling', () => {
   it('throws a distinct error for TRY_AGAIN_LATER status', async () => {
     const fakeSpec = {
       funcArgsToScVals: () => [] as xdr.ScVal[],
+      funcResToNative: () => null,
     };
     const fakeServer = {
       getAccount: async (publicKey: string) => new Account(publicKey, '0'),
@@ -267,6 +271,7 @@ describe('sendTransaction status handling', () => {
   it('proceeds to poll on DUPLICATE status', async () => {
     const fakeSpec = {
       funcArgsToScVals: () => [] as xdr.ScVal[],
+      funcResToNative: () => null,
     };
     let pollCalled = false;
     const fakeServer = {
@@ -291,13 +296,19 @@ describe('sendTransaction status handling', () => {
 
     await expect(
       client.batch([{ method: 'dummy', args: {} }]),
-    ).resolves.toEqual({ txHash: 'dup-hash', createdAt: 1_700_000_000, success: true });
+    ).resolves.toEqual({
+      txHash: 'dup-hash',
+      createdAt: 1_700_000_000,
+      success: true,
+      results: [{ method: 'dummy', args: {}, returnValue: null }],
+    });
     expect(pollCalled).toBe(true);
   });
 
   it('throws on ERROR status without polling', async () => {
     const fakeSpec = {
       funcArgsToScVals: () => [] as xdr.ScVal[],
+      funcResToNative: () => null,
     };
     let pollCalled = false;
     const fakeServer = {
@@ -344,6 +355,7 @@ describe('pollAttempts option', () => {
   it('passes custom pollAttempts to pollTransaction', async () => {
     const fakeSpec = {
       funcArgsToScVals: () => [] as xdr.ScVal[],
+      funcResToNative: () => null,
     };
     let receivedAttempts = 0;
     const fakeServer = {

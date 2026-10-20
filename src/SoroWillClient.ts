@@ -23,6 +23,7 @@ import {
 } from './events';
 import type {
   BatchOperation,
+  BatchOperationResults,
   BatchResult,
   Beneficiary,
   CreateWillParams,
@@ -1491,10 +1492,10 @@ export class SoroWillClient {
    * @throws {WillContractError} Mapped contract-level errors from any operation in the batch.
    * @throws {Error} If the wallet is not connected or fails to sign.
    */
-  async batch(
-    operations: readonly BatchOperation[],
+  async batch<const TOperations extends readonly BatchOperation[]>(
+    operations: TOperations,
     options?: RequestOptions,
-  ): Promise<BatchResult> {
+  ): Promise<BatchResult<TOperations>> {
     if (operations.length === 0) {
       throw new RangeError('A batch must contain at least one operation');
     }
@@ -1558,7 +1559,20 @@ export class SoroWillClient {
         const signedTxXdr = normalizeSignatureResponse(signedTxResponse);
         const result = await this.submitSignedTransaction(signedTxXdr, options);
         txHash = result.txHash;
-        return { success: true, txHash: result.txHash, createdAt: result.createdAt };
+        // Soroban allows a single invocation per transaction, so the
+        // transaction's return value belongs to the (only) operation.
+        const results = operations.map(({ method, args, decode }) => {
+          const native =
+            result.returnValue === undefined ? undefined : spec.funcResToNative(method, result.returnValue);
+          return { method, args, returnValue: decode ? decode(native) : native };
+        }) as BatchOperationResults<TOperations>;
+        const batchResult: BatchResult<TOperations> = {
+          success: true,
+          txHash: result.txHash,
+          createdAt: result.createdAt,
+          results,
+        };
+        return batchResult;
       });
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
