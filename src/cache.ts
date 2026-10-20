@@ -12,14 +12,22 @@ export interface CachePersistenceAdapter {
   clear(): Promise<void>;
 }
 
+/**
+ * Default upper bound on the number of entries a {@link ReadCache} keeps in
+ * memory. Long-running client instances would otherwise grow without limit.
+ */
+export const DEFAULT_MAX_CACHE_ENTRIES = 1000;
+
 export interface ReadCacheOptions {
   ttlMs?: number;
   now?: () => number;
   persistence?: CachePersistenceAdapter;
   /**
    * Maximum number of entries to keep in the cache. When the number of entries
-   * exceeds this limit, the least-recently-used entries are evicted (and removed
-   * from persistence). When omitted, the cache is unbounded.
+   * exceeds this limit, expired entries are pruned first and then the
+   * least-recently-used entries are evicted (and removed from persistence).
+   * Defaults to {@link DEFAULT_MAX_CACHE_ENTRIES}. Pass `Infinity` to opt into
+   * an unbounded cache.
    */
   maxEntries?: number;
 }
@@ -129,7 +137,7 @@ export class ReadCache {
   private readonly ttlMs: number;
   private readonly now: () => number;
   private readonly persistence: CachePersistenceAdapter | undefined;
-  private readonly maxEntries: number | undefined;
+  private readonly maxEntries: number;
   private readonly readyPromise: Promise<void>;
   /**
    * Keys written or deleted after construction but before hydration completes.
@@ -153,8 +161,29 @@ export class ReadCache {
     this.ttlMs = ttlMs;
     this.now = options.now ?? Date.now;
     this.persistence = options.persistence;
-    this.maxEntries = options.maxEntries;
+    const maxEntries = options.maxEntries ?? DEFAULT_MAX_CACHE_ENTRIES;
+    if (
+      typeof maxEntries !== 'number' ||
+      Number.isNaN(maxEntries) ||
+      maxEntries < 1 ||
+      (Number.isFinite(maxEntries) && !Number.isInteger(maxEntries))
+    ) {
+      throw new Error(
+        `ReadCache: maxEntries must be a positive integer or Infinity, received ${String(maxEntries)}`,
+      );
+    }
+    this.maxEntries = maxEntries;
     this.readyPromise = this.hydrate();
+  }
+
+  /** Number of entries currently held in memory (expired entries included until pruned). */
+  get size(): number {
+    return this.entries.size;
+  }
+
+  /** Configured maximum number of entries before LRU eviction kicks in. */
+  get capacity(): number {
+    return this.maxEntries;
   }
 
   async ready(): Promise<void> {
@@ -255,23 +284,37 @@ export class ReadCache {
   }
 
   private evictIfNeeded(): void {
-    if (this.maxEntries === undefined) {
+    if (this.entries.size <= this.maxEntries) {
       return;
     }
 
+    // Drop expired entries first so live data is not evicted in their place.
+    const now = this.now();
+    for (const [key, entry] of this.entries) {
+      if (entry.expiresAt !== null && entry.expiresAt <= now) {
+        this.removeEvicted(key);
+      }
+    }
+
+    // Map iteration order is insertion order, and get()/set() re-insert on
+    // access, so the first key is always the least-recently-used one.
     while (this.entries.size > this.maxEntries) {
       const oldestKey = this.entries.keys().next().value;
       if (oldestKey === undefined) {
         break;
       }
 
-      this.entries.delete(oldestKey);
-      this.touchedKeys.add(oldestKey);
-      void this.persistence?.delete(oldestKey).catch(() => {
-        // Silently ignore persistence failures to prevent unhandled rejections
-        // The entry is evicted in-memory; only durability guarantee is lost
-      });
+      this.removeEvicted(oldestKey);
     }
+  }
+
+  private removeEvicted(key: string): void {
+    this.entries.delete(key);
+    this.touchedKeys.add(key);
+    void this.persistence?.delete(key).catch(() => {
+      // Silently ignore persistence failures to prevent unhandled rejections
+      // The entry is evicted in-memory; only durability guarantee is lost
+    });
   }
 
   private async delete(key: string): Promise<void> {
@@ -294,6 +337,10 @@ export class ReadCache {
     }
 
     const now = this.now();
+    // Entries written while hydration was in flight are more recent than
+    // anything persisted, so they are moved behind the hydrated entries below
+    // to keep LRU order correct.
+    const writtenDuringHydration = Array.from(this.entries.values());
 
     for (const persistedEntry of persistedEntries) {
       if (persistedEntry.expiresAt !== null && persistedEntry.expiresAt <= now) {
@@ -313,6 +360,15 @@ export class ReadCache {
         expiresAt: persistedEntry.expiresAt,
         willIds: new Set(persistedEntry.willIds),
       });
+    }
+
+    for (const entry of writtenDuringHydration) {
+      // Skip entries replaced or removed while expired entries were deleted.
+      if (this.entries.get(entry.key) !== entry) {
+        continue;
+      }
+      this.entries.delete(entry.key);
+      this.entries.set(entry.key, entry);
     }
 
     this.evictIfNeeded();

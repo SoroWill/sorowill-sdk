@@ -104,6 +104,7 @@ export {
   IndexedDbCachePersistenceAdapter,
   LocalStorageCachePersistenceAdapter,
   MemoryCachePersistenceAdapter,
+  DEFAULT_MAX_CACHE_ENTRIES,
   ReadCache,
   createReadCacheKey,
 } from './cache';

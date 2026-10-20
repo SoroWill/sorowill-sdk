@@ -162,6 +162,8 @@ interface WebSocketLike {
 /** Options for constructing a read cache scoped to SoroWill reads. */
 export interface SoroWillReadCacheOptions {
   ttlMs?: number;
+  /** Maximum cached entries before least-recently-used eviction. Defaults to 1000. */
+  maxEntries?: number;
 }
 
 export type {
