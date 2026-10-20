@@ -164,7 +164,7 @@ const BASE_CREATE_WILL_PARAMS = {
 };
 
 function makeClient() {
-  return new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
+  return new SoroWillClient({ network: 'testnet', contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR' });
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +173,7 @@ function makeClient() {
 
 describe('#153 – SoroWillClient constructor contractId validation', () => {
   it('constructs successfully with a valid-looking contract ID', () => {
-    expect(() => new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' })).not.toThrow();
+    expect(() => new SoroWillClient({ network: 'testnet', contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR' })).not.toThrow();
   });
 
   it('throws InvalidContractIdError (not a raw StrKey error) when contractId is empty', () => {

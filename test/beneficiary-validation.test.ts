@@ -139,7 +139,7 @@ const BASE_CREATE_WILL_PARAMS = {
 };
 
 function makeClient() {
-  return new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
+  return new SoroWillClient({ network: 'testnet', contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR' });
 }
 
 describe('Freighter wallet adapter', () => {

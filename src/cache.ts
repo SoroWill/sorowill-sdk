@@ -12,6 +12,25 @@ export interface CachePersistenceAdapter {
   clear(): Promise<void>;
 }
 
+// Share the lock across caches using the same adapter. Serialize all mutations,
+// since adapters may store every key in one read-modify-write document.
+const persistenceLocks = new WeakMap<CachePersistenceAdapter, Promise<void>>();
+
+function withPersistenceLock(
+  adapter: CachePersistenceAdapter,
+  operation: () => Promise<void>,
+): Promise<void> {
+  const previous = persistenceLocks.get(adapter) ?? Promise.resolve();
+  const result = previous.then(operation);
+  // A failed mutation must release the lock so later writes can still proceed.
+  const tail = result.catch(() => {});
+  persistenceLocks.set(adapter, tail);
+  void tail.then(() => {
+    if (persistenceLocks.get(adapter) === tail) persistenceLocks.delete(adapter);
+  });
+  return result;
+}
+
 export interface ReadCacheOptions {
   ttlMs?: number;
   now?: () => number;
@@ -193,7 +212,7 @@ export class ReadCache {
   set(key: string, value: unknown, willIds: Iterable<string> = []): void {
     if (this.ttlMs === 0) {
       this.touchedKeys.add(key);
-      void this.persistence?.delete(key);
+      void this.persist((adapter) => adapter.delete(key)).catch(() => {});
       return;
     }
 
@@ -208,12 +227,13 @@ export class ReadCache {
     // Delete before set so an updated key moves to the most-recent position.
     this.entries.delete(key);
     this.entries.set(key, entry);
-    void this.persistence
-      ?.write(this.toPersistedEntry(entry))
-      .catch(() => {
-        // Silently ignore persistence failures to prevent unhandled rejections
-        // The cache remains functional in-memory; only durability is lost
+    if (this.persistence) {
+      // Snapshot now so queued writes cannot observe later caller mutations.
+      const persistedEntry = this.toPersistedEntry(entry);
+      void this.persist((adapter) => adapter.write(persistedEntry)).catch(() => {
+        // Keep the memory cache usable when persistence fails.
       });
+    }
 
     this.evictIfNeeded();
   }
@@ -248,7 +268,7 @@ export class ReadCache {
   clear(): void {
     this.clearedBeforeHydration = true;
     this.entries.clear();
-    void this.persistence?.clear().catch(() => {
+    void this.persist((adapter) => adapter.clear()).catch(() => {
       // Silently ignore persistence failures to prevent unhandled rejections
       // The cache is cleared in-memory; only durability guarantee is lost
     });
@@ -267,7 +287,7 @@ export class ReadCache {
 
       this.entries.delete(oldestKey);
       this.touchedKeys.add(oldestKey);
-      void this.persistence?.delete(oldestKey).catch(() => {
+      void this.persist((adapter) => adapter.delete(oldestKey)).catch(() => {
         // Silently ignore persistence failures to prevent unhandled rejections
         // The entry is evicted in-memory; only durability guarantee is lost
       });
@@ -277,7 +297,7 @@ export class ReadCache {
   private async delete(key: string): Promise<void> {
     this.touchedKeys.add(key);
     this.entries.delete(key);
-    await this.persistence?.delete(key);
+    await this.persist((adapter) => adapter.delete(key));
   }
 
   private async hydrate(): Promise<void> {
@@ -296,14 +316,13 @@ export class ReadCache {
     const now = this.now();
 
     for (const persistedEntry of persistedEntries) {
-      if (persistedEntry.expiresAt !== null && persistedEntry.expiresAt <= now) {
-        await this.persistence.delete(persistedEntry.key);
+      // Check before expiry cleanup too: an old expired entry must not delete
+      // a fresh write made while hydration was in flight.
+      if (this.touchedKeys.has(persistedEntry.key)) {
         continue;
       }
-
-      // Never let an older persisted entry replace a value that was written
-      // (or deleted) after construction but before hydration completed.
-      if (this.touchedKeys.has(persistedEntry.key)) {
+      if (persistedEntry.expiresAt !== null && persistedEntry.expiresAt <= now) {
+        await this.persist((adapter) => adapter.delete(persistedEntry.key));
         continue;
       }
 
@@ -316,6 +335,11 @@ export class ReadCache {
     }
 
     this.evictIfNeeded();
+  }
+
+  private persist(operation: (adapter: CachePersistenceAdapter) => Promise<void>): Promise<void> {
+    const adapter = this.persistence;
+    return adapter ? withPersistenceLock(adapter, () => operation(adapter)) : Promise.resolve();
   }
 
   private toPersistedEntry(entry: CacheEntry): PersistedCacheEntry {

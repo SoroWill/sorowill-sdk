@@ -11,7 +11,10 @@ vi.mock('@stellar/freighter-api', () => ({
   },
 }));
 
-vi.mock('@stellar/stellar-sdk', () => {
+vi.mock('@stellar/stellar-sdk', async () => {
+  const { StrKey } = await vi.importActual<typeof import('@stellar/stellar-sdk')>(
+    '@stellar/stellar-sdk',
+  );
   class MockContract {
     constructor(private readonly id: string) {}
     contractId(): string {
@@ -28,6 +31,7 @@ vi.mock('@stellar/stellar-sdk', () => {
     Account: class {},
     BASE_FEE: '100',
     Contract: MockContract,
+    StrKey,
     Networks: { PUBLIC: 'PUBLIC', TESTNET: 'TESTNET' },
     Transaction: class {},
     TransactionBuilder: class {},

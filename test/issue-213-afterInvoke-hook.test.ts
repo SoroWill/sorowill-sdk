@@ -193,7 +193,7 @@ describe('Issue #213: Throwing afterInvoke hook on success path makes invoke() r
     hookManager = new HookManager();
     client = new SoroWillClient({
       network: 'testnet',
-      contractId: 'TESTCONTRACT',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       hooks: hookManager,
     });
   });

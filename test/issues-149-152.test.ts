@@ -175,7 +175,7 @@ import {
 function makeClient(overrides: { rpcServer?: unknown } = {}): SoroWillClient {
   return new SoroWillClient({
     network: 'testnet',
-    contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARRDD',
+    contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
     ...(overrides.rpcServer ? { rpcServer: overrides.rpcServer as never } : {}),
   });
 }

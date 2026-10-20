@@ -203,6 +203,27 @@ export interface SignTransactionOptions {
 
 export interface WalletAdapter {
   isConnected(): Promise<boolean>;
+  /**
+   * Requests a wallet connection, including any provider approval prompt.
+   * Repeated calls are allowed, but are not guaranteed to be idempotent: the
+   * adapter/provider may return the current connection, prompt again, or reject
+   * (for example if approval is denied). Errors propagate to the caller.
+   * Use reconnect() to restore an existing session without prompting when the
+   * adapter supports it; it falls back to connect() when restoration is unavailable.
+   *
+   * @example First connection (may prompt)
+   * ```ts
+   * const connection = await wallet.connect();
+   * ```
+   * @example Already connected (reuse when possible; handle provider errors)
+   * ```ts
+   * try {
+   *   const connection = await wallet.reconnect();
+   * } catch (error) {
+   *   showConnectionError(error);
+   * }
+   * ```
+   */
   connect(): Promise<WalletConnection>;
   reconnect(): Promise<WalletConnection>;
   disconnect(): Promise<void>;

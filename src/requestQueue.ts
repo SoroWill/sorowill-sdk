@@ -185,10 +185,9 @@ export class RequestQueue {
     }
     while (
       core.active < core.maxConcurrent &&
-      core.starts.length < core.requestsPerSecond &&
-      core.pending.length > 0
+      core.starts.length < core.requestsPerSecond
     ) {
-      const request = this.selectNextRequest();
+      const request = this.dequeue();
       if (request === undefined) break;
       core.active += 1;
       core.starts.push(Date.now());
@@ -205,21 +204,22 @@ export class RequestQueue {
     }
   }
 
-  private selectNextRequest(): PendingRequest<unknown> | undefined {
+  /**
+   * Selects and removes a request in one synchronous operation. JavaScript runs
+   * this to completion before another producer, abort listener, or drain can
+   * touch the shared core. Callers use the removal result, not a size check.
+   */
+  private dequeue(): PendingRequest<unknown> | undefined {
     const pending = this.core.pending;
-    if (pending.length === 0) {
-      return undefined;
-    }
-    let selectedIndex = 0;
-    let selectedPriority = pending[0]!.priority;
-    for (let i = 1; i < pending.length; i++) {
+    let selectedIndex = -1;
+    let selectedPriority = -Infinity;
+    for (let i = 0; i < pending.length; i++) {
       if (pending[i]!.priority > selectedPriority) {
         selectedIndex = i;
         selectedPriority = pending[i]!.priority;
       }
     }
-    const [request] = pending.splice(selectedIndex, 1);
-    return request;
+    return selectedIndex === -1 ? undefined : pending.splice(selectedIndex, 1)[0];
   }
 
   private async execute<T>(request: PendingRequest<T>): Promise<void> {

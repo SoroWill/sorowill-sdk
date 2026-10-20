@@ -221,7 +221,7 @@ describe('SoroWillClient', () => {
   it('constructs from environment variables', () => {
     const client = SoroWillClient.fromEnv({
       SOROWILL_NETWORK: 'mainnet',
-      SOROWILL_CONTRACT_ID: 'CCONTRACT',
+      SOROWILL_CONTRACT_ID: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       SOROWILL_RPC_URL: 'https://rpc.example',
       SOROWILL_EVENT_RPC_URL: 'https://rpc-events.example',
       SOROWILL_EVENT_STREAM_URL: 'wss://stream.example/events',
@@ -239,7 +239,7 @@ describe('SoroWillClient', () => {
       result: { retval: [rawWill(1), rawWill(2), rawWill(3)] },
     });
 
-    const client = new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
+    const client = new SoroWillClient({ network: 'testnet', contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR' });
     const firstPage = await client.getWillsByOwner('GOWNER', { pageSize: 2 });
     if (Array.isArray(firstPage)) throw new Error('Expected paginated result');
     const secondPageOpts: Record<string, unknown> = { pageSize: 2 };
@@ -258,7 +258,7 @@ describe('SoroWillClient', () => {
       result: { retval: [rawWill(4), rawWill(5), rawWill(6)] },
     });
 
-    const client = new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
+    const client = new SoroWillClient({ network: 'testnet', contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR' });
     const firstPage = await client.getWillsByBeneficiary('GBEN', { pageSize: 1 });
     if (Array.isArray(firstPage)) throw new Error('Expected paginated result');
     const secondPageOptsB: Record<string, unknown> = { pageSize: 1 };
@@ -277,7 +277,7 @@ describe('SoroWillClient', () => {
       result: { retval: [] },
     });
 
-    const client = new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
+    const client = new SoroWillClient({ network: 'testnet', contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR' });
     const wills = await client.getWillsByOwner('GNEWWALLET');
 
     expect(wills).toEqual([]);
@@ -288,7 +288,7 @@ describe('SoroWillClient', () => {
       result: { retval: [] },
     });
 
-    const client = new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
+    const client = new SoroWillClient({ network: 'testnet', contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR' });
     const wills = await client.getWillsByBeneficiary('GNEWWALLET');
 
     expect(wills).toEqual([]);
@@ -300,7 +300,7 @@ describe('SoroWillClient', () => {
       result: { retval: undefined },
     }));
 
-    const client = new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
+    const client = new SoroWillClient({ network: 'testnet', contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR' });
 
     await expect(
       client.previewFee('create_will', {
@@ -349,7 +349,7 @@ describe('SoroWillClient', () => {
               id: 'evt-1',
               pagingToken: '1',
               ledger: 123,
-              contractId: 'CCONTRACT',
+              contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
               txHash: 'abc',
               type: 'contract',
               topics: ['will_created'],
@@ -363,7 +363,7 @@ describe('SoroWillClient', () => {
 
     const client = new SoroWillClient({
       network: 'testnet',
-      contractId: 'CCONTRACT',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       fetch: fetchMock as unknown as typeof fetch,
       defaultPollIntervalMs: 1,
     });
@@ -387,7 +387,7 @@ describe('SoroWillClient', () => {
   it('throws WebSocketNotConfiguredError when transport: "websocket" is explicitly requested but unconfigured', async () => {
     const client = new SoroWillClient({
       network: 'testnet',
-      contractId: 'CCONTRACT',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
     });
 
     await expect(
@@ -398,7 +398,7 @@ describe('SoroWillClient', () => {
   it('skips WASM fetch when specJson is provided', async () => {
     const client = new SoroWillClient({
       network: 'testnet',
-      contractId: 'CCONTRACT',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       specJson: new Uint8Array(),
     });
 
@@ -415,7 +415,7 @@ describe('SoroWillClient', () => {
   it('falls back to lazy WASM fetch when specJson is not provided', async () => {
     const client = new SoroWillClient({
       network: 'testnet',
-      contractId: 'CCONTRACT',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
     });
 
     mockState.simulateTransaction.mockResolvedValue({
@@ -448,7 +448,7 @@ describe('SoroWillClient', () => {
                       id: 'evt-ws-1',
                       pagingToken: '5',
                       ledger: 200,
-                      contractId: 'CCONTRACT',
+                      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
                       type: 'contract',
                       topics: ['checked_in'],
                       value: { will_id: '10' },
@@ -481,7 +481,7 @@ describe('SoroWillClient', () => {
               id: 'evt-poll-1',
               pagingToken: '6',
               ledger: 201,
-              contractId: 'CCONTRACT',
+              contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
               type: 'contract',
               topics: ['guardian_triggered'],
               value: { will_id: '11' },
@@ -494,7 +494,7 @@ describe('SoroWillClient', () => {
 
     const wsClient = new SoroWillClient({
       network: 'testnet',
-      contractId: 'CCONTRACT',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       webSocketFactory,
       eventStreamUrl: 'wss://stream.example/events',
     });
@@ -512,7 +512,7 @@ describe('SoroWillClient', () => {
     let fallbackSubscription: EventSubscription | undefined;
     const fallbackClient = new SoroWillClient({
       network: 'testnet',
-      contractId: 'CCONTRACT',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       eventStreamUrl: 'wss://unsupported.example/events',
       fetch: fallbackFetch as unknown as typeof fetch,
       webSocketFactory,
@@ -543,7 +543,7 @@ describe('SoroWillClient', () => {
     try {
       const client = new SoroWillClient({
         network: 'testnet',
-        contractId: 'CCONTRACT',
+        contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       });
 
       await expect(
