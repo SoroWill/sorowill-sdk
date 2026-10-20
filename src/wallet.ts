@@ -256,6 +256,15 @@ export interface SignTransactionOptions {
   timeoutMs?: number;
 }
 
+/** Called with the wallet's new network after it switches networks. */
+export type WalletNetworkChangeListener = (network: {
+  network: string;
+  networkPassphrase: string;
+}) => void;
+
+/** Default interval (ms) at which Freighter is polled for wallet changes. */
+const DEFAULT_FREIGHTER_WATCH_INTERVAL_MS = 3_000;
+
 export interface WalletAdapter {
   isConnected(): Promise<boolean>;
   connect(): Promise<WalletConnection>;
@@ -268,6 +277,13 @@ export interface WalletAdapter {
   ): Promise<string | SignatureResponse>;
   /** Reports the network this wallet is currently set to, without prompting the user. Optional — not every wallet adapter can report this. */
   getNetwork?(): Promise<{ network: string; networkPassphrase: string }>;
+  /**
+   * Registers `listener` to be called whenever the wallet switches to a
+   * different network. Returns a function that removes the listener.
+   * Optional — {@link SoroWillClient} uses it to drop cached reads from the
+   * previous network.
+   */
+  onNetworkChange?(listener: WalletNetworkChangeListener): () => void;
   /**
    * Returns the current session token for this wallet, if the adapter issues
    * one. Optional — adapters that do not use session tokens may omit it.
@@ -484,6 +500,50 @@ export class FreighterWalletAdapter implements WalletAdapter {
     };
   }
 
+  /**
+   * Watches Freighter for network switches using its `WatchWalletChanges`
+   * poller and calls `listener` whenever the network passphrase changes.
+   * The first reported network is recorded as the baseline and does not
+   * trigger the listener. Returns a function that stops watching.
+   *
+   * Outside a browser there is no extension to watch, so this is a no-op.
+   */
+  onNetworkChange(listener: WalletNetworkChangeListener): () => void {
+    if (typeof (globalThis as { window?: unknown }).window === 'undefined') {
+      return () => {};
+    }
+    let stopped = false;
+    let watcher: { stop(): void } | undefined;
+    let lastPassphrase: string | undefined;
+
+    void this.loadInjectedFreighterApi()
+      .then((freighterApi) => {
+        if (stopped || typeof freighterApi.WatchWalletChanges !== 'function') {
+          return;
+        }
+        const instance = new freighterApi.WatchWalletChanges(DEFAULT_FREIGHTER_WATCH_INTERVAL_MS);
+        watcher = instance;
+        instance.watch(({ network, networkPassphrase, error }) => {
+          if (error || !networkPassphrase) {
+            return;
+          }
+          const previous = lastPassphrase;
+          lastPassphrase = networkPassphrase;
+          if (previous !== undefined && previous !== networkPassphrase) {
+            listener({ network, networkPassphrase });
+          }
+        });
+      })
+      .catch(() => {
+        // Freighter is unavailable; there are no network changes to watch.
+      });
+
+    return () => {
+      stopped = true;
+      watcher?.stop();
+    };
+  }
+
   async getPublicKey(): Promise<string> {
     const freighterApi = await this.loadInjectedFreighterApi();
     const { address, error } = await freighterApi.getAddress();
@@ -576,8 +636,15 @@ export class WalletConnectWalletAdapter implements WalletAdapter {
         opts: SignTransactionOptions,
       ): Promise<string | SignatureResponse>;
       getNetwork?(): Promise<{ network: string; networkPassphrase: string }>;
+      onNetworkChange?(listener: WalletNetworkChangeListener): () => void;
     },
-  ) {}
+  ) {
+    if (connector.onNetworkChange) {
+      this.onNetworkChange = (listener) => connector.onNetworkChange!(listener);
+    }
+  }
+
+  onNetworkChange?: (listener: WalletNetworkChangeListener) => () => void;
 
   isConnected(): Promise<boolean> {
     return this.connector.isConnected();
@@ -622,6 +689,7 @@ export const freighterAdapter: WalletAdapter = {
   getPublicKey: () => defaultFreighterWalletAdapter.getPublicKey(),
   signTransaction: (xdr: string, opts: SignTransactionOptions) => defaultFreighterWalletAdapter.signTransaction(xdr, opts),
   getNetwork: () => defaultFreighterWalletAdapter.getNetwork(),
+  onNetworkChange: (listener: WalletNetworkChangeListener) => defaultFreighterWalletAdapter.onNetworkChange(listener),
 };
 
 export function getDefaultWalletAdapter(): WalletAdapter {

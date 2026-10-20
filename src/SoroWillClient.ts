@@ -707,6 +707,8 @@ export class SoroWillClient {
   private readonly autoFeeBumpOnTimeout: boolean;
   private readonly transactionTimeoutSeconds: number;
   private readonly requireWalletNetwork: boolean;
+  /** Removes the wallet network-change listener registered in the constructor (#603). */
+  private readonly stopWatchingWalletNetwork: (() => void) | undefined;
   /**
    * How long (in milliseconds) the lazily-fetched contract spec is considered
    * fresh. After this TTL elapses the next call will re-fetch the spec from the
@@ -803,6 +805,14 @@ export class SoroWillClient {
     }
 
     this.feeStatsCache = new Map();
+
+    // Scope cached reads to the configured network, and drop them whenever the
+    // wallet reports a network switch so testnet data is never served after
+    // switching to mainnet (or vice versa) (#603).
+    this.readCache?.setNetwork(this.networkPassphrase);
+    this.stopWatchingWalletNetwork = this.wallet.onNetworkChange?.(({ networkPassphrase }) => {
+      this.handleNetworkChange(networkPassphrase);
+    });
 
     if (this.readCache && options.eventSource) {
       // Subscribe and automatically clean up the listener if setup throws.
@@ -1830,6 +1840,7 @@ export class SoroWillClient {
     if (this.eventSubscription) {
       unsubscribeFromWillEvents(this.eventSubscription);
     }
+    this.stopWatchingWalletNetwork?.();
     this.inFlightTracker.clear();
     this.queue.rejectAll(new Error('SoroWillClient destroyed'));
   }
@@ -2436,6 +2447,27 @@ export class SoroWillClient {
    */
   flushFeeStatsCache(): void {
     this.feeStatsCache.clear();
+  }
+
+  /**
+   * Notifies the client that the active network is now `networkPassphrase`.
+   * If it differs from the network the read cache was populated on, the read
+   * cache and fee-stats cache are cleared so no data from the previous network
+   * is returned.
+   *
+   * Called automatically when the wallet adapter implements `onNetworkChange`;
+   * call it yourself when you detect a network switch some other way.
+   *
+   * @returns `true` if the network changed and cached data was cleared.
+   */
+  handleNetworkChange(networkPassphrase: string): boolean {
+    const previous = this.readCache?.getNetwork() ?? this.lastFeeStatsCachedPassphrase;
+    if (previous === networkPassphrase) {
+      return false;
+    }
+    this.readCache?.setNetwork(networkPassphrase);
+    this.flushFeeStatsCache();
+    return true;
   }
 
   /**
