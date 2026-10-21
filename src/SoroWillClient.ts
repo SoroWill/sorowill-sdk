@@ -129,6 +129,13 @@ export interface RpcRetryOptions {
 
 export interface SoroWillRpcServer {
   getContractWasmByContractId(contractId: string): Promise<Buffer | Uint8Array>;
+  /**
+   * Simulate an already-built Soroban transaction without signing or submitting it.
+   * Use this low-level RPC method to inspect contract results or validate a
+   * transaction before submission. Client write methods simulate internally
+   * as part of `invoke`; callers should use those methods to perform writes.
+   * Simulation makes an RPC round trip and does not change ledger state.
+   */
   simulateTransaction(transaction: Transaction): Promise<rpc.Api.SimulateTransactionResponse>;
   getAccount(address: string): Promise<Account>;
   prepareTransaction(transaction: Transaction): Promise<Transaction>;
@@ -1941,7 +1948,15 @@ export class SoroWillClient {
     }
   }
 
-  /** Builds, simulates, signs, and submits a state-changing contract call. */
+  /**
+   * Builds, simulates, signs, and submits a state-changing contract call.
+   * Use public write methods such as `createWill` or `triggerWill` to change
+   * ledger state. Read methods only simulate and return a value; they do not
+   * sign or submit. Each invocation performs simulation plus submission and
+   * finality polling, so it costs more RPC requests and time than a read.
+   * RPC requests use the client timeout (30 seconds by default), overridden
+   * for this call with `options.timeoutMs`.
+   */
   private async invoke(
     method: string,
     args: Record<string, unknown>,

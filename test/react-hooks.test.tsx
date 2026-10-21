@@ -48,9 +48,36 @@ vi.mock('../src/SoroWillClient', () => ({
   },
 }));
 
-import { useWill, useWillsByBeneficiary, useWillsByOwner } from '../src/react/hooks';
+import { useWallet, useWill, useWillsByBeneficiary, useWillsByOwner } from '../src/react/hooks';
+import type { WalletAdapter } from '../src/wallet';
 
 const CLIENT_OPTIONS = { network: 'testnet' as const, contractId: 'CABC' };
+
+describe('useWallet', () => {
+  it('clears the initialized key when the wallet changes networks mid-initialization', async () => {
+    let resolvePublicKey!: (key: string) => void;
+    let networkRead = 0;
+    const wallet = {
+      isConnected: vi.fn().mockResolvedValue(true),
+      getNetwork: vi.fn().mockImplementation(async () => {
+        networkRead += 1;
+        return networkRead === 1
+          ? { network: 'TESTNET', networkPassphrase: 'test-passphrase' }
+          : { network: 'PUBLIC', networkPassphrase: 'main-passphrase' };
+      }),
+      getPublicKey: vi.fn(() => new Promise<string>((resolve) => { resolvePublicKey = resolve; })),
+    } as unknown as WalletAdapter;
+
+    const { result } = renderHook(() => useWallet(wallet));
+    await waitFor(() => expect(wallet.getPublicKey).toHaveBeenCalledOnce());
+    resolvePublicKey('GOLDKEY');
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.connected).toBe(true);
+    expect(result.current.publicKey).toBeNull();
+    expect(result.current.network).toBeNull();
+  });
+});
 
 // Regression guard for #216: useWillsByOwner/useWillsByBeneficiary assume
 // SoroWillClient's read methods resolve to a plain Will[] when called without
