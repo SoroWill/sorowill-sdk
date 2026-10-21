@@ -42,6 +42,44 @@ export class HookExecutionError extends SoroWillError {
 }
 
 /**
+ * Raised when a hook triggers a nested contract invocation while another
+ * invocation is already in progress (e.g. a `beforeInvoke` hook calls another
+ * operation through the same `SoroWillClient`). Without this guard the hooks
+ * would re-enter `HookManager.runBeforeInvoke`/`runAfterInvoke` and could
+ * recurse indefinitely.
+ *
+ * The offending nested invocation is never executed — the client state is
+ * left unchanged and the caller receives a clear, synchronous error instead of
+ * a stack overflow.
+ *
+ * @example
+ * ```ts
+ * hooks.onBeforeInvoke(async (ctx) => {
+ *   // ❌ Never call another client operation from within a hook.
+ *   await client.checkIn('42');
+ * });
+ *
+ * try {
+ *   await client.checkIn('42');
+ * } catch (err) {
+ *   if (err instanceof HookRecursionError) {
+ *     console.error('Recursive hook execution blocked:', err.message);
+ *   }
+ * }
+ * ```
+ */
+export class HookRecursionError extends SoroWillError {
+  constructor(message?: string) {
+    super(
+      message ??
+        'Recursive hook execution detected: a hook triggered a nested contract invocation while another invocation was already in progress. ' +
+          'Hooks must not call client operations that re-enter HookManager.runBeforeInvoke or runAfterInvoke.',
+    );
+    this.name = 'HookRecursionError';
+  }
+}
+
+/**
  * Raised when an amount string passed to {@link SoroWillClient.createWill} or
  * {@link SoroWillClient.topUp} is not a valid positive integer. This catches
  * zero, negative, and malformed (non-numeric) strings before they reach
@@ -66,6 +104,55 @@ export class RequestTimeoutError extends SoroWillError {
   constructor(timeoutMs: number, options?: ErrorOptions) {
     super(`SoroWill RPC request timed out after ${timeoutMs}ms`, options);
     this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
+ * Raised when a {@link RequestQueue} is asked to enqueue a request beyond its
+ * configured maximum queue size (`maxQueueSize`). The excess request is
+ * rejected without ever being scheduled, so the queue can never grow without
+ * bound when requests are produced faster than the configured concurrency and
+ * rate limits allow them to be processed (#525).
+ */
+export class RequestQueueOverflowError extends SoroWillError {
+  /** The configured maximum number of pending requests that was exceeded. */
+  readonly maxQueueSize: number;
+
+  constructor(maxQueueSize: number, options?: ErrorOptions) {
+    super(
+      `RequestQueue is full: cannot enqueue more than ${maxQueueSize} pending requests. ` +
+        'The queue is processing requests slower than they are being submitted. ' +
+        'Retry shortly, reduce the submission rate, or increase the queue\'s maxQueueSize / concurrency.',
+      options,
+    );
+    this.maxQueueSize = maxQueueSize;
+  }
+}
+
+/**
+ * Raised when an operation is submitted while an identical operation (same
+ * will id and method) is already in flight and the caller asked for exclusive
+ * execution. Unlike the default deduplication behaviour — which coalesces
+ * concurrent duplicates onto the in-flight promise — exclusive operations
+ * reject the duplicate immediately so it can never issue a second, duplicate
+ * transaction on-chain (#523). The original in-flight operation is unaffected
+ * and continues to completion.
+ */
+export class DuplicateOperationError extends SoroWillError {
+  /** The will id whose operation was already in flight. */
+  readonly willId: string;
+  /** The contract method that was already in flight for {@link willId}. */
+  readonly method: string;
+
+  constructor(willId: string | bigint, method: string, options?: ErrorOptions) {
+    const id = typeof willId === 'bigint' ? willId.toString() : willId;
+    super(
+      `A "${method}" operation for will ${id} is already in flight. ` +
+        'Wait for the in-flight operation to settle before submitting another one.',
+      options,
+    );
+    this.willId = id;
+    this.method = method;
   }
 }
 
@@ -180,6 +267,48 @@ export class UnsupportedBatchSizeError extends SoroWillError {
         'submit each call as its own transaction instead.',
       options,
     );
+  }
+}
+
+/**
+ * Raised when the operations passed to {@link SoroWillClient.batch} do not all
+ * target the same Stellar network, or when the network they target differs
+ * from the network the client is configured for (#550).
+ *
+ * The check runs before any transaction is built, signed, or submitted, so a
+ * batch can never silently mix testnet and mainnet operations.
+ */
+export class BatchNetworkMismatchError extends SoroWillError {
+  /** The network the client is configured for. */
+  readonly clientNetwork: string;
+  /** The network the offending operation targets. */
+  readonly operationNetwork: string;
+  /** Index of the offending operation within the batch. */
+  readonly operationIndex: number;
+  /** Index of the operation declaring a conflicting network, when set. */
+  readonly conflictingOperationIndex: number | undefined;
+  /** The network declared by the conflicting operation, when set. */
+  readonly conflictingNetwork: string | undefined;
+
+  constructor(
+    clientNetwork: string,
+    operationNetwork: string,
+    operationIndex: number,
+    conflicting?: { operationIndex: number; network: string },
+    options?: ErrorOptions,
+  ) {
+    const message = conflicting
+      ? `Batch operations must all target the same network: operation ${operationIndex} targets ` +
+        `"${operationNetwork}" but operation ${conflicting.operationIndex} targets ` +
+        `"${conflicting.network}".`
+      : `Batch operation ${operationIndex} targets network "${operationNetwork}" but the client is ` +
+        `configured for "${clientNetwork}".`;
+    super(message, options);
+    this.clientNetwork = clientNetwork;
+    this.operationNetwork = operationNetwork;
+    this.operationIndex = operationIndex;
+    this.conflictingOperationIndex = conflicting?.operationIndex;
+    this.conflictingNetwork = conflicting?.network;
   }
 }
 
@@ -693,6 +822,35 @@ export class InvalidDayCountError extends SoroWillError {
     );
     this.paramName = paramName;
     this.value = value;
+  }
+}
+
+/**
+ * Raised when `checkinPeriodDays` passed to {@link SoroWillClient.createWill}
+ * exceeds the contract storage TTL window the will entry can survive without
+ * a check-in extending it. A will whose check-in deadline outlives the
+ * ledger-entry TTL would be archived before it can be triggered, bricking it
+ * until a manual restore.
+ *
+ * Thrown synchronously before any RPC call is made.
+ *
+ * @since 0.1.2
+ */
+export class CheckinPeriodExceedsTtlError extends SoroWillError {
+  /** Check-in period supplied (in days). */
+  readonly suppliedDays: number;
+  /** Maximum check-in period allowed (in days). */
+  readonly maxDays: number;
+
+  constructor(suppliedDays: number, maxDays: number, options?: ErrorOptions) {
+    super(
+      `Invalid checkinPeriodDays ${suppliedDays}: exceeds the maximum of ${maxDays} days ` +
+        'imposed by the contract storage TTL window. A will whose check-in deadline outlives ' +
+        'its ledger-entry TTL would be archived before it can be triggered.',
+      options,
+    );
+    this.suppliedDays = suppliedDays;
+    this.maxDays = maxDays;
   }
 }
 
