@@ -213,6 +213,13 @@ export interface SoroWillClientOptions {
    */
   inFlightTracker?: InFlightTracker;
   /**
+   * Coalesce identical concurrent read-only calls (same contract method and
+   * arguments) into a single RPC simulation, sharing its result between every
+   * caller. Defaults to `true`. Reads that pass an `AbortSignal` are never
+   * coalesced, so aborting one caller can't cancel another caller's request.
+   */
+  deduplicateReads?: boolean;
+  /**
    * Advanced override for testing or preloaded contract specs.
    *
    * By injecting a pre-built spec you can write snapshot tests that lock in
@@ -696,6 +703,12 @@ export class SoroWillClient {
   private readonly inFlightTracker: InFlightTracker;
   private readonly timeoutMs: number;
   private readonly readCache: ReadCache | undefined;
+  private readonly deduplicateReads: boolean;
+  /**
+   * Read simulations currently in flight, keyed by method + arguments +
+   * request options, so identical concurrent reads share one RPC call (#619).
+   */
+  private readonly inFlightReads = new Map<string, Promise<unknown>>();
   private readonly retryOptions: RpcRetryOptions;
   private specPromise: Promise<InstanceType<typeof Spec>> | undefined;
   /**
@@ -782,6 +795,7 @@ export class SoroWillClient {
       // dedup entry for the same (willId, method) pair (#503).
       new InFlightTracker(options.contractId);
     this.readCache = options.readCache === false ? undefined : new ReadCache(options.readCache);
+    this.deduplicateReads = options.deduplicateReads ?? true;
     this.retryOptions = { ...DEFAULT_RETRY_OPTIONS, ...options.retry };
     const { maxAttempts, initialDelayMs, maxDelayMs, backoffFactor } = this.retryOptions;
     if (!Number.isInteger(maxAttempts) || maxAttempts <= 0) {
@@ -1853,6 +1867,7 @@ export class SoroWillClient {
       unsubscribeFromWillEvents(this.eventSubscription);
     }
     this.inFlightTracker.clear();
+    this.inFlightReads.clear();
     this.queue.rejectAll(new Error('SoroWillClient destroyed'));
   }
 
@@ -1928,8 +1943,41 @@ export class SoroWillClient {
     return await this.specPromise;
   }
 
-  /** Simulates a read-only contract call, requiring no connected wallet or signature. */
-  private async read<T>(
+  /**
+   * Simulates a read-only contract call, requiring no connected wallet or
+   * signature. Identical concurrent calls (same method, arguments and
+   * request options) are coalesced into a single RPC simulation (#619).
+   */
+  private read<T>(
+    method: string,
+    args: Record<string, unknown>,
+    options?: RequestOptions,
+  ): Promise<T> {
+    if (!this.deduplicateReads || options?.signal) {
+      return this.executeRead<T>(method, args, options);
+    }
+
+    const key = createReadCacheKey(method, {
+      args,
+      retries: options?.retries,
+      timeout: options?.timeout,
+      timeoutMs: options?.timeoutMs,
+    });
+    const existing = this.inFlightReads.get(key);
+    if (existing) {
+      return existing as Promise<T>;
+    }
+
+    const pending = this.executeRead<T>(method, args, options).finally(() => {
+      if (this.inFlightReads.get(key) === pending) {
+        this.inFlightReads.delete(key);
+      }
+    });
+    this.inFlightReads.set(key, pending);
+    return pending;
+  }
+
+  private async executeRead<T>(
     method: string,
     args: Record<string, unknown>,
     options?: RequestOptions,
