@@ -30,6 +30,19 @@ export interface ReadCacheOptions {
    * an unbounded cache.
    */
   maxEntries?: number;
+  /**
+   * Callback invoked when a persistence adapter operation (write, delete, or
+   * clear) fails. Receives the affected key and the error. The cache continues
+   * to function in-memory; only durability is affected.
+   */
+  onPersistenceFailure?: (key: string, error: unknown) => void;
+  /**
+   * When `true`, a persistence write failure in `set()` rolls back the
+   * in-memory cache entry (removes it) so memory and persistence stay in sync.
+   * Defaults to `false` (the in-memory entry is kept even if persistence
+   * fails). When `false`, only the `onPersistenceFailure` callback is invoked.
+   */
+  rollbackOnPersistenceFailure?: boolean;
 }
 
 interface CacheEntry {
@@ -55,21 +68,24 @@ function serializeCacheValue(value: unknown): string {
   });
 }
 
-function deserializeCacheValue<T>(value: string): T {
+export function deserializeCacheValue<T>(value: string): T {
   return JSON.parse(value, (_key, currentValue) => {
     if (
       currentValue &&
       typeof currentValue === 'object' &&
       '__type' in currentValue &&
-      'value' in currentValue &&
-      typeof currentValue.value === 'string'
+      'value' in currentValue
     ) {
-      if (currentValue.__type === 'bigint') {
+      const type = currentValue.__type as string;
+      if (type === 'bigint') {
         return BigInt(currentValue.value);
       }
-      if (currentValue.__type === 'date') {
+      if (type === 'date') {
         return new Date(currentValue.value);
       }
+      console.warn(
+        `[SoroWill] Cache: unknown __type "${type}" encountered during deserialization; returning raw value.`,
+      );
     }
     return currentValue;
   }) as T;
@@ -97,10 +113,29 @@ function stableStringify(value: unknown): string {
 }
 
 /**
+ * Escapes special characters (such as colons, slashes, percent signs, and separators)
+ * in a cache key component to prevent cache key collisions when component IDs contain
+ * separators.
+ *
+ * @param component - The raw string component (e.g. method name or identifier)
+ * @returns The escaped component safe for use in cache keys
+ */
+export function escapeKeyComponent(component: string): string {
+  return encodeURIComponent(component);
+}
+
+/**
+ * Alias for {@link escapeKeyComponent}.
+ */
+export const escapeCacheKeyComponent = escapeKeyComponent;
+
+/**
  * Builds a locale-agnostic cache key for a read method.
  *
  * Cache key design:
- * - Keys are derived ONLY from the method name and its non-locale arguments.
+ * - Keys are derived from the escaped method name and its stably serialized arguments.
+ * - Special characters in component IDs (such as colons and separators) are escaped
+ *   via {@link escapeKeyComponent} to prevent cache key collisions.
  * - Locale-dependent inputs (e.g. `locale`, `language`, `i18n`) are stripped
  *   before serialization so the same underlying data maps to a single key
  *   regardless of the active language.
@@ -108,10 +143,10 @@ function stableStringify(value: unknown): string {
  *   applied AFTER retrieving the cached value, never before caching it.
  *
  * This guarantees that switching languages mid-app does not return stale data
- * formatted for the previous locale.
+ * formatted for the previous locale and eliminates collision vulnerabilities.
  */
 export function createReadCacheKey(method: string, args: Record<string, unknown>): string {
-  return `${method}:${stableStringify(args)}`;
+  return `${escapeKeyComponent(method)}:${stableStringify(args)}`;
 }
 
 /**
@@ -137,8 +172,17 @@ export class ReadCache {
   private readonly ttlMs: number;
   private readonly now: () => number;
   private readonly persistence: CachePersistenceAdapter | undefined;
-  private readonly maxEntries: number;
+  private readonly maxEntries: number | undefined;
+  private readonly onPersistenceFailure: ((key: string, error: unknown) => void) | undefined;
+  private readonly rollbackOnPersistenceFailure: boolean;
   private readonly readyPromise: Promise<void>;
+  /**
+   * Will-ID to cache-key index. Maps each will ID to the set of cache keys
+   * whose entries reference that will ID, so reads and invalidations address
+   * the same entries and eviction can clean up associated references
+   * instead of leaking them.
+   */
+  private readonly willIdToKeys = new Map<string, Set<string>>();
   /**
    * Keys written or deleted after construction but before hydration completes.
    * Hydration must not overwrite these with older persisted values.
@@ -149,30 +193,32 @@ export class ReadCache {
    * repopulate the cache once it resolves.
    */
   private clearedBeforeHydration = false;
+  /**
+   * Network passphrase the cached entries belong to. Entries read on one
+   * network are meaningless on another, so switching networks clears the
+   * cache (see {@link ReadCache.setNetwork}).
+   */
+  private networkPassphrase: string | undefined;
 
   constructor(options: ReadCacheOptions = {}) {
     const ttlMs = options.ttlMs ?? 60_000;
-    if (typeof ttlMs !== 'number' || !Number.isFinite(ttlMs) || ttlMs < 0) {
+    if (typeof ttlMs !== 'number' || !Number.isFinite(ttlMs)) {
       throw new Error(
-        `ReadCache: ttlMs must be a finite non-negative number, received ${String(ttlMs)}`,
+        `ReadCache: ttlMs must be a finite number, received ${String(ttlMs)}`,
       );
     }
+    if (ttlMs < 0) {
+      console.warn(
+        `[SoroWill] Cache: negative ttlMs ${ttlMs}ms is not allowed; treating as 0 (immediate expiration).`,
+      );
+    }
+    this.ttlMs = Math.max(0, ttlMs);
 
-    this.ttlMs = ttlMs;
     this.now = options.now ?? Date.now;
     this.persistence = options.persistence;
-    const maxEntries = options.maxEntries ?? DEFAULT_MAX_CACHE_ENTRIES;
-    if (
-      typeof maxEntries !== 'number' ||
-      Number.isNaN(maxEntries) ||
-      maxEntries < 1 ||
-      (Number.isFinite(maxEntries) && !Number.isInteger(maxEntries))
-    ) {
-      throw new Error(
-        `ReadCache: maxEntries must be a positive integer or Infinity, received ${String(maxEntries)}`,
-      );
-    }
-    this.maxEntries = maxEntries;
+    this.maxEntries = options.maxEntries;
+    this.onPersistenceFailure = options.onPersistenceFailure;
+    this.rollbackOnPersistenceFailure = options.rollbackOnPersistenceFailure ?? false;
     this.readyPromise = this.hydrate();
   }
 
@@ -222,7 +268,9 @@ export class ReadCache {
   set(key: string, value: unknown, willIds: Iterable<string> = []): void {
     if (this.ttlMs === 0) {
       this.touchedKeys.add(key);
-      void this.persistence?.delete(key);
+      void this.persistence
+        ?.delete(key)
+        .catch((err) => this.onPersistenceFailure?.(key, err));
       return;
     }
 
@@ -234,14 +282,28 @@ export class ReadCache {
     };
 
     this.touchedKeys.add(key);
+    // Index the key under each will ID so invalidation by will ID can find it.
+    for (const willId of entry.willIds) {
+      let keys = this.willIdToKeys.get(willId);
+      if (!keys) {
+        keys = new Set();
+        this.willIdToKeys.set(willId, keys);
+      }
+      keys.add(key);
+    }
     // Delete before set so an updated key moves to the most-recent position.
     this.entries.delete(key);
     this.entries.set(key, entry);
     void this.persistence
       ?.write(this.toPersistedEntry(entry))
-      .catch(() => {
-        // Silently ignore persistence failures to prevent unhandled rejections
-        // The cache remains functional in-memory; only durability is lost
+      .catch((err) => {
+        // Report persistence failure via callback if provided
+        this.onPersistenceFailure?.(key, err);
+        // Optionally roll back the in-memory entry so memory and persistence stay in sync
+        if (this.rollbackOnPersistenceFailure) {
+          this.entries.delete(key);
+          this.touchedKeys.delete(key);
+        }
       });
 
     this.evictIfNeeded();
@@ -265,22 +327,42 @@ export class ReadCache {
     await this.readyPromise;
 
     const keysToDelete: string[] = [];
-    for (const [key, entry] of this.entries) {
-      if (entry.willIds.has(willId)) {
-        keysToDelete.push(key);
-      }
+    const keys = this.willIdToKeys.get(willId);
+    if (keys) {
+      keys.forEach((key) => keysToDelete.push(key));
     }
 
     await Promise.all(keysToDelete.map((key) => this.delete(key)));
   }
 
+  /** Returns the network passphrase the cache is currently scoped to, if any. */
+  getNetwork(): string | undefined {
+    return this.networkPassphrase;
+  }
+
+  /**
+   * Scopes the cache to `networkPassphrase`. If the cache was already scoped
+   * to a different network (e.g. the wallet switched testnet ↔ mainnet), every
+   * entry is cleared so data read on the previous network is never served.
+   *
+   * @returns `true` if the network changed and the cache was cleared.
+   */
+  setNetwork(networkPassphrase: string): boolean {
+    const changed =
+      this.networkPassphrase !== undefined && this.networkPassphrase !== networkPassphrase;
+    this.networkPassphrase = networkPassphrase;
+    if (changed) {
+      this.clear();
+    }
+    return changed;
+  }
+
   clear(): void {
     this.clearedBeforeHydration = true;
     this.entries.clear();
-    void this.persistence?.clear().catch(() => {
-      // Silently ignore persistence failures to prevent unhandled rejections
-      // The cache is cleared in-memory; only durability guarantee is lost
-    });
+    void this.persistence
+      ?.clear()
+      .catch((err) => this.onPersistenceFailure?.('__clear__', err));
   }
 
   private evictIfNeeded(): void {
@@ -304,7 +386,11 @@ export class ReadCache {
         break;
       }
 
-      this.removeEvicted(oldestKey);
+      this.entries.delete(oldestKey);
+      this.touchedKeys.add(oldestKey);
+      void this.persistence
+        ?.delete(oldestKey)
+        .catch((err) => this.onPersistenceFailure?.(oldestKey, err));
     }
   }
 
@@ -320,7 +406,11 @@ export class ReadCache {
   private async delete(key: string): Promise<void> {
     this.touchedKeys.add(key);
     this.entries.delete(key);
-    await this.persistence?.delete(key);
+    try {
+      await this.persistence?.delete(key);
+    } catch (err) {
+      this.onPersistenceFailure?.(key, err);
+    }
   }
 
   private async hydrate(): Promise<void> {
@@ -354,12 +444,24 @@ export class ReadCache {
         continue;
       }
 
-      this.entries.set(persistedEntry.key, {
+      const entry: CacheEntry = {
         key: persistedEntry.key,
-        value: deserializeCacheValue(persistedEntry.value),
+        value,
         expiresAt: persistedEntry.expiresAt,
         willIds: new Set(persistedEntry.willIds),
-      });
+      };
+
+      // Rebuild the will-ID index from persisted entries.
+      for (const willId of entry.willIds) {
+        let keys = this.willIdToKeys.get(willId);
+        if (!keys) {
+          keys = new Set();
+          this.willIdToKeys.set(willId, keys);
+        }
+        keys.add(persistedEntry.key);
+      }
+
+      this.entries.set(persistedEntry.key, entry);
     }
 
     for (const entry of writtenDuringHydration) {
