@@ -18,6 +18,7 @@ import {
 } from './cache';
 import {
   unsubscribeFromWillEvents,
+  validateEventTypeFilter,
   type WillEventSource,
   type WillEventSubscription,
 } from './events';
@@ -36,6 +37,7 @@ import type {
   PaginationOptions,
   RequestOptions,
   SoroWillEvent,
+  SorobanEventType,
   UpdateBeneficiariesParams,
   Will,
 } from './types';
@@ -58,6 +60,7 @@ import {
   InvalidCursorError,
   InvalidGuardianSignatureError,
   InvalidPaginationOptionsError,
+  InvalidPublicKeyError,
   InvokeFailedError,
   RequestTimeoutError,
   mapContractError,
@@ -141,6 +144,13 @@ export interface RpcRetryOptions {
 
 export interface SoroWillRpcServer {
   getContractWasmByContractId(contractId: string): Promise<Buffer | Uint8Array>;
+  /**
+   * Simulate an already-built Soroban transaction without signing or submitting it.
+   * Use this low-level RPC method to inspect contract results or validate a
+   * transaction before submission. Client write methods simulate internally
+   * as part of `invoke`; callers should use those methods to perform writes.
+   * Simulation makes an RPC round trip and does not change ledger state.
+   */
   simulateTransaction(transaction: Transaction): Promise<rpc.Api.SimulateTransactionResponse>;
   getAccount(address: string): Promise<Account>;
   prepareTransaction(transaction: Transaction): Promise<Transaction>;
@@ -224,6 +234,13 @@ export interface SoroWillClientOptions {
    * ```
    */
   inFlightTracker?: InFlightTracker;
+  /**
+   * Coalesce identical concurrent read-only calls (same contract method and
+   * arguments) into a single RPC simulation, sharing its result between every
+   * caller. Defaults to `true`. Reads that pass an `AbortSignal` are never
+   * coalesced, so aborting one caller can't cancel another caller's request.
+   */
+  deduplicateReads?: boolean;
   /**
    * Advanced override for testing or preloaded contract specs.
    *
@@ -469,6 +486,38 @@ const DEFAULT_RETRY_OPTIONS: RpcRetryOptions = {
  * corrupted `Will`: verifies the value decoded by `funcResToNative` actually
  * has the shape this SDK expects before any of its fields are trusted.
  */
+/**
+ * Settles with `promise`, or rejects with the signal's abort reason as soon as
+ * `signal` fires — whichever happens first. Lets callers stop waiting on a
+ * long-running step (wallet signing, an in-flight RPC) the moment they abort
+ * instead of waiting for it to time out (#608).
+ */
+function raceAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    // The original promise is abandoned; keep its eventual rejection handled.
+    promise.catch(() => undefined);
+    return Promise.reject(signal.reason);
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      promise.catch(() => undefined);
+      reject(signal.reason);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 function isRawWillShape(value: unknown): value is RawWill {
   if (typeof value !== 'object' || value === null) {
     return false;
@@ -670,14 +719,20 @@ function mapEventRecord(record: RawEventRecord, fallbackContractId: string): Sor
 }
 
 /**
- * Validates and decodes a will-list pagination cursor. Cursors produced by
- * the SDK are the canonical base-10 string of a non-negative safe integer
- * offset (e.g. `"0"`, `"25"`), so anything else — non-strings, empty
- * strings, signs, decimals, leading zeros, or values beyond
- * `Number.MAX_SAFE_INTEGER` — is rejected client-side with an
- * {@link InvalidCursorError} before any RPC call is made.
+ * Builds the `getEvents` filter list. A Soroban filter matches a single event
+ * `type`, so one filter is emitted per requested type.
  */
-function parseCursor(cursor: unknown): number {
+function buildEventFilters(
+  contractId: string,
+  eventTypes: SorobanEventType[] | undefined,
+): Array<{ type?: SorobanEventType; contractIds: string[] }> {
+  if (!eventTypes) {
+    return [{ contractIds: [contractId] }];
+  }
+  return eventTypes.map((type) => ({ type, contractIds: [contractId] }));
+}
+
+function parseCursor(cursor: string | undefined): number {
   if (cursor === undefined) {
     return 0;
   }
@@ -848,6 +903,16 @@ function getDefaultEnv(): EnvSource {
  * TypeScript. Read methods (`getWill`, `getWillsByOwner`,
  * `getWillsByBeneficiary`) work without a connected wallet. All other
  * methods sign and submit a transaction via the configured wallet adapter.
+ *
+ * Transaction source addresses must be valid Stellar account public keys and
+ * already funded with XLM on the selected network to cover the minimum account
+ * reserve and transaction fees. Unfunded wallets can raise
+ * {@link AccountNotFundedError}. On testnet, use
+ * {@link https://friendbot.stellar.org | Friendbot} for free test XLM.
+ * On mainnet, transfer real XLM to the address before submitting transactions.
+ * Invalid keys raise {@link InvalidPublicKeyError} before signing or account lookup.
+ *
+ * @see https://developers.stellar.org/docs/learn/fundamentals/lumens
  */
 export class SoroWillClient {
   private readonly server: SoroWillRpcServer;
@@ -872,6 +937,12 @@ export class SoroWillClient {
   private readonly inFlightTracker: InFlightTracker;
   private readonly timeoutMs: number;
   private readonly readCache: ReadCache | undefined;
+  private readonly deduplicateReads: boolean;
+  /**
+   * Read simulations currently in flight, keyed by method + arguments +
+   * request options, so identical concurrent reads share one RPC call (#619).
+   */
+  private readonly inFlightReads = new Map<string, Promise<unknown>>();
   private readonly retryOptions: RpcRetryOptions;
   private specPromise: Promise<InstanceType<typeof Spec>> | undefined;
   /**
@@ -914,6 +985,10 @@ export class SoroWillClient {
   private readonly signedTransactionHashes: Set<string>;
 
   constructor(options: SoroWillClientOptions) {
+    // Stellar SDK names its contract StrKey validator isValidContract.
+    if (typeof options.contractId !== 'string' || !StrKey.isValidContract(options.contractId)) {
+      throw new InvalidContractIdError(options.contractId ?? '');
+    }
     const config = NETWORK_CONFIG[options.network];
     const rpcUrl = options.rpcUrl ?? config.rpcUrls[0]!;
 
@@ -974,6 +1049,7 @@ export class SoroWillClient {
     // #573: Track signed transaction hashes to prevent duplicate signing.
     this.signedTransactionHashes = new Set();
     this.readCache = options.readCache === false ? undefined : new ReadCache(options.readCache);
+    this.deduplicateReads = options.deduplicateReads ?? true;
     this.retryOptions = { ...DEFAULT_RETRY_OPTIONS, ...options.retry };
     const { maxAttempts, initialDelayMs, maxDelayMs, backoffFactor } = this.retryOptions;
     if (!Number.isInteger(maxAttempts) || maxAttempts <= 0) {
@@ -2131,12 +2207,12 @@ export class SoroWillClient {
     let error: string | null = null;
     try {
       return await this.serializeWrite(async () => {
+        const publicKey = await this.getWalletPublicKey();
         const spec = await this.getSpec(options);
         const contractOperations = operations.map(({ method, args }) =>
           this.contract.call(method, ...spec.funcArgsToScVals(method, args)),
         );
 
-        const publicKey = await this.getWalletPublicKey();
         const account = await this.rpc(
           () => this.rpcPool.withFailover((server) => server.getAccount(publicKey)),
           options,
@@ -2476,7 +2552,16 @@ export class SoroWillClient {
     listener: (event: SoroWillEvent) => void,
     options: EventSubscriptionOptions = {},
   ): Promise<EventSubscription> {
-    validateEventCursor(options.cursor);
+    const eventTypes = validateEventTypeFilter(options.eventTypes);
+    if (eventTypes) {
+      const userListener = listener;
+      const allowed = new Set<string>(eventTypes);
+      listener = (event) => {
+        if (allowed.has(event.type)) userListener(event);
+      };
+      options = { ...options, eventTypes };
+    }
+
     const wantsWebSocket = options.transport !== 'polling';
     const canUseWebSocket = wantsWebSocket && !!this.webSocketFactory && !!this.eventStreamUrl;
 
@@ -2548,6 +2633,7 @@ export class SoroWillClient {
             type: 'subscribe',
             contractId: this.getContractId(),
             cursor: options.cursor,
+            ...(options.eventTypes ? { eventTypes: options.eventTypes } : {}),
           }),
         );
         resolve(subscription);
@@ -2649,7 +2735,7 @@ export class SoroWillClient {
             id: 1,
             method: 'getEvents',
             params: {
-              filters: [{ contractIds: [this.getContractId()] }],
+              filters: buildEventFilters(this.getContractId(), options.eventTypes),
               pagination: { cursor, limit: options.pageSize },
             },
           }),
@@ -2722,6 +2808,7 @@ export class SoroWillClient {
     }
     this.stopWatchingWalletNetwork?.();
     this.inFlightTracker.clear();
+    this.inFlightReads.clear();
     this.queue.rejectAll(new Error('SoroWillClient destroyed'));
   }
 
@@ -2824,8 +2911,41 @@ export class SoroWillClient {
     return await this.specPromise;
   }
 
-  /** Simulates a read-only contract call, requiring no connected wallet or signature. */
-  private async read<T>(
+  /**
+   * Simulates a read-only contract call, requiring no connected wallet or
+   * signature. Identical concurrent calls (same method, arguments and
+   * request options) are coalesced into a single RPC simulation (#619).
+   */
+  private read<T>(
+    method: string,
+    args: Record<string, unknown>,
+    options?: RequestOptions,
+  ): Promise<T> {
+    if (!this.deduplicateReads || options?.signal) {
+      return this.executeRead<T>(method, args, options);
+    }
+
+    const key = createReadCacheKey(method, {
+      args,
+      retries: options?.retries,
+      timeout: options?.timeout,
+      timeoutMs: options?.timeoutMs,
+    });
+    const existing = this.inFlightReads.get(key);
+    if (existing) {
+      return existing as Promise<T>;
+    }
+
+    const pending = this.executeRead<T>(method, args, options).finally(() => {
+      if (this.inFlightReads.get(key) === pending) {
+        this.inFlightReads.delete(key);
+      }
+    });
+    this.inFlightReads.set(key, pending);
+    return pending;
+  }
+
+  private async executeRead<T>(
     method: string,
     args: Record<string, unknown>,
     options?: RequestOptions,
@@ -2870,7 +2990,15 @@ export class SoroWillClient {
     }
   }
 
-  /** Builds, simulates, signs, and submits a state-changing contract call. */
+  /**
+   * Builds, simulates, signs, and submits a state-changing contract call.
+   * Use public write methods such as `createWill` or `triggerWill` to change
+   * ledger state. Read methods only simulate and return a value; they do not
+   * sign or submit. Each invocation performs simulation plus submission and
+   * finality polling, so it costs more RPC requests and time than a read.
+   * RPC requests use the client timeout (30 seconds by default), overridden
+   * for this call with `options.timeoutMs`.
+   */
   private async invoke(
     method: string,
     args: Record<string, unknown>,
@@ -2883,7 +3011,7 @@ export class SoroWillClient {
     await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
 
     const willId = args.will_id === undefined ? undefined : String(args.will_id);
-    const run = async (): Promise<{
+    const execute = async (options: RequestOptions | undefined): Promise<{
       txHash: string;
       createdAt: number;
       returnValue: ScVal | undefined;
@@ -3096,6 +3224,7 @@ export class SoroWillClient {
           'Expected a plain Transaction envelope after signing, but received FeeBumpTransaction',
         );
       }
+      assertSupportedSignatureAlgorithm(signedTx, { context: label });
 
       options?.signal?.throwIfAborted();
       // Failover only retries connection-level errors (see RpcEndpointPool). Re-sending the
@@ -3170,6 +3299,7 @@ export class SoroWillClient {
               'Expected a plain Transaction envelope after signing, but received FeeBumpTransaction',
             );
           }
+          assertSupportedSignatureAlgorithm(feeBumpSignedTx, { context: `${label} (fee bump)` });
 
           const feeBumpResponse = await this.rpc(
             () => this.rpcPool.withFailover((server) => server.sendTransaction(feeBumpSignedTx)),
@@ -3265,8 +3395,9 @@ export class SoroWillClient {
    *
    * @param method - The contract method name (e.g. `'create_will'`, `'check_in'`)
    * @param args - Arguments to the method as a record of name-value pairs
-   * @param sourcePublicKey - Optional source account public key; defaults to the connected wallet
+   * @param sourcePublicKey - Optional XLM-funded source account public key; defaults to the connected wallet
    * @returns An unsigned, unprepared transaction XDR
+   * @throws {InvalidPublicKeyError} If the source or wallet key is not a valid Stellar account public key
    * @throws {SimulationError} If the method name or arguments are invalid (during XDR encoding)
    * @throws {AccountNotFundedError} If the source account does not exist on the ledger
    * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout
@@ -3328,6 +3459,7 @@ export class SoroWillClient {
         'Expected a plain Transaction envelope after signing, but received FeeBumpTransaction',
       );
     }
+    assertSupportedSignatureAlgorithm(signedTx, { context: 'submitSignedTransaction' });
     const publicKey = await this.getWalletPublicKey();
     await this.rpc(
       () => this.rpcPool.withFailover((server) => server.getAccount(publicKey)),
@@ -3651,11 +3783,14 @@ export class SoroWillClient {
     args: Record<string, unknown>,
     sourcePublicKey?: string,
   ): Promise<Transaction> {
+    const publicKey = sourcePublicKey ?? (await this.getWalletPublicKey());
+    if (!StrKey.isValidEd25519PublicKey(publicKey)) {
+      throw new InvalidPublicKeyError('sourcePublicKey');
+    }
     const spec = await this.getSpec();
     const scArgs = spec.funcArgsToScVals(method, args);
     const operation = this.contract.call(method, ...scArgs);
 
-    const publicKey = sourcePublicKey ?? (await this.getWalletPublicKey());
     const account = await this.rpcPool.withFailover((server) => server.getAccount(publicKey));
     return this.buildInvocationEnvelope([operation], account);
   }
@@ -3688,7 +3823,11 @@ export class SoroWillClient {
   }
 
   private async getWalletPublicKey(): Promise<string> {
-    return this.wallet.getPublicKey();
+    const publicKey = await this.wallet.getPublicKey();
+    if (!StrKey.isValidEd25519PublicKey(publicKey)) {
+      throw new InvalidPublicKeyError('publicKey');
+    }
+    return publicKey;
   }
 
   /**

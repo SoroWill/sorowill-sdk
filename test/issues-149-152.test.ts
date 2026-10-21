@@ -31,7 +31,7 @@ const { mockState } = vi.hoisted(() => ({
       hash: 'TX_HASH_123',
     })),
     simulateTransaction: vi.fn(),
-    walletPublicKey: 'GTESTACCOUNT',
+    walletPublicKey: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
   },
 }));
 
@@ -175,7 +175,7 @@ import {
 function makeClient(overrides: { rpcServer?: unknown } = {}): SoroWillClient {
   return new SoroWillClient({
     network: 'testnet',
-    contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARRDD',
+    contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
     ...(overrides.rpcServer ? { rpcServer: overrides.rpcServer as never } : {}),
   });
 }
@@ -192,7 +192,7 @@ describe('#149 – createWill day-param validation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Default successful path
-    mockState.getAccount.mockResolvedValue({ accountId: 'GTESTACCOUNT', sequence: '1' });
+    mockState.getAccount.mockResolvedValue({ accountId: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', sequence: '1' });
     mockState.prepareTransaction.mockImplementation(async (tx: { toXDR: () => string }) => ({
       toXDR: tx.toXDR,
     }));
@@ -332,7 +332,7 @@ describe('#149 – createWill day-param validation', () => {
 describe('#150 – invoke() diagnostic fields on failure', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockState.getAccount.mockResolvedValue({ accountId: 'GTESTACCOUNT', sequence: '1' });
+    mockState.getAccount.mockResolvedValue({ accountId: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', sequence: '1' });
     mockState.prepareTransaction.mockImplementation(async (tx: { toXDR: () => string }) => ({
       toXDR: tx.toXDR,
     }));
@@ -557,7 +557,7 @@ describe('#152 – unfunded account surface as AccountNotFundedError', () => {
   });
 
   it('AccountNotFundedError is not thrown when getAccount() succeeds', async () => {
-    mockState.getAccount.mockResolvedValue({ accountId: 'GTESTACCOUNT', sequence: '1' });
+    mockState.getAccount.mockResolvedValue({ accountId: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', sequence: '1' });
 
     const client = makeClient();
     // Should resolve, not reject with AccountNotFundedError
@@ -593,6 +593,6 @@ describe('#152 – unfunded account surface as AccountNotFundedError', () => {
 
     expect(caught).toBeInstanceOf(AccountNotFundedError);
     // publicKey should be set to the wallet's address
-    expect((caught as AccountNotFundedError).publicKey).toBe('GTESTACCOUNT');
+    expect((caught as AccountNotFundedError).publicKey).toBe('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF');
   });
 });

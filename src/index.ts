@@ -53,10 +53,18 @@ export type {
   SubmitFeeBumpOptions,
 } from './feeBump';
 
-export { SimulationResultError } from './txValidation';
+export {
+  SimulationResultError,
+  UnsupportedSignatureAlgorithmError,
+  assertSupportedSignatureAlgorithm,
+  assertSignedTransactionXdrSignatures,
+  ED25519_SIGNATURE_LENGTH,
+} from './txValidation';
 export type {
   SimulationResponse,
   TransactionMatchOptions,
+  SignatureValidationOptions,
+  SignedTransactionLike,
 } from './txValidation';
 
 export type {
@@ -73,10 +81,11 @@ export type {
   PaginationOptions,
   RequestOptions,
   SoroWillEvent,
+  SorobanEventType,
   UpdateBeneficiariesParams,
   Will,
 } from './types';
-export { WillStatus, WillErrorCode } from './types';
+export { SOROBAN_EVENT_TYPES, WillStatus, WillErrorCode } from './types';
 
 export {
   FreighterWalletAdapter,
@@ -137,6 +146,7 @@ export type { CachePersistenceAdapter, PersistedCacheEntry, ReadCacheOptions } f
 export {
   addEventListener,
   unsubscribeFromWillEvents,
+  validateEventTypeFilter,
 } from './events';
 export type {
   WillEvent,
@@ -179,6 +189,7 @@ export {
   InvalidPreimageError,
   InvalidPublicKeyError,
   InvalidSecretKeyError,
+  InvalidSignedXdrEncodingError,
   InvalidSplitError,
   InvalidStellarAddressError,
   InvalidTokenError,
@@ -233,6 +244,9 @@ export {
   RequestPriority,
   getSharedRequestQueue,
   releaseSharedRequestQueue,
+  computeBackoffDelay,
+  isRateLimitError,
+  MAX_BACKOFF_MS,
 } from './requestQueue';
 export type { RequestQueueOptions } from './requestQueue';
 

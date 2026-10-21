@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { freighterApiMock, mockState } = vi.hoisted(() => ({
   freighterApiMock: {
-    getAddress: vi.fn(async () => ({ address: 'GTESTACCOUNT', error: undefined })),
+    getAddress: vi.fn(async () => ({ address: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', error: undefined })),
     requestAccess: vi.fn(),
     getNetworkDetails: vi.fn().mockResolvedValue({ network: 'TESTNET', networkPassphrase: 'TESTNET' }),
     isConnected: vi.fn(),
@@ -144,7 +144,7 @@ import { SoroWillClient } from '../src/SoroWillClient';
 import { calculateShares } from '../src/utils';
 
 function makeClient() {
-  return new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
+  return new SoroWillClient({ network: 'testnet', contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR' });
 }
 
 function beneficiariesFor(method: string): Array<{ address: string; basis_points: number }> {

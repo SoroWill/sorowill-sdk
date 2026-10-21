@@ -12,11 +12,24 @@ export interface CachePersistenceAdapter {
   clear(): Promise<void>;
 }
 
-/**
- * Default upper bound on the number of entries a {@link ReadCache} keeps in
- * memory. Long-running client instances would otherwise grow without limit.
- */
-export const DEFAULT_MAX_CACHE_ENTRIES = 1000;
+// Share the lock across caches using the same adapter. Serialize all mutations,
+// since adapters may store every key in one read-modify-write document.
+const persistenceLocks = new WeakMap<CachePersistenceAdapter, Promise<void>>();
+
+function withPersistenceLock(
+  adapter: CachePersistenceAdapter,
+  operation: () => Promise<void>,
+): Promise<void> {
+  const previous = persistenceLocks.get(adapter) ?? Promise.resolve();
+  const result = previous.then(operation);
+  // A failed mutation must release the lock so later writes can still proceed.
+  const tail = result.catch(() => {});
+  persistenceLocks.set(adapter, tail);
+  void tail.then(() => {
+    if (persistenceLocks.get(adapter) === tail) persistenceLocks.delete(adapter);
+  });
+  return result;
+}
 
 export interface ReadCacheOptions {
   ttlMs?: number;
@@ -50,6 +63,21 @@ interface CacheEntry {
   value: unknown;
   expiresAt: number | null;
   willIds: Set<string>;
+}
+
+/**
+ * Returns `true` once `now` has reached `expiresAt` (the boundary itself
+ * counts as expired). A non-finite numeric `expiresAt` — e.g. a corrupted
+ * persisted entry — is treated as expired rather than as fresh forever.
+ */
+function isExpired(expiresAt: unknown, now: number): boolean {
+  if (expiresAt === null) {
+    return false;
+  }
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) {
+    return true;
+  }
+  return expiresAt <= now;
 }
 
 function serializeCacheValue(value: unknown): string {
@@ -244,6 +272,10 @@ export class ReadCache {
    * `ready()` completes will return undefined for entries that are currently
    * being loaded from persistent storage.
    *
+   * The entry's expiration is checked on every retrieval: an entry whose
+   * `expiresAt` has been reached is never returned, and is invalidated both
+   * in memory and in persistent storage so it can't be served again (#620).
+   *
    * @param key - The cache key to look up
    * @returns The cached value if found and not expired, or undefined
    */
@@ -253,8 +285,8 @@ export class ReadCache {
       return undefined;
     }
 
-    if (entry.expiresAt !== null && entry.expiresAt <= this.now()) {
-      this.entries.delete(key);
+    if (isExpired(entry.expiresAt, this.now())) {
+      this.invalidateExpired(key);
       return undefined;
     }
 
@@ -305,6 +337,7 @@ export class ReadCache {
           this.touchedKeys.delete(key);
         }
       });
+    }
 
     this.evictIfNeeded();
   }
@@ -394,12 +427,13 @@ export class ReadCache {
     }
   }
 
-  private removeEvicted(key: string): void {
-    this.entries.delete(key);
+  /** Drops an expired entry from memory and, best-effort, from persistence. */
+  private invalidateExpired(key: string): void {
     this.touchedKeys.add(key);
+    this.entries.delete(key);
     void this.persistence?.delete(key).catch(() => {
       // Silently ignore persistence failures to prevent unhandled rejections
-      // The entry is evicted in-memory; only durability guarantee is lost
+      // The entry is already gone in-memory and hydration skips expired entries
     });
   }
 
@@ -433,14 +467,13 @@ export class ReadCache {
     const writtenDuringHydration = Array.from(this.entries.values());
 
     for (const persistedEntry of persistedEntries) {
-      if (persistedEntry.expiresAt !== null && persistedEntry.expiresAt <= now) {
-        await this.persistence.delete(persistedEntry.key);
+      // Check before expiry cleanup too: an old expired entry must not delete
+      // a fresh write made while hydration was in flight.
+      if (this.touchedKeys.has(persistedEntry.key)) {
         continue;
       }
-
-      // Never let an older persisted entry replace a value that was written
-      // (or deleted) after construction but before hydration completed.
-      if (this.touchedKeys.has(persistedEntry.key)) {
+      if (persistedEntry.expiresAt !== null && persistedEntry.expiresAt <= now) {
+        await this.persist((adapter) => adapter.delete(persistedEntry.key));
         continue;
       }
 
@@ -474,6 +507,11 @@ export class ReadCache {
     }
 
     this.evictIfNeeded();
+  }
+
+  private persist(operation: (adapter: CachePersistenceAdapter) => Promise<void>): Promise<void> {
+    const adapter = this.persistence;
+    return adapter ? withPersistenceLock(adapter, () => operation(adapter)) : Promise.resolve();
   }
 
   private toPersistedEntry(entry: CacheEntry): PersistedCacheEntry {

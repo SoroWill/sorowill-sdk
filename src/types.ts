@@ -527,8 +527,23 @@ export interface EventSubscription {
   closed?: boolean;
 }
 
+/**
+ * Event types a Soroban RPC node can emit, as used by the `type` field of a
+ * `getEvents` filter.
+ */
+export const SOROBAN_EVENT_TYPES = ['contract', 'system', 'diagnostic'] as const;
+
+export type SorobanEventType = (typeof SOROBAN_EVENT_TYPES)[number];
+
 export interface EventSubscriptionOptions {
   transport?: EventSubscriptionTransport;
+  /**
+   * Only deliver events of these types. Each entry must be one of
+   * {@link SOROBAN_EVENT_TYPES}; anything else is rejected with
+   * `InvalidEventTypeFilterError` rather than producing a subscription that
+   * silently matches nothing. Omit to receive events of every type.
+   */
+  eventTypes?: SorobanEventType[];
   retryAttempts?: number;
   retryDelayMs?: number;
   websocketConnectTimeoutMs?: number;

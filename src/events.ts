@@ -1,3 +1,6 @@
+import { InvalidEventTypeFilterError } from './errors';
+import { SOROBAN_EVENT_TYPES, type SorobanEventType } from './types';
+
 export interface WillEvent {
   type: string;
   willId: string;
@@ -74,6 +77,37 @@ export function addEventListener(
       listener(event);
     }
   });
+}
+
+/**
+ * Validates an `eventTypes` subscription filter against
+ * {@link SOROBAN_EVENT_TYPES}, returning the de-duplicated list of types, or
+ * `undefined` when no filter was given (match every type).
+ *
+ * @throws {InvalidEventTypeFilterError} if the filter is not an array, is
+ *   empty, or contains any value that is not a supported event type.
+ */
+export function validateEventTypeFilter(eventTypes: unknown): SorobanEventType[] | undefined {
+  if (eventTypes === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(eventTypes)) {
+    throw new InvalidEventTypeFilterError([eventTypes], SOROBAN_EVENT_TYPES);
+  }
+  if (eventTypes.length === 0) {
+    throw new InvalidEventTypeFilterError([], SOROBAN_EVENT_TYPES, {
+      cause: new Error('eventTypes must contain at least one event type; omit it to match every type.'),
+    });
+  }
+
+  const invalid = eventTypes.filter(
+    (t) => typeof t !== 'string' || !(SOROBAN_EVENT_TYPES as readonly string[]).includes(t),
+  );
+  if (invalid.length > 0) {
+    throw new InvalidEventTypeFilterError(invalid, SOROBAN_EVENT_TYPES);
+  }
+
+  return [...new Set(eventTypes as SorobanEventType[])];
 }
 
 export function unsubscribeFromWillEvents(subscription: WillEventSubscription): void {

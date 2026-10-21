@@ -372,6 +372,30 @@ export class InvalidTransactionXdrError extends SoroWillError {
 }
 
 /**
+ * Raised when a wallet signer returns a signed transaction that is not valid
+ * base64. Stellar transaction envelopes are always standard (RFC 4648),
+ * padded base64-encoded XDR, so anything else would only fail later — and
+ * far more cryptically — when the envelope is decoded or submitted to the
+ * contract.
+ *
+ * The offending value is intentionally not embedded in the message; only its
+ * length is kept so the error is safe to forward to error-tracking pipelines.
+ */
+export class InvalidSignedXdrEncodingError extends SoroWillError {
+  /** Length of the rejected XDR string. */
+  readonly length: number;
+
+  constructor(length: number, options?: ErrorOptions) {
+    super(
+      'Wallet signer returned a signed transaction XDR that is not valid base64. ' +
+        'Expected a standard, padded base64-encoded TransactionEnvelope.',
+      options,
+    );
+    this.length = length;
+  }
+}
+
+/**
  * Raised when the wallet's `signTransaction` call does not resolve within the
  * configured timeout. This can happen when the Freighter popup is dismissed in
  * a way that leaves the underlying promise pending, or when the extension hangs.
@@ -849,11 +873,16 @@ export class TransactionSubmissionError extends SoroWillError {
  * Raised when the account returned by `getAccount()` is not found or has
  * never been funded on the current network. A common situation for brand-new
  * testnet addresses or mainnet addresses that have not yet received the
- * minimum XLM reserve.
+ * minimum XLM reserve. Source accounts need XLM for the reserve and transaction
+ * fees before submitting transactions. Use
+ * {@link https://friendbot.stellar.org | Friendbot} for free testnet XLM;
+ * mainnet accounts must receive real XLM.
  *
  * The `publicKey` is stored as a structured property rather than being
  * embedded in the message so callers can decide how to handle it (e.g.
  * redacting or hashing it before forwarding to an error-tracking service).
+ *
+ * @see https://developers.stellar.org/docs/learn/fundamentals/lumens
  */
 export class AccountNotFundedError extends SoroWillError {
   /** The Stellar public key whose account could not be loaded. */
@@ -862,7 +891,9 @@ export class AccountNotFundedError extends SoroWillError {
   constructor(publicKey: string, options?: ErrorOptions) {
     super(
       `The Stellar account for the connected wallet has not been funded on this network. ` +
-        `Fund the account with the minimum XLM reserve before submitting transactions.`,
+        `Fund the account with XLM for the minimum reserve and transaction fees before submitting transactions. ` +
+        `For free testnet XLM, visit https://friendbot.stellar.org (testnet only). ` +
+        `On mainnet, transfer real XLM to the account. See https://developers.stellar.org/docs/learn/fundamentals/lumens.`,
       options,
     );
     this.publicKey = publicKey;
@@ -912,6 +943,28 @@ export class InvalidCursorError extends SoroWillError {
     super(reason ? `Invalid pagination cursor: ${reason}` : 'Invalid pagination cursor', options);
     this.cursor = cursor;
     this.reason = reason;
+  }
+}
+
+/**
+ * Raised when `subscribeToEvents` is given an `eventTypes` filter containing
+ * values outside the supported Soroban event type enum. Without this check an
+ * invalid type would produce a subscription that silently matches nothing.
+ */
+export class InvalidEventTypeFilterError extends SoroWillError {
+  /** The filter entries that are not supported event types. */
+  readonly invalidTypes: unknown[];
+  /** The event types that are accepted in a filter. */
+  readonly supportedTypes: readonly string[];
+
+  constructor(invalidTypes: unknown[], supportedTypes: readonly string[], options?: ErrorOptions) {
+    super(
+      `Invalid event type filter: ${invalidTypes.map((t) => JSON.stringify(t) ?? String(t)).join(', ')}. ` +
+        `Supported event types are: ${supportedTypes.join(', ')}.`,
+      options,
+    );
+    this.invalidTypes = invalidTypes;
+    this.supportedTypes = supportedTypes;
   }
 }
 

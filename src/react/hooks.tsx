@@ -4,6 +4,16 @@ import type ReactNamespace from 'react';
 import { SoroWillClient } from '../SoroWillClient';
 import type { SoroWillClientOptions } from '../SoroWillClient';
 import type { Will } from '../types';
+import type { WalletAdapter } from '../wallet';
+
+/** Wallet connection state returned by {@link useWallet}. */
+export interface UseWalletResult {
+  connected: boolean;
+  publicKey: string | null;
+  network: { network: string; networkPassphrase: string } | null;
+  loading: boolean;
+  error: Error | null;
+}
 
 /**
  * `react` is an optional peer dependency of this subpath. It is imported
@@ -47,6 +57,77 @@ const CLIENT_OPTION_KEYS = [
   'debug',
 ] as const satisfies readonly (keyof SoroWillClientOptions)[];
 
+/**
+ * Reads wallet connection details when the adapter changes. Initialization
+ * checks the network on both sides of the public-key read; if it changed in
+ * between, the hook clears the key and network so consumers cannot act on a
+ * mixed session. Adapters without `getNetwork` still report connection/key.
+ *
+ * @example
+ * ```tsx
+ * const { connected, publicKey, network, loading } = useWallet(walletAdapter);
+ * ```
+ */
+export function useWallet(wallet: WalletAdapter): UseWalletResult {
+  const [state, setState] = getReact().useState<UseWalletResult>({
+    connected: false,
+    publicKey: null,
+    network: null,
+    loading: true,
+    error: null,
+  });
+
+  getReact().useEffect(() => {
+    let cancelled = false;
+    setState({ connected: false, publicKey: null, network: null, loading: true, error: null });
+
+    void (async () => {
+      try {
+        const connected = await wallet.isConnected();
+        if (!connected) {
+          if (!cancelled) setState({ connected: false, publicKey: null, network: null, loading: false, error: null });
+          return;
+        }
+        const initialNetwork = wallet.getNetwork ? await wallet.getNetwork() : null;
+        const publicKey = await wallet.getPublicKey();
+        const currentNetwork = wallet.getNetwork ? await wallet.getNetwork() : null;
+        if (cancelled) return;
+
+        const changed = initialNetwork && currentNetwork &&
+          (initialNetwork.network !== currentNetwork.network || initialNetwork.networkPassphrase !== currentNetwork.networkPassphrase);
+        setState(changed
+          ? { connected: true, publicKey: null, network: null, loading: false, error: null }
+          : { connected: true, publicKey, network: currentNetwork ?? initialNetwork, loading: false, error: null });
+      } catch (err) {
+        if (!cancelled) setState({
+          connected: false,
+          publicKey: null,
+          network: null,
+          loading: false,
+          error: err instanceof Error ? err : new Error(String(err)),
+        });
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [wallet]);
+
+  return state;
+}
+
+/**
+ * Creates and memoizes a client for React components.
+ *
+ * The client is recreated when any client option in `CLIENT_OPTION_KEYS`
+ * changes (object and function options are compared by reference). Components
+ * rerender when their own inputs or the surrounding parent state changes;
+ * this hook itself does not subscribe to client updates.
+ *
+ * @example
+ * ```tsx
+ * const client = useSoroWillClient({ network: 'testnet', contractId: 'C...' });
+ * ```
+ */
 export function useSoroWillClient(options: SoroWillClientOptions): SoroWillClient {
   const deps = CLIENT_OPTION_KEYS.map((key) => options[key]);
 
@@ -83,7 +164,10 @@ export function useSoroWillClient(options: SoroWillClientOptions): SoroWillClien
 }
 
 /**
- * Fetch a single will by its on-chain ID.
+ * Fetch a single will by its on-chain ID. The query runs when the memoized
+ * client, `willId`, or internal refetch counter changes. Passing `null` clears
+ * the result; changing an input aborts the previous request. Calling `refetch`
+ * increments the counter and starts another request.
  *
  * @example
  * ```tsx
@@ -145,7 +229,10 @@ export function useWill(
 }
 
 /**
- * Fetch all wills owned by a Stellar address.
+ * Fetch all wills owned by a Stellar address. The query runs when the memoized
+ * client, `owner`, or internal refetch counter changes. Passing `null` clears
+ * the result; changing an input aborts the previous request. Calling `refetch`
+ * increments the counter and starts another request.
  *
  * @example
  * ```tsx
@@ -207,7 +294,11 @@ export function useWillsByOwner(
 }
 
 /**
- * Fetch all wills where a given address is named as a beneficiary.
+ * Fetch all wills where a given address is named as a beneficiary. The query
+ * runs when the memoized client, `beneficiary`, or internal refetch counter
+ * changes. Passing `null` clears the result; changing an input aborts the
+ * previous request. Calling `refetch` increments the counter and starts
+ * another request.
  *
  * @example
  * ```tsx
