@@ -31,6 +31,21 @@ interface CacheEntry {
   willIds: Set<string>;
 }
 
+/**
+ * Returns `true` once `now` has reached `expiresAt` (the boundary itself
+ * counts as expired). A non-finite numeric `expiresAt` — e.g. a corrupted
+ * persisted entry — is treated as expired rather than as fresh forever.
+ */
+function isExpired(expiresAt: unknown, now: number): boolean {
+  if (expiresAt === null) {
+    return false;
+  }
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) {
+    return true;
+  }
+  return expiresAt <= now;
+}
+
 function serializeCacheValue(value: unknown): string {
   return JSON.stringify(value, function (key, currentValue) {
     // `Date` defines `toJSON`, so by the time a replacer sees it, it has
@@ -169,6 +184,10 @@ export class ReadCache {
    * `ready()` completes will return undefined for entries that are currently
    * being loaded from persistent storage.
    *
+   * The entry's expiration is checked on every retrieval: an entry whose
+   * `expiresAt` has been reached is never returned, and is invalidated both
+   * in memory and in persistent storage so it can't be served again (#620).
+   *
    * @param key - The cache key to look up
    * @returns The cached value if found and not expired, or undefined
    */
@@ -178,8 +197,8 @@ export class ReadCache {
       return undefined;
     }
 
-    if (entry.expiresAt !== null && entry.expiresAt <= this.now()) {
-      this.entries.delete(key);
+    if (isExpired(entry.expiresAt, this.now())) {
+      this.invalidateExpired(key);
       return undefined;
     }
 
@@ -274,6 +293,16 @@ export class ReadCache {
     }
   }
 
+  /** Drops an expired entry from memory and, best-effort, from persistence. */
+  private invalidateExpired(key: string): void {
+    this.touchedKeys.add(key);
+    this.entries.delete(key);
+    void this.persistence?.delete(key).catch(() => {
+      // Silently ignore persistence failures to prevent unhandled rejections
+      // The entry is already gone in-memory and hydration skips expired entries
+    });
+  }
+
   private async delete(key: string): Promise<void> {
     this.touchedKeys.add(key);
     this.entries.delete(key);
@@ -296,7 +325,7 @@ export class ReadCache {
     const now = this.now();
 
     for (const persistedEntry of persistedEntries) {
-      if (persistedEntry.expiresAt !== null && persistedEntry.expiresAt <= now) {
+      if (isExpired(persistedEntry.expiresAt, now)) {
         await this.persistence.delete(persistedEntry.key);
         continue;
       }
