@@ -19,6 +19,13 @@ export type {
   SoroWillReadCacheOptions,
 } from './SoroWillClient';
 export { DEFAULT_CONTRACT_IDS } from './SoroWillClient';
+export {
+  SDK_REQUIRED_CONTRACT_METHODS,
+  computeContractSpecVersion,
+  describeContractVersionMismatch,
+  readContractMeta,
+} from './contractVersion';
+export type { ContractSpecVersion } from './contractVersion';
 
 export { HookManager } from './hooks';
 export type {
