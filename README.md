@@ -218,6 +218,7 @@ console.log(will.status, will.balance, will.beneficiaries);
 | `previewFee` | Simulates a state-changing method and returns its estimated Soroban resource fee | `method`, `params` | `Promise<{ resourceFee }>` |
 | `getNetworkFeeStats` | Passes through network-wide classic-fee/surge-pricing stats (no wallet required) | — | `Promise<rpc.Api.GetFeeStatsResponse>` |
 | `getWill` | Reads the full state of a will (no wallet required) | `willId` | `Promise<Will>` |
+| `getWills` | Reads multiple wills in a single batch RPC call (`get_wills`), with optional client-side pagination (max 50 IDs) | `willIds`, `PaginationOptions?` | `Promise<Will[] \| { wills, nextCursor }>` |
 | `getWillsByOwner` | Lists every will owned by an address, with optional client-side pagination | `owner`, `PaginationOptions?` | `Promise<Will[] \| { wills, nextCursor }>` |
 | `getWillsByBeneficiary` | Lists every will an address is named in, with optional client-side pagination | `beneficiary`, `PaginationOptions?` | `Promise<Will[] \| { wills, nextCursor }>` |
 | `guardianTrigger` | Casts a guardian vote; 2 of 3 forces an early release | `willId` | `Promise<{ txHash }>` |
@@ -266,6 +267,57 @@ const result = await client.batch([
 Soroban transactions may contain only a single `InvokeHostFunction` operation, so multiple contract
 calls cannot be combined into one atomic transaction. `batch` therefore accepts exactly one
 operation and throws `UnsupportedBatchSizeError` for larger batches; submit each call separately.
+
+### Network validation (#550)
+
+Every `BatchOperation` may declare the Stellar network it targets:
+
+```ts
+const result = await client.batch([
+  {
+    method: 'check_in',
+    args: { will_id: 1n, owner: wallet.publicKey },
+    network: 'testnet', // optional — 'testnet' | 'mainnet'
+  },
+]);
+```
+
+The SDK validates the network of every operation **before** any transaction is built, signed, or
+submitted:
+
+- Operations that omit `network` inherit the client's configured network.
+- All operations that declare a `network` must declare the *same* network.
+- That network must match the network the client is configured for.
+
+A violation throws `BatchNetworkMismatchError` (with `clientNetwork`, `operationNetwork`,
+`operationIndex`, and — for a conflicting batch — `conflictingOperationIndex`/`conflictingNetwork`),
+so a batch can never silently mix testnet and mainnet operations.
+
+## Event subscriptions
+
+`subscribeToEvents(listener, options)` returns an `EventSubscription` handle:
+
+```ts
+const subscription = await client.subscribeToEvents(
+  (event) => console.log(event.type, event.id),
+  { transport: 'auto', onError: (err) => console.error(err) },
+);
+
+subscription.unsubscribe(); // or subscription.close()
+```
+
+**Handler semantics.** A subscription has **exactly one** handler — the `listener` passed to
+`subscribeToEvents()`. The returned handle exposes no way to attach a second one.
+
+- **Exclusivity**: each event is delivered to that one listener only; events are never fanned out to
+  multiple handlers of the same subscription. To serve several consumers, call `subscribeToEvents()`
+  once per consumer — each subscription then receives its own copy of the stream.
+- **Ordering**: events are delivered in the order the network produced them (ascending ledger
+  sequence, and within a ledger, ascending event order). Delivery is strictly sequential: the next
+  event is not dispatched until the listener for the previous one has returned.
+- **Error isolation**: if the listener throws, the failure is contained to that single event. The
+  subscription stays open, the remaining events are still delivered, and the error is reported through
+  `EventSubscriptionOptions.onError`. This holds for both the WebSocket and the polling transport.
 
 ## Debugging and structured logging
 
@@ -601,6 +653,7 @@ Notes:
 |---|---|---|---|
 | `formatUSDC` | function | `utils` | Formats stroops as a human-readable decimal string, e.g. `"1,234.50"` |
 | `toStroops` | function | `utils` | Parses a decimal USDC string into base units as a `bigint` |
+| `deepFreezeObject` | function | `utils` | Recursively `Object.freeze`s a value and its nested objects so returned records cannot be mutated |
 | `getTimeUntilCheckin` | function | `utils` | Seconds until the next check-in deadline (negative if overdue) |
 | `isCheckinDue` | function | `utils` | Whether the check-in deadline has already passed |
 | `calculateShares` | function | `utils` | Splits a balance across beneficiaries, mirroring on-chain rounding |
@@ -648,6 +701,7 @@ Notes:
 | `TooManyBeneficiariesError` | class | `errors` | Exceeds the maximum number of beneficiaries |
 | `RequestTimeoutError` | class | `errors` | An RPC request exceeded its configured timeout |
 | `WalletNetworkMismatchError` | class | `errors` | The wallet's active network does not match the client's configured network |
+| `BatchNetworkMismatchError` | class | `errors` | The operations in a `batch` target different networks, or a network other than the client's |
 | `FreighterInstallCheckError` | class | `errors` | An unexpected error occurred while checking whether Freighter is installed |
 | `SoroWillRestoreRequiredError` | class | `errors` | The contract entry needs a ledger restore before it can be invoked |
 | `InvalidPaginationOptionsError` | class | `errors` | The supplied pagination options are invalid |
@@ -943,6 +997,10 @@ Read methods are cached in memory by default. You can disable caching with `read
 - `IndexedDbCachePersistenceAdapter`
 
 If you already have a contract event stream, pass it as `eventSource` and cached will reads will be invalidated automatically when matching will events arrive.
+
+### `getWill` caching and expected call frequency
+
+`client.getWill(willId)` is cached per will id (default TTL: 60 seconds), so it is safe to call repeatedly — from UI renders, polling intervals, or event handlers. Each distinct `willId` performs at most one RPC read per TTL window; later calls within the TTL are served from the cache. Configure the TTL with `readCache: { ttlMs: number }`, force a fresh read with `readCache: false`, or invalidate a specific will's cache entries with `client`'s underlying `readCache.invalidateByWillId(willId)` / an `eventSource`.
 
 ## Architecture
 

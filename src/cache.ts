@@ -22,6 +22,19 @@ export interface ReadCacheOptions {
    * from persistence). When omitted, the cache is unbounded.
    */
   maxEntries?: number;
+  /**
+   * Callback invoked when a persistence adapter operation (write, delete, or
+   * clear) fails. Receives the affected key and the error. The cache continues
+   * to function in-memory; only durability is affected.
+   */
+  onPersistenceFailure?: (key: string, error: unknown) => void;
+  /**
+   * When `true`, a persistence write failure in `set()` rolls back the
+   * in-memory cache entry (removes it) so memory and persistence stay in sync.
+   * Defaults to `false` (the in-memory entry is kept even if persistence
+   * fails). When `false`, only the `onPersistenceFailure` callback is invoked.
+   */
+  rollbackOnPersistenceFailure?: boolean;
 }
 
 interface CacheEntry {
@@ -47,7 +60,7 @@ function serializeCacheValue(value: unknown): string {
   });
 }
 
-function deserializeCacheValue<T>(value: string): T {
+export function deserializeCacheValue<T>(value: string): T {
   return JSON.parse(value, (_key, currentValue) => {
     if (
       currentValue &&
@@ -56,12 +69,16 @@ function deserializeCacheValue<T>(value: string): T {
       'value' in currentValue &&
       typeof currentValue.value === 'string'
     ) {
-      if (currentValue.__type === 'bigint') {
+      const type = currentValue.__type as string;
+      if (type === 'bigint') {
         return BigInt(currentValue.value);
       }
-      if (currentValue.__type === 'date') {
+      if (type === 'date') {
         return new Date(currentValue.value);
       }
+      console.warn(
+        `[SoroWill] Cache: unknown __type "${type}" encountered during deserialization; returning raw value.`,
+      );
     }
     return currentValue;
   }) as T;
@@ -149,7 +166,16 @@ export class ReadCache {
   private readonly now: () => number;
   private readonly persistence: CachePersistenceAdapter | undefined;
   private readonly maxEntries: number | undefined;
+  private readonly onPersistenceFailure: ((key: string, error: unknown) => void) | undefined;
+  private readonly rollbackOnPersistenceFailure: boolean;
   private readonly readyPromise: Promise<void>;
+  /**
+   * Will-ID to cache-key index. Maps each will ID to the set of cache keys
+   * whose entries reference that will ID, so reads and invalidations address
+   * the same entries and eviction can clean up associated references
+   * instead of leaking them.
+   */
+  private readonly willIdToKeys = new Map<string, Set<string>>();
   /**
    * Keys written or deleted after construction but before hydration completes.
    * Hydration must not overwrite these with older persisted values.
@@ -163,16 +189,23 @@ export class ReadCache {
 
   constructor(options: ReadCacheOptions = {}) {
     const ttlMs = options.ttlMs ?? 60_000;
-    if (typeof ttlMs !== 'number' || !Number.isFinite(ttlMs) || ttlMs < 0) {
+    if (typeof ttlMs !== 'number' || !Number.isFinite(ttlMs)) {
       throw new Error(
-        `ReadCache: ttlMs must be a finite non-negative number, received ${String(ttlMs)}`,
+        `ReadCache: ttlMs must be a finite number, received ${String(ttlMs)}`,
       );
     }
+    if (ttlMs < 0) {
+      console.warn(
+        `[SoroWill] Cache: negative ttlMs ${ttlMs}ms is not allowed; treating as 0 (immediate expiration).`,
+      );
+    }
+    this.ttlMs = Math.max(0, ttlMs);
 
-    this.ttlMs = ttlMs;
     this.now = options.now ?? Date.now;
     this.persistence = options.persistence;
     this.maxEntries = options.maxEntries;
+    this.onPersistenceFailure = options.onPersistenceFailure;
+    this.rollbackOnPersistenceFailure = options.rollbackOnPersistenceFailure ?? false;
     this.readyPromise = this.hydrate();
   }
 
@@ -212,7 +245,9 @@ export class ReadCache {
   set(key: string, value: unknown, willIds: Iterable<string> = []): void {
     if (this.ttlMs === 0) {
       this.touchedKeys.add(key);
-      void this.persistence?.delete(key);
+      void this.persistence
+        ?.delete(key)
+        .catch((err) => this.onPersistenceFailure?.(key, err));
       return;
     }
 
@@ -224,14 +259,28 @@ export class ReadCache {
     };
 
     this.touchedKeys.add(key);
+    // Index the key under each will ID so invalidation by will ID can find it.
+    for (const willId of entry.willIds) {
+      let keys = this.willIdToKeys.get(willId);
+      if (!keys) {
+        keys = new Set();
+        this.willIdToKeys.set(willId, keys);
+      }
+      keys.add(key);
+    }
     // Delete before set so an updated key moves to the most-recent position.
     this.entries.delete(key);
     this.entries.set(key, entry);
     void this.persistence
       ?.write(this.toPersistedEntry(entry))
-      .catch(() => {
-        // Silently ignore persistence failures to prevent unhandled rejections
-        // The cache remains functional in-memory; only durability is lost
+      .catch((err) => {
+        // Report persistence failure via callback if provided
+        this.onPersistenceFailure?.(key, err);
+        // Optionally roll back the in-memory entry so memory and persistence stay in sync
+        if (this.rollbackOnPersistenceFailure) {
+          this.entries.delete(key);
+          this.touchedKeys.delete(key);
+        }
       });
 
     this.evictIfNeeded();
@@ -255,10 +304,9 @@ export class ReadCache {
     await this.readyPromise;
 
     const keysToDelete: string[] = [];
-    for (const [key, entry] of this.entries) {
-      if (entry.willIds.has(willId)) {
-        keysToDelete.push(key);
-      }
+    const keys = this.willIdToKeys.get(willId);
+    if (keys) {
+      keys.forEach((key) => keysToDelete.push(key));
     }
 
     await Promise.all(keysToDelete.map((key) => this.delete(key)));
@@ -267,10 +315,9 @@ export class ReadCache {
   clear(): void {
     this.clearedBeforeHydration = true;
     this.entries.clear();
-    void this.persistence?.clear().catch(() => {
-      // Silently ignore persistence failures to prevent unhandled rejections
-      // The cache is cleared in-memory; only durability guarantee is lost
-    });
+    void this.persistence
+      ?.clear()
+      .catch((err) => this.onPersistenceFailure?.('__clear__', err));
   }
 
   private evictIfNeeded(): void {
@@ -286,17 +333,20 @@ export class ReadCache {
 
       this.entries.delete(oldestKey);
       this.touchedKeys.add(oldestKey);
-      void this.persistence?.delete(oldestKey).catch(() => {
-        // Silently ignore persistence failures to prevent unhandled rejections
-        // The entry is evicted in-memory; only durability guarantee is lost
-      });
+      void this.persistence
+        ?.delete(oldestKey)
+        .catch((err) => this.onPersistenceFailure?.(oldestKey, err));
     }
   }
 
   private async delete(key: string): Promise<void> {
     this.touchedKeys.add(key);
     this.entries.delete(key);
-    await this.persistence?.delete(key);
+    try {
+      await this.persistence?.delete(key);
+    } catch (err) {
+      this.onPersistenceFailure?.(key, err);
+    }
   }
 
   private async hydrate(): Promise<void> {
@@ -326,12 +376,24 @@ export class ReadCache {
         continue;
       }
 
-      this.entries.set(persistedEntry.key, {
+      const entry: CacheEntry = {
         key: persistedEntry.key,
         value: deserializeCacheValue(persistedEntry.value),
         expiresAt: persistedEntry.expiresAt,
         willIds: new Set(persistedEntry.willIds),
-      });
+      };
+
+      // Rebuild the will-ID index from persisted entries.
+      for (const willId of entry.willIds) {
+        let keys = this.willIdToKeys.get(willId);
+        if (!keys) {
+          keys = new Set();
+          this.willIdToKeys.set(willId, keys);
+        }
+        keys.add(persistedEntry.key);
+      }
+
+      this.entries.set(persistedEntry.key, entry);
     }
 
     this.evictIfNeeded();
