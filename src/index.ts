@@ -41,6 +41,10 @@ export type {
 
 export {
   buildFeeBumpXdr,
+  estimateFeeBumpFee,
+  isFeeEstimateStale,
+  refreshFeeEstimateIfStale,
+  DEFAULT_FEE_STALENESS_THRESHOLD_MS,
   signFeeBumpXdr,
   submitFeeBump,
   submitFeeBumpTransaction,
@@ -48,7 +52,9 @@ export {
   StaleTransactionSequenceError,
 } from './feeBump';
 export type {
+  EstimateFeeBumpFeeOptions,
   FeeBumpOptions,
+  FeeEstimate,
   SubmitFeeBumpOptions,
 } from './feeBump';
 

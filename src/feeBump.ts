@@ -24,6 +24,38 @@ export const BASE_FEE = '100';
 export const DEFAULT_MAX_FEE_MULTIPLIER = 10000;
 
 /**
+ * Default age, in milliseconds, after which a {@link FeeEstimate} is
+ * considered stale and is re-estimated before submission.
+ */
+export const DEFAULT_FEE_STALENESS_THRESHOLD_MS = 30_000;
+
+/**
+ * A fee-bump fee estimate and the time it was produced. Pass it to
+ * {@link submitFeeBump} so the fee can be re-estimated if the network's
+ * inclusion-fee baseline may have moved before submission.
+ */
+export interface FeeEstimate {
+  /**
+   * The estimated per-operation base fee for the fee-bump, in stroops — the
+   * value passed to `TransactionBuilder.buildFeeBumpTransaction`, which
+   * multiplies it by the operation count and adds the Soroban resource fee.
+   */
+  fee: string;
+  /** Epoch milliseconds at which the estimate was produced. */
+  estimatedAt: number;
+}
+
+/** Options for {@link estimateFeeBumpFee}. */
+export interface EstimateFeeBumpFeeOptions {
+  /** The network to use. */
+  network: SoroWillNetwork;
+  /** The base64-encoded XDR of the prepared inner transaction. */
+  innerTransactionXdr: string;
+  /** Optional RPC server to use instead of the network's configured endpoints (e.g. for tests). */
+  rpcServer?: SoroWillRpcServer;
+}
+
+/**
  * Error thrown when a fee-bump fee exceeds the configured reasonable maximum.
  */
 export class ExorbitantFeeError extends Error {
@@ -138,6 +170,98 @@ export function estimateBatchFee(invocationCount: number, baseFee: number = 100)
   const count = Number.isFinite(invocationCount) && invocationCount > 0 ? Math.floor(invocationCount) : 1;
   const perOp = Number.isFinite(baseFee) && baseFee > 0 ? Math.floor(baseFee) : 100;
   return String(count * perOp);
+}
+
+/** Returns the inner transaction's per-operation inclusion fee (its fee minus any Soroban resource fee). */
+function getInnerInclusionFeePerOp(innerTx: Transaction): bigint {
+  let resourceFee = 0n;
+  try {
+    const ext = innerTx.toEnvelope().v1().tx().ext();
+    if (ext.switch() === 1) resourceFee = BigInt(ext.sorobanData().resourceFee().toString());
+  } catch {
+    resourceFee = 0n;
+  }
+  const ops = BigInt(Math.max(innerTx.operations.length, 1));
+  const perOp = (BigInt(innerTx.fee) - resourceFee + ops - 1n) / ops;
+  return perOp > 0n ? perOp : 0n;
+}
+
+/**
+ * Estimate the fee for fee-bumping `innerTransactionXdr` using the network's
+ * current inclusion-fee baseline (the p90 Soroban inclusion fee from
+ * `getFeeStats`).
+ *
+ * The estimate is a per-operation base fee: the larger of the network p90,
+ * the network minimum base fee, and the inner transaction's own
+ * per-operation inclusion fee (the fee-bump must not bid less than it).
+ *
+ * Inclusion fees move from ledger to ledger, so an estimate is only valid for
+ * a short time. Pass the returned {@link FeeEstimate} to {@link submitFeeBump}
+ * to have it re-estimated automatically if it is older than the configured
+ * staleness threshold at submission time.
+ *
+ * @throws {SoroWillError} If the RPC server does not support `getFeeStats`.
+ */
+export async function estimateFeeBumpFee(options: EstimateFeeBumpFeeOptions): Promise<FeeEstimate> {
+  const config = NETWORK_CONFIG[options.network];
+  const pool = new RpcEndpointPool(config.rpcUrls, options.rpcServer);
+
+  const innerTx = TransactionBuilder.fromXDR(
+    options.innerTransactionXdr,
+    config.networkPassphrase,
+  ) as Transaction;
+
+  const stats = await pool.withFailover((server) => {
+    if (typeof server.getFeeStats !== 'function') {
+      throw new SoroWillError('The configured RPC server does not support getFeeStats');
+    }
+    return server.getFeeStats();
+  });
+
+  let fee = BigInt(stats.sorobanInclusionFee.p90);
+  const baseFee = BigInt(BASE_FEE);
+  if (fee < baseFee) fee = baseFee;
+  const innerPerOp = getInnerInclusionFeePerOp(innerTx);
+  if (fee < innerPerOp) fee = innerPerOp;
+
+  return { fee: fee.toString(), estimatedAt: Date.now() };
+}
+
+/**
+ * Returns true when `estimate` is older than `thresholdMs` and should be
+ * re-estimated before submission.
+ */
+export function isFeeEstimateStale(
+  estimate: FeeEstimate,
+  thresholdMs: number = DEFAULT_FEE_STALENESS_THRESHOLD_MS,
+  now: number = Date.now(),
+): boolean {
+  return now - estimate.estimatedAt > thresholdMs;
+}
+
+/**
+ * Re-estimate `estimate` if it is stale. The returned estimate's fee is never
+ * lower than the original — a fee that has dropped since estimation is still
+ * accepted by the network, while one that has risen would cause the
+ * submission to be rejected.
+ */
+export async function refreshFeeEstimateIfStale(
+  estimate: FeeEstimate,
+  options: EstimateFeeBumpFeeOptions & { feeStalenessThresholdMs?: number },
+): Promise<FeeEstimate> {
+  if (!isFeeEstimateStale(estimate, options.feeStalenessThresholdMs)) {
+    return estimate;
+  }
+
+  const fresh = await estimateFeeBumpFee({
+    network: options.network,
+    innerTransactionXdr: options.innerTransactionXdr,
+    ...(options.rpcServer && { rpcServer: options.rpcServer }),
+  });
+  if (BigInt(fresh.fee) < BigInt(estimate.fee)) {
+    return { ...fresh, fee: estimate.fee };
+  }
+  return fresh;
 }
 
 /**
@@ -317,14 +441,23 @@ export async function submitFeeBumpTransaction(
  * @param options.network - Stellar network to use.
  * @param options.pollAttempts - Maximum number of attempts to poll for transaction confirmation. Defaults to 30.
  * @param options.maxFeeMultiplier - Maximum multiple of the base fee allowed. Defaults to 10x. Set to 0 to disable.
+ * @param options.feeEstimate - A fee estimate from {@link estimateFeeBumpFee}. When it is older than
+ *   `feeStalenessThresholdMs` it is re-estimated against the current network inclusion-fee baseline
+ *   before submission. Takes precedence over `fee`.
+ * @param options.feeStalenessThresholdMs - Age in milliseconds after which `feeEstimate` is re-estimated.
+ *   Defaults to {@link DEFAULT_FEE_STALENESS_THRESHOLD_MS}.
+ * @param options.rpcServer - Optional RPC server to use instead of the network's configured endpoints.
  */
 export async function submitFeeBump(options: {
   innerTransactionXdr: string;
   feeSourceSecretKey: string;
   network: SoroWillNetwork;
   fee?: string;
+  feeEstimate?: FeeEstimate;
+  feeStalenessThresholdMs?: number;
   pollAttempts?: number;
   maxFeeMultiplier?: number;
+  rpcServer?: SoroWillRpcServer;
 }): Promise<{ txHash: string; createdAt: number }> {
   const config = NETWORK_CONFIG[options.network];
   let keypair: Keypair;
@@ -347,6 +480,17 @@ export async function submitFeeBump(options: {
   }
 
   let fee = options.fee;
+  if (options.feeEstimate) {
+    const estimate = await refreshFeeEstimateIfStale(options.feeEstimate, {
+      network: options.network,
+      innerTransactionXdr: options.innerTransactionXdr,
+      ...(options.feeStalenessThresholdMs !== undefined && {
+        feeStalenessThresholdMs: options.feeStalenessThresholdMs,
+      }),
+      ...(options.rpcServer && { rpcServer: options.rpcServer }),
+    });
+    fee = estimate.fee;
+  }
   if (!fee) {
     fee = innerTx.fee;
   }
@@ -368,6 +512,9 @@ export async function submitFeeBump(options: {
   if (options.pollAttempts !== undefined) {
     submitOptions.pollAttempts = options.pollAttempts;
   }
+  if (options.rpcServer) {
+    submitOptions.rpcServer = options.rpcServer;
+  }
 
   return submitFeeBumpTransaction(submitOptions);
 }
@@ -384,6 +531,13 @@ export interface AutoFeeBumpOnTimeoutOptions {
   timeoutMs: number;
   /** Optional explicit fee for the bump. Defaults to the inner transaction's fee. */
   fee?: string;
+  /**
+   * Optional fee estimate for the bump. Because the bump is only submitted
+   * after `timeoutMs` elapses, a stale estimate is re-estimated first.
+   */
+  feeEstimate?: FeeEstimate;
+  /** Age in milliseconds after which `feeEstimate` is re-estimated. */
+  feeStalenessThresholdMs?: number;
   /** Maximum number of attempts to poll for confirmation. Defaults to 30. */
   pollAttempts?: number;
 }
@@ -472,6 +626,8 @@ export async function autoFeeBumpOnTimeout(
     feeSourceSecretKey: string;
     network: SoroWillNetwork;
     fee?: string;
+    feeEstimate?: FeeEstimate;
+    feeStalenessThresholdMs?: number;
     pollAttempts?: number;
   } = {
     innerTransactionXdr: options.innerTransactionXdr,
@@ -479,6 +635,10 @@ export async function autoFeeBumpOnTimeout(
     network: options.network,
   };
   if (options.fee !== undefined) bumpOptions.fee = options.fee;
+  if (options.feeEstimate !== undefined) bumpOptions.feeEstimate = options.feeEstimate;
+  if (options.feeStalenessThresholdMs !== undefined) {
+    bumpOptions.feeStalenessThresholdMs = options.feeStalenessThresholdMs;
+  }
   if (options.pollAttempts !== undefined) bumpOptions.pollAttempts = options.pollAttempts;
 
   const bumped = await submitFeeBump(bumpOptions);
