@@ -18,6 +18,7 @@ import {
 } from './cache';
 import {
   unsubscribeFromWillEvents,
+  validateEventTypeFilter,
   type WillEventSource,
   type WillEventSubscription,
 } from './events';
@@ -32,6 +33,7 @@ import type {
   PaginationOptions,
   RequestOptions,
   SoroWillEvent,
+  SorobanEventType,
   UpdateBeneficiariesParams,
   Will,
 } from './types';
@@ -568,6 +570,20 @@ function mapEventRecord(record: RawEventRecord, fallbackContractId: string): Sor
     value: record.value,
     raw: record,
   };
+}
+
+/**
+ * Builds the `getEvents` filter list. A Soroban filter matches a single event
+ * `type`, so one filter is emitted per requested type.
+ */
+function buildEventFilters(
+  contractId: string,
+  eventTypes: SorobanEventType[] | undefined,
+): Array<{ type?: SorobanEventType; contractIds: string[] }> {
+  if (!eventTypes) {
+    return [{ contractIds: [contractId] }];
+  }
+  return eventTypes.map((type) => ({ type, contractIds: [contractId] }));
 }
 
 function parseCursor(cursor: string | undefined): number {
@@ -1594,12 +1610,27 @@ export class SoroWillClient {
    * {@link WebSocketNotConfiguredError} instead of silently falling back to
    * polling if `webSocketFactory`/`eventStreamUrl` aren't configured.
    *
+   * Pass `eventTypes` to only receive events of those types; every entry is
+   * validated against {@link SOROBAN_EVENT_TYPES} up front.
+   *
+   * @throws {InvalidEventTypeFilterError} if `eventTypes` contains an
+   *   unsupported event type.
    * @returns A handle that can be used to close the subscription.
    */
   async subscribeToEvents(
     listener: (event: SoroWillEvent) => void,
     options: EventSubscriptionOptions = {},
   ): Promise<EventSubscription> {
+    const eventTypes = validateEventTypeFilter(options.eventTypes);
+    if (eventTypes) {
+      const userListener = listener;
+      const allowed = new Set<string>(eventTypes);
+      listener = (event) => {
+        if (allowed.has(event.type)) userListener(event);
+      };
+      options = { ...options, eventTypes };
+    }
+
     const wantsWebSocket = options.transport !== 'polling';
     const canUseWebSocket = wantsWebSocket && !!this.webSocketFactory && !!this.eventStreamUrl;
 
@@ -1671,6 +1702,7 @@ export class SoroWillClient {
             type: 'subscribe',
             contractId: this.getContractId(),
             cursor: options.cursor,
+            ...(options.eventTypes ? { eventTypes: options.eventTypes } : {}),
           }),
         );
         resolve(subscription);
@@ -1762,7 +1794,7 @@ export class SoroWillClient {
             id: 1,
             method: 'getEvents',
             params: {
-              filters: [{ contractIds: [this.getContractId()] }],
+              filters: buildEventFilters(this.getContractId(), options.eventTypes),
               pagination: { cursor, limit: options.pageSize },
             },
           }),

@@ -694,6 +694,28 @@ export class InvalidCursorError extends SoroWillError {
   }
 }
 
+/**
+ * Raised when `subscribeToEvents` is given an `eventTypes` filter containing
+ * values outside the supported Soroban event type enum. Without this check an
+ * invalid type would produce a subscription that silently matches nothing.
+ */
+export class InvalidEventTypeFilterError extends SoroWillError {
+  /** The filter entries that are not supported event types. */
+  readonly invalidTypes: unknown[];
+  /** The event types that are accepted in a filter. */
+  readonly supportedTypes: readonly string[];
+
+  constructor(invalidTypes: unknown[], supportedTypes: readonly string[], options?: ErrorOptions) {
+    super(
+      `Invalid event type filter: ${invalidTypes.map((t) => JSON.stringify(t) ?? String(t)).join(', ')}. ` +
+        `Supported event types are: ${supportedTypes.join(', ')}.`,
+      options,
+    );
+    this.invalidTypes = invalidTypes;
+    this.supportedTypes = supportedTypes;
+  }
+}
+
 export class InvalidPaginationOptionsError extends SoroWillError {
   readonly option: string;
   readonly value: number | undefined;

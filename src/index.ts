@@ -67,10 +67,11 @@ export type {
   PaginationOptions,
   RequestOptions,
   SoroWillEvent,
+  SorobanEventType,
   UpdateBeneficiariesParams,
   Will,
 } from './types';
-export { WillStatus, WillErrorCode } from './types';
+export { SOROBAN_EVENT_TYPES, WillStatus, WillErrorCode } from './types';
 
 export {
   FreighterWalletAdapter,
@@ -112,6 +113,7 @@ export type { CachePersistenceAdapter, PersistedCacheEntry, ReadCacheOptions } f
 export {
   addEventListener,
   unsubscribeFromWillEvents,
+  validateEventTypeFilter,
 } from './events';
 export type {
   WillEvent,
@@ -140,6 +142,7 @@ export {
   InsufficientBalanceError,
   InvalidContractIdError,
   InvalidDayCountError,
+  InvalidEventTypeFilterError,
   InvalidGuardianThresholdError,
   InvalidPaginationOptionsError,
   InvalidPercentageError,
