@@ -42,6 +42,30 @@ export class HookExecutionError extends SoroWillError {
 }
 
 /**
+ * Raised when a `beforeInvoke` hook resolves to a value other than `true`,
+ * `false`, or `undefined`. A `null` (or any non-boolean) return is almost
+ * always a bug in the hook — e.g. an accidental expression-bodied arrow
+ * function — so it is rejected rather than silently treated as "proceed".
+ */
+export class HookReturnValueError extends SoroWillError {
+  /** The name of the lifecycle phase whose hook returned the invalid value. */
+  readonly hookName: string;
+  /** The invalid value the hook returned. */
+  readonly returnValue: unknown;
+
+  constructor(hookName: string, returnValue: unknown, options?: ErrorOptions) {
+    const described = returnValue === null ? 'null' : `${typeof returnValue} (${String(returnValue)})`;
+    super(
+      `${hookName} hook returned an invalid value: ${described}. ` +
+        'Hooks must return true or undefined to proceed, or false to abort the invocation.',
+      options,
+    );
+    this.hookName = hookName;
+    this.returnValue = returnValue;
+  }
+}
+
+/**
  * Raised when an amount string passed to {@link SoroWillClient.createWill} or
  * {@link SoroWillClient.topUp} is not a valid positive integer. This catches
  * zero, negative, and malformed (non-numeric) strings before they reach

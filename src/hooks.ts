@@ -1,4 +1,4 @@
-import { HookExecutionError } from './errors';
+import { HookExecutionError, HookReturnValueError } from './errors';
 
 /**
  * Contains all information about the contract call about to be made.
@@ -33,7 +33,9 @@ export interface AfterInvokeContext {
 
 /**
  * A function that runs before a contract call is submitted.
- * Return `false` to abort the invocation, or `void` to proceed.
+ * Return `false` to abort the invocation, or `true` / `void` to proceed.
+ * Any other return value (including `null`) is rejected with a
+ * {@link HookReturnValueError}.
  */
 export type BeforeInvokeHook = (ctx: BeforeInvokeContext) => boolean | void | Promise<boolean | void>;
 
@@ -76,11 +78,13 @@ export class HookManager {
 
   /** Register a hook that runs before every contract invocation. */
   onBeforeInvoke(hook: BeforeInvokeHook): void {
+    assertHookFunction('beforeInvoke', hook);
     this.registry.beforeInvoke.push(hook);
   }
 
   /** Register a hook that runs after every contract invocation. */
   onAfterInvoke(hook: AfterInvokeHook): void {
+    assertHookFunction('afterInvoke', hook);
     this.registry.afterInvoke.push(hook);
   }
 
@@ -112,14 +116,22 @@ export class HookManager {
    * If any hook throws, the error is wrapped in a `HookExecutionError` and
    * re-thrown immediately. The transaction is not built or submitted when a
    * hook throws — the client state is unchanged.
+   *
+   * Each hook's resolved value is validated: only `true`, `false` and
+   * `undefined` are accepted. Anything else (e.g. `null`, a number, a string)
+   * throws a `HookReturnValueError` instead of being silently treated as
+   * "proceed".
    */
   async runBeforeInvoke(ctx: BeforeInvokeContext): Promise<boolean> {
     for (const hook of this.registry.beforeInvoke) {
-      let result: boolean | void;
+      let result: unknown;
       try {
         result = await hook(ctx);
       } catch (err) {
         throw new HookExecutionError('beforeInvoke', err);
+      }
+      if (result !== undefined && typeof result !== 'boolean') {
+        throw new HookReturnValueError('beforeInvoke', result);
       }
       if (result === false) return false;
     }
@@ -151,5 +163,11 @@ export class HookManager {
   /** The number of registered afterInvoke hooks. */
   get afterInvokeCount(): number {
     return this.registry.afterInvoke.length;
+  }
+}
+
+function assertHookFunction(hookName: string, hook: unknown): void {
+  if (typeof hook !== 'function') {
+    throw new TypeError(`${hookName} hook must be a function, received ${hook === null ? 'null' : typeof hook}.`);
   }
 }
