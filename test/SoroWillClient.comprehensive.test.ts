@@ -265,7 +265,7 @@ describe('SoroWillClient public methods', () => {
       contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
       rpcServer: makeRpcServer() as unknown as SoroWillRpcServer,
     });
-    const wills = await client.getWillsByOwner('GOWNER');
+    const wills = await client.getWillsByOwner('GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG');
     expect(Array.isArray(wills)).toBe(true);
     expect(wills[0]?.id).toBe('1');
   });
@@ -276,7 +276,7 @@ describe('SoroWillClient public methods', () => {
       contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
       rpcServer: makeRpcServer() as unknown as SoroWillRpcServer,
     });
-    const wills = await client.getWillsByBeneficiary('GBEN');
+    const wills = await client.getWillsByBeneficiary('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF');
     expect(Array.isArray(wills)).toBe(true);
     expect(wills[0]?.id).toBe('1');
   });

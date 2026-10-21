@@ -23,6 +23,7 @@ import {
 } from './cache';
 import {
   unsubscribeFromWillEvents,
+  validateEventTypeFilter,
   type WillEventSource,
   type WillEventSubscription,
 } from './events';
@@ -41,6 +42,7 @@ import type {
   PaginationOptions,
   RequestOptions,
   SoroWillEvent,
+  SorobanEventType,
   UpdateBeneficiariesParams,
   Will,
 } from './types';
@@ -187,6 +189,8 @@ interface WebSocketLike {
 /** Options for constructing a read cache scoped to SoroWill reads. */
 export interface SoroWillReadCacheOptions {
   ttlMs?: number;
+  /** Maximum cached entries before least-recently-used eviction. Defaults to 1000. */
+  maxEntries?: number;
 }
 
 export type {
@@ -235,6 +239,13 @@ export interface SoroWillClientOptions {
    * ```
    */
   inFlightTracker?: InFlightTracker;
+  /**
+   * Coalesce identical concurrent read-only calls (same contract method and
+   * arguments) into a single RPC simulation, sharing its result between every
+   * caller. Defaults to `true`. Reads that pass an `AbortSignal` are never
+   * coalesced, so aborting one caller can't cancel another caller's request.
+   */
+  deduplicateReads?: boolean;
   /**
    * Advanced override for testing or preloaded contract specs.
    *
@@ -720,14 +731,71 @@ function mapEventRecord(record: RawEventRecord, fallbackContractId: string): Sor
   };
 }
 
+/**
+ * Builds the `getEvents` filter list. A Soroban filter matches a single event
+ * `type`, so one filter is emitted per requested type.
+ */
+function buildEventFilters(
+  contractId: string,
+  eventTypes: SorobanEventType[] | undefined,
+): Array<{ type?: SorobanEventType; contractIds: string[] }> {
+  if (!eventTypes) {
+    return [{ contractIds: [contractId] }];
+  }
+  return eventTypes.map((type) => ({ type, contractIds: [contractId] }));
+}
+
 function parseCursor(cursor: string | undefined): number {
   if (cursor === undefined) {
     return 0;
   }
-  if (!/^\d+$/.test(cursor)) {
-    throw new InvalidCursorError(cursor);
+  if (typeof cursor !== 'string') {
+    throw new InvalidCursorError(String(cursor), `expected a string, received ${typeof cursor}`);
   }
-  return Number(cursor);
+  if (cursor.length === 0) {
+    throw new InvalidCursorError(cursor, 'cursor must not be empty');
+  }
+  if (!/^(0|[1-9]\d*)$/.test(cursor)) {
+    throw new InvalidCursorError(
+      cursor,
+      'expected a non-negative integer offset with no sign, decimals, whitespace, or leading zeros',
+    );
+  }
+  const offset = Number(cursor);
+  if (!Number.isSafeInteger(offset)) {
+    throw new InvalidCursorError(cursor, 'cursor offset exceeds Number.MAX_SAFE_INTEGER');
+  }
+  return offset;
+}
+
+/** Maximum accepted length of an event-stream cursor (RPC paging token). */
+const MAX_EVENT_CURSOR_LENGTH = 256;
+
+/**
+ * Validates an event-subscription cursor (an opaque RPC paging token) before
+ * it is forwarded to the RPC node or WebSocket stream. Paging tokens are
+ * short alphanumeric strings (e.g. `"0004294967296-0000000001"`), so the
+ * SDK only accepts non-empty strings of letters, digits, `-` and `_`.
+ */
+function validateEventCursor(cursor: unknown): void {
+  if (cursor === undefined) {
+    return;
+  }
+  if (typeof cursor !== 'string') {
+    throw new InvalidCursorError(String(cursor), `expected a string, received ${typeof cursor}`);
+  }
+  if (cursor.length === 0) {
+    throw new InvalidCursorError(cursor, 'cursor must not be empty');
+  }
+  if (cursor.length > MAX_EVENT_CURSOR_LENGTH) {
+    throw new InvalidCursorError(
+      cursor,
+      `cursor must be at most ${MAX_EVENT_CURSOR_LENGTH} characters`,
+    );
+  }
+  if (!/^[A-Za-z0-9_-]+$/.test(cursor)) {
+    throw new InvalidCursorError(cursor, 'cursor may only contain letters, digits, "-" and "_"');
+  }
 }
 
 function normalizePositiveInteger(value: number | undefined, label: string): number | null {
@@ -882,6 +950,12 @@ export class SoroWillClient {
   private readonly inFlightTracker: InFlightTracker;
   private readonly timeoutMs: number;
   private readonly readCache: ReadCache | undefined;
+  private readonly deduplicateReads: boolean;
+  /**
+   * Read simulations currently in flight, keyed by method + arguments +
+   * request options, so identical concurrent reads share one RPC call (#619).
+   */
+  private readonly inFlightReads = new Map<string, Promise<unknown>>();
   private readonly retryOptions: RpcRetryOptions;
   private specPromise: Promise<InstanceType<typeof Spec>> | undefined;
   /**
@@ -988,6 +1062,7 @@ export class SoroWillClient {
     // #573: Track signed transaction hashes to prevent duplicate signing.
     this.signedTransactionHashes = new Set();
     this.readCache = options.readCache === false ? undefined : new ReadCache(options.readCache);
+    this.deduplicateReads = options.deduplicateReads ?? true;
     this.retryOptions = { ...DEFAULT_RETRY_OPTIONS, ...options.retry };
     const { maxAttempts, initialDelayMs, maxDelayMs, backoffFactor } = this.retryOptions;
     if (!Number.isInteger(maxAttempts) || maxAttempts <= 0) {
@@ -1844,6 +1919,8 @@ export class SoroWillClient {
     owner: string,
     options?: (PaginationOptions & RequestOptions) | RequestOptions,
   ): Promise<Will[] | PaginatedWillsResult> {
+    // #612: reject malformed addresses before they reach the cache key or RPC.
+    assertValidStellarAddress(owner, 'owner', { allowContract: true });
     const paginationOptions = options as PaginationOptions | undefined;
     if (paginationOptions?.cursor !== undefined) {
       parseCursor(paginationOptions.cursor);
@@ -1912,6 +1989,8 @@ export class SoroWillClient {
     beneficiary: string,
     options?: (PaginationOptions & RequestOptions) | RequestOptions,
   ): Promise<Will[] | PaginatedWillsResult> {
+    // #612: reject malformed addresses before they reach the cache key or RPC.
+    assertValidStellarAddress(beneficiary, 'beneficiary', { allowContract: true });
     const paginationOptions = options as PaginationOptions | undefined;
     if (paginationOptions?.cursor !== undefined) {
       parseCursor(paginationOptions.cursor);
@@ -2109,10 +2188,10 @@ export class SoroWillClient {
    * console.log(`Batch operation txHash: ${result.txHash}`);
    * ```
    */
-  async batch(
-    operations: readonly BatchOperation[],
+  async batch<const TOperations extends readonly BatchOperation[]>(
+    operations: TOperations,
     options?: RequestOptions,
-  ): Promise<BatchResult> {
+  ): Promise<BatchResult<TOperations>> {
     if (operations.length === 0) {
       throw new RangeError('A batch must contain at least one operation');
     }
@@ -2183,7 +2262,20 @@ export class SoroWillClient {
         const signedTxXdr = normalizeSignatureResponse(signedTxResponse);
         const result = await this.submitSignedTransaction(signedTxXdr, options);
         txHash = result.txHash;
-        return { success: true, txHash: result.txHash, createdAt: result.createdAt };
+        // Soroban allows a single invocation per transaction, so the
+        // transaction's return value belongs to the (only) operation.
+        const results = operations.map(({ method, args, decode }) => {
+          const native =
+            result.returnValue === undefined ? undefined : spec.funcResToNative(method, result.returnValue);
+          return { method, args, returnValue: decode ? decode(native) : native };
+        }) as BatchOperationResults<TOperations>;
+        const batchResult: BatchResult<TOperations> = {
+          success: true,
+          txHash: result.txHash,
+          createdAt: result.createdAt,
+          results,
+        };
+        return batchResult;
       });
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
@@ -2478,6 +2570,16 @@ export class SoroWillClient {
     listener: (event: SoroWillEvent) => void,
     options: EventSubscriptionOptions = {},
   ): Promise<EventSubscription> {
+    const eventTypes = validateEventTypeFilter(options.eventTypes);
+    if (eventTypes) {
+      const userListener = listener;
+      const allowed = new Set<string>(eventTypes);
+      listener = (event) => {
+        if (allowed.has(event.type)) userListener(event);
+      };
+      options = { ...options, eventTypes };
+    }
+
     const wantsWebSocket = options.transport !== 'polling';
     const canUseWebSocket = wantsWebSocket && !!this.webSocketFactory && !!this.eventStreamUrl;
 
@@ -2549,6 +2651,7 @@ export class SoroWillClient {
             type: 'subscribe',
             contractId: this.getContractId(),
             cursor: options.cursor,
+            ...(options.eventTypes ? { eventTypes: options.eventTypes } : {}),
           }),
         );
         resolve(subscription);
@@ -2650,7 +2753,7 @@ export class SoroWillClient {
             id: 1,
             method: 'getEvents',
             params: {
-              filters: [{ contractIds: [this.getContractId()] }],
+              filters: buildEventFilters(this.getContractId(), options.eventTypes),
               pagination: { cursor, limit: options.pageSize },
             },
           }),
@@ -2723,6 +2826,7 @@ export class SoroWillClient {
     }
     this.stopWatchingWalletNetwork?.();
     this.inFlightTracker.clear();
+    this.inFlightReads.clear();
     this.queue.rejectAll(new Error('SoroWillClient destroyed'));
   }
 
@@ -2867,8 +2971,41 @@ export class SoroWillClient {
     return await this.specPromise;
   }
 
-  /** Simulates a read-only contract call, requiring no connected wallet or signature. */
-  private async read<T>(
+  /**
+   * Simulates a read-only contract call, requiring no connected wallet or
+   * signature. Identical concurrent calls (same method, arguments and
+   * request options) are coalesced into a single RPC simulation (#619).
+   */
+  private read<T>(
+    method: string,
+    args: Record<string, unknown>,
+    options?: RequestOptions,
+  ): Promise<T> {
+    if (!this.deduplicateReads || options?.signal) {
+      return this.executeRead<T>(method, args, options);
+    }
+
+    const key = createReadCacheKey(method, {
+      args,
+      retries: options?.retries,
+      timeout: options?.timeout,
+      timeoutMs: options?.timeoutMs,
+    });
+    const existing = this.inFlightReads.get(key);
+    if (existing) {
+      return existing as Promise<T>;
+    }
+
+    const pending = this.executeRead<T>(method, args, options).finally(() => {
+      if (this.inFlightReads.get(key) === pending) {
+        this.inFlightReads.delete(key);
+      }
+    });
+    this.inFlightReads.set(key, pending);
+    return pending;
+  }
+
+  private async executeRead<T>(
     method: string,
     args: Record<string, unknown>,
     options?: RequestOptions,

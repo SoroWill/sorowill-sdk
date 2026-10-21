@@ -244,7 +244,7 @@ describe('SoroWillClient', () => {
     if (Array.isArray(firstPage)) throw new Error('Expected paginated result');
     const secondPageOpts: Record<string, unknown> = { pageSize: 2 };
     if (firstPage.nextCursor) secondPageOpts.cursor = firstPage.nextCursor;
-    const secondPage = await client.getWillsByOwner('GOWNER', secondPageOpts as never);
+    const secondPage = await client.getWillsByOwner('GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', secondPageOpts as never);
     if (Array.isArray(secondPage)) throw new Error('Expected paginated result');
 
     expect(firstPage.wills.map((will: { id: string }) => will.id)).toEqual(['1', '2']);
@@ -263,7 +263,7 @@ describe('SoroWillClient', () => {
     if (Array.isArray(firstPage)) throw new Error('Expected paginated result');
     const secondPageOptsB: Record<string, unknown> = { pageSize: 1 };
     if (firstPage.nextCursor) secondPageOptsB.cursor = firstPage.nextCursor;
-    const secondPage = await client.getWillsByBeneficiary('GBEN', secondPageOptsB as never);
+    const secondPage = await client.getWillsByBeneficiary('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', secondPageOptsB as never);
     if (Array.isArray(secondPage)) throw new Error('Expected paginated result');
 
     expect(firstPage.wills.map((will: { id: string }) => will.id)).toEqual(['4']);

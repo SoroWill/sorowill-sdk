@@ -382,8 +382,25 @@ export interface BatchOperation {
   network?: 'testnet' | 'mainnet';
 }
 
-export interface BatchResult {
+/** Maps a tuple of operations to a tuple of their typed results, preserving order and length. */
+export type BatchOperationResults<TOperations extends readonly BatchOperation[]> = {
+  -readonly [K in keyof TOperations]: TOperations[K] extends BatchOperation
+    ? BatchOperationResult<TOperations[K]>
+    : never;
+};
+
+/**
+ * Result of a successful {@link SoroWillClient.batch} submission. `results`
+ * has one entry per submitted operation, each typed from its operation.
+ */
+export interface BatchResult<
+  TOperations extends readonly BatchOperation[] = readonly BatchOperation[],
+> {
   success: boolean;
+  txHash: string;
+  /** Ledger close time of the submitted transaction, in Unix seconds. */
+  createdAt: number;
+  results: BatchOperationResults<TOperations>;
   error?: Error;
 }
 
@@ -510,8 +527,23 @@ export interface EventSubscription {
   closed?: boolean;
 }
 
+/**
+ * Event types a Soroban RPC node can emit, as used by the `type` field of a
+ * `getEvents` filter.
+ */
+export const SOROBAN_EVENT_TYPES = ['contract', 'system', 'diagnostic'] as const;
+
+export type SorobanEventType = (typeof SOROBAN_EVENT_TYPES)[number];
+
 export interface EventSubscriptionOptions {
   transport?: EventSubscriptionTransport;
+  /**
+   * Only deliver events of these types. Each entry must be one of
+   * {@link SOROBAN_EVENT_TYPES}; anything else is rejected with
+   * `InvalidEventTypeFilterError` rather than producing a subscription that
+   * silently matches nothing. Omit to receive events of every type.
+   */
+  eventTypes?: SorobanEventType[];
   retryAttempts?: number;
   retryDelayMs?: number;
   websocketConnectTimeoutMs?: number;

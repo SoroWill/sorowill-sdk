@@ -37,8 +37,10 @@ export interface ReadCacheOptions {
   persistence?: CachePersistenceAdapter;
   /**
    * Maximum number of entries to keep in the cache. When the number of entries
-   * exceeds this limit, the least-recently-used entries are evicted (and removed
-   * from persistence). When omitted, the cache is unbounded.
+   * exceeds this limit, expired entries are pruned first and then the
+   * least-recently-used entries are evicted (and removed from persistence).
+   * Defaults to {@link DEFAULT_MAX_CACHE_ENTRIES}. Pass `Infinity` to opt into
+   * an unbounded cache.
    */
   maxEntries?: number;
   /**
@@ -61,6 +63,21 @@ interface CacheEntry {
   value: unknown;
   expiresAt: number | null;
   willIds: Set<string>;
+}
+
+/**
+ * Returns `true` once `now` has reached `expiresAt` (the boundary itself
+ * counts as expired). A non-finite numeric `expiresAt` — e.g. a corrupted
+ * persisted entry — is treated as expired rather than as fresh forever.
+ */
+function isExpired(expiresAt: unknown, now: number): boolean {
+  if (expiresAt === null) {
+    return false;
+  }
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) {
+    return true;
+  }
+  return expiresAt <= now;
 }
 
 function serializeCacheValue(value: unknown): string {
@@ -233,6 +250,16 @@ export class ReadCache {
     this.readyPromise = this.hydrate();
   }
 
+  /** Number of entries currently held in memory (expired entries included until pruned). */
+  get size(): number {
+    return this.entries.size;
+  }
+
+  /** Configured maximum number of entries before LRU eviction kicks in. */
+  get capacity(): number {
+    return this.maxEntries;
+  }
+
   async ready(): Promise<void> {
     await this.readyPromise;
   }
@@ -245,6 +272,10 @@ export class ReadCache {
    * `ready()` completes will return undefined for entries that are currently
    * being loaded from persistent storage.
    *
+   * The entry's expiration is checked on every retrieval: an entry whose
+   * `expiresAt` has been reached is never returned, and is invalidated both
+   * in memory and in persistent storage so it can't be served again (#620).
+   *
    * @param key - The cache key to look up
    * @returns The cached value if found and not expired, or undefined
    */
@@ -254,8 +285,8 @@ export class ReadCache {
       return undefined;
     }
 
-    if (entry.expiresAt !== null && entry.expiresAt <= this.now()) {
-      this.entries.delete(key);
+    if (isExpired(entry.expiresAt, this.now())) {
+      this.invalidateExpired(key);
       return undefined;
     }
 
@@ -368,10 +399,20 @@ export class ReadCache {
   }
 
   private evictIfNeeded(): void {
-    if (this.maxEntries === undefined) {
+    if (this.entries.size <= this.maxEntries) {
       return;
     }
 
+    // Drop expired entries first so live data is not evicted in their place.
+    const now = this.now();
+    for (const [key, entry] of this.entries) {
+      if (entry.expiresAt !== null && entry.expiresAt <= now) {
+        this.removeEvicted(key);
+      }
+    }
+
+    // Map iteration order is insertion order, and get()/set() re-insert on
+    // access, so the first key is always the least-recently-used one.
     while (this.entries.size > this.maxEntries) {
       const oldestKey = this.entries.keys().next().value;
       if (oldestKey === undefined) {
@@ -384,6 +425,16 @@ export class ReadCache {
         ?.delete(oldestKey)
         .catch((err) => this.onPersistenceFailure?.(oldestKey, err));
     }
+  }
+
+  /** Drops an expired entry from memory and, best-effort, from persistence. */
+  private invalidateExpired(key: string): void {
+    this.touchedKeys.add(key);
+    this.entries.delete(key);
+    void this.persistence?.delete(key).catch(() => {
+      // Silently ignore persistence failures to prevent unhandled rejections
+      // The entry is already gone in-memory and hydration skips expired entries
+    });
   }
 
   private async delete(key: string): Promise<void> {
@@ -410,6 +461,10 @@ export class ReadCache {
     }
 
     const now = this.now();
+    // Entries written while hydration was in flight are more recent than
+    // anything persisted, so they are moved behind the hydrated entries below
+    // to keep LRU order correct.
+    const writtenDuringHydration = Array.from(this.entries.values());
 
     for (const persistedEntry of persistedEntries) {
       // Check before expiry cleanup too: an old expired entry must not delete
@@ -440,6 +495,15 @@ export class ReadCache {
       }
 
       this.entries.set(persistedEntry.key, entry);
+    }
+
+    for (const entry of writtenDuringHydration) {
+      // Skip entries replaced or removed while expired entries were deleted.
+      if (this.entries.get(entry.key) !== entry) {
+        continue;
+      }
+      this.entries.delete(entry.key);
+      this.entries.set(entry.key, entry);
     }
 
     this.evictIfNeeded();

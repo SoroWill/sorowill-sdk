@@ -205,13 +205,36 @@ export interface SignatureResponse {
   hash?: string;
 }
 
+/** Standard (RFC 4648 §4) base64 alphabet with required `=` padding. */
+const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+/**
+ * Returns `true` when `value` is a non-empty, standard, padded base64 string —
+ * the encoding every Stellar XDR envelope uses.
+ */
+export function isValidBase64(value: string): boolean {
+  return value.length > 0 && value.length % 4 === 0 && BASE64_PATTERN.test(value);
+}
+
+/**
+ * Throws {@link InvalidSignedXdrEncodingError} unless `xdr` is valid base64.
+ */
+function assertBase64Xdr(xdr: string): string {
+  if (!isValidBase64(xdr)) {
+    throw new InvalidSignedXdrEncodingError(xdr.length);
+  }
+  return xdr;
+}
+
 /**
  * Normalizes a wallet signer result to the signed XDR string the SDK expects.
  *
  * Some adapters return a bare XDR string, while others (WalletConnect, xBull,
  * …) return a {@link SignatureResponse} object. Passing the object through as
  * if it were a string silently fails downstream, so we validate the shape here
- * and throw a clear error for anything malformed.
+ * and throw a clear error for anything malformed. The extracted XDR must also
+ * be valid base64, otherwise {@link InvalidSignedXdrEncodingError} is thrown
+ * before the envelope can reach the contract call.
  */
 export function normalizeSignatureResponse(
   result: string | SignatureResponse,
@@ -220,13 +243,13 @@ export function normalizeSignatureResponse(
     if (result.length === 0) {
       throw new Error('Wallet signer returned an empty signed XDR string.');
     }
-    return result;
+    return assertBase64Xdr(result);
   }
 
   if (result && typeof result === 'object') {
     const { envelope_xdr } = result as SignatureResponse;
     if (typeof envelope_xdr === 'string' && envelope_xdr.length > 0) {
-      return envelope_xdr;
+      return assertBase64Xdr(envelope_xdr);
     }
     throw new Error(
       'Wallet signer returned a SignatureResponse without a valid `envelope_xdr` string.',
