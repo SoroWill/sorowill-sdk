@@ -42,6 +42,44 @@ export class HookExecutionError extends SoroWillError {
 }
 
 /**
+ * Raised when a hook triggers a nested contract invocation while another
+ * invocation is already in progress (e.g. a `beforeInvoke` hook calls another
+ * operation through the same `SoroWillClient`). Without this guard the hooks
+ * would re-enter `HookManager.runBeforeInvoke`/`runAfterInvoke` and could
+ * recurse indefinitely.
+ *
+ * The offending nested invocation is never executed — the client state is
+ * left unchanged and the caller receives a clear, synchronous error instead of
+ * a stack overflow.
+ *
+ * @example
+ * ```ts
+ * hooks.onBeforeInvoke(async (ctx) => {
+ *   // ❌ Never call another client operation from within a hook.
+ *   await client.checkIn('42');
+ * });
+ *
+ * try {
+ *   await client.checkIn('42');
+ * } catch (err) {
+ *   if (err instanceof HookRecursionError) {
+ *     console.error('Recursive hook execution blocked:', err.message);
+ *   }
+ * }
+ * ```
+ */
+export class HookRecursionError extends SoroWillError {
+  constructor(message?: string) {
+    super(
+      message ??
+        'Recursive hook execution detected: a hook triggered a nested contract invocation while another invocation was already in progress. ' +
+          'Hooks must not call client operations that re-enter HookManager.runBeforeInvoke or runAfterInvoke.',
+    );
+    this.name = 'HookRecursionError';
+  }
+}
+
+/**
  * Raised when an amount string passed to {@link SoroWillClient.createWill} or
  * {@link SoroWillClient.topUp} is not a valid positive integer. This catches
  * zero, negative, and malformed (non-numeric) strings before they reach
@@ -766,6 +804,24 @@ export class UnknownContractErrorCodeError extends SoroWillError {
 export function mapContractError(error: unknown): Error {
   if (error instanceof WillContractError || error instanceof RequestTimeoutError) {
     return error;
+  }
+  // SimulationError wraps a contract simulation error; extract the contract
+  // error code from its `simulationError` property so that typed contract
+  // errors (e.g. WillNotFoundError) are properly mapped.
+  if (error instanceof SimulationError) {
+    const simText = error.simulationError;
+    const simMatch =
+      /Error\(Contract,\s*#?(\d+)\)/i.exec(simText) ??
+      /(?:contract error|contracterror|error code)[^\d#]*#?(\d+)/i.exec(simText) ??
+      /^#?(\d+)$/i.exec(simText.trim());
+    const simCodeText = simMatch?.[1];
+    if (simCodeText !== undefined) {
+      const simCode = Number(simCodeText);
+      const ErrorClass = CONTRACT_ERRORS[simCode];
+      if (ErrorClass !== undefined) {
+        return new ErrorClass({ cause: error });
+      }
+    }
   }
   const text = errorText(error);
   const match =

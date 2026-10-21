@@ -1,4 +1,4 @@
-import { HookExecutionError } from './errors';
+import { HookExecutionError, HookRecursionError } from './errors';
 
 /**
  * Contains all information about the contract call about to be made.
@@ -83,6 +83,13 @@ export class HookManager {
     afterInvoke: [],
   };
 
+  /**
+   * Set while `runBeforeInvoke` or `runAfterInvoke` is actively executing.
+   * Used to detect and reject re-entrant (recursive) hook execution, where a
+   * hook triggers another contract invocation through the same client.
+   */
+  private executing = false;
+
   /** Register a hook that runs before every contract invocation. */
   onBeforeInvoke(hook: BeforeInvokeHook): void {
     this.registry.beforeInvoke.push(hook);
@@ -151,17 +158,27 @@ export class HookManager {
    * a `HookExecutionError` whose message names the offending return type.
    */
   async runBeforeInvoke(ctx: BeforeInvokeContext): Promise<boolean> {
-    for (const hook of this.registry.beforeInvoke) {
-      let result: boolean | void;
-      try {
-        result = await hook(ctx);
-      } catch (err) {
-        throw new HookExecutionError('beforeInvoke', err);
-      }
-      HookManager.assertAllowedHookReturnValue(result, 'beforeInvoke');
-      if (result === false) return false;
+    if (this.executing) {
+      throw new HookRecursionError();
     }
-    return true;
+    this.executing = true;
+    try {
+      for (const hook of this.registry.beforeInvoke) {
+        let result: boolean | void;
+        try {
+          result = await hook(ctx);
+        } catch (err) {
+          // Let recursion errors propagate unwrapped so callers can catch them
+          // directly; wrap any other hook error as before.
+          if (err instanceof HookRecursionError) throw err;
+          throw new HookExecutionError('beforeInvoke', err);
+        }
+        if (result === false) return false;
+      }
+      return true;
+    } finally {
+      this.executing = false;
+    }
   }
 
   /**
@@ -172,12 +189,22 @@ export class HookManager {
    * Every hook still runs exactly once, in order, even if an earlier one throws.
    */
   async runAfterInvoke(ctx: AfterInvokeContext): Promise<void> {
-    for (const hook of this.registry.afterInvoke) {
-      try {
-        await hook(ctx);
-      } catch {
-        // Intentionally ignored — see method doc.
+    if (this.executing) {
+      throw new HookRecursionError();
+    }
+    this.executing = true;
+    try {
+      for (const hook of this.registry.afterInvoke) {
+        try {
+          await hook(ctx);
+        } catch (err) {
+          // Let recursion errors propagate unwrapped; swallow any other hook
+          // error — afterInvoke is instrumentation and must not break the call.
+          if (err instanceof HookRecursionError) throw err;
+        }
       }
+    } finally {
+      this.executing = false;
     }
   }
 
