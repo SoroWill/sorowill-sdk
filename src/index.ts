@@ -8,6 +8,7 @@
  * `@stellar/stellar-sdk` directly if you need them.
  */
 export { SoroWillClient, parseWillId, SoroWillInvalidIdError } from './SoroWillClient';
+export { MAX_CHECKIN_PERIOD_DAYS } from './SoroWillClient';
 export type {
   EventSubscription,
   EventSubscriptionOptions,
@@ -65,17 +66,30 @@ export type {
   SubmitFeeBumpOptions,
 } from './feeBump';
 
-export { SimulationResultError } from './txValidation';
+export {
+  SimulationResultError,
+  UnsupportedSignatureAlgorithmError,
+  assertSupportedSignatureAlgorithm,
+  assertSignedTransactionXdrSignatures,
+  ED25519_SIGNATURE_LENGTH,
+} from './txValidation';
 export type {
   SimulationResponse,
   TransactionMatchOptions,
+  SignatureValidationOptions,
+  SignedTransactionLike,
 } from './txValidation';
 
 export type {
   BatchOperation,
+  BatchOperationResult,
+  BatchOperationStatus,
+  BatchQueueOptions,
+  BatchQueueResult,
   BatchResult,
   Beneficiary,
   CreateWillParams,
+  EmergencyCheckInOptions,
   PaginatedWillsResult,
   PaginationOptions,
   RequestOptions,
@@ -87,14 +101,28 @@ export { WillStatus, WillErrorCode } from './types';
 
 export {
   FreighterWalletAdapter,
+  WalletSessionError,
+  WalletSessionExpiredError,
+  assertWalletSessionActive,
   connectWallet,
   freighterAdapter,
   getDefaultWalletAdapter,
   getPublicKey,
   isFreighterInstalled,
+  isFreighterInstallCheckError,
+  isSignTransactionTimeoutError,
+  isWalletNetworkMismatchError,
+  isWalletSessionError,
   signTransaction,
+  WalletSessionError,
 } from './wallet';
-export type { WalletAdapter, WalletConnection } from './wallet';
+export type {
+  WalletAdapter,
+  WalletAdapterError,
+  WalletConnection,
+  WalletSession,
+} from './wallet';
+export type { WalletAdapter, WalletConnection, WalletSessionOptions } from './wallet';
 
 export { createAlbedoAdapter } from './adapters/albedo';
 export type { AlbedoAdapterOptions } from './adapters/albedo';
@@ -103,6 +131,7 @@ export {
   MemoryWalletConnectSessionStore,
   WalletConnectAdapter,
   WalletConnectTimeoutError,
+  WalletConnectUnsupportedMethodError,
 } from './walletConnect';
 export type {
   WalletConnectAdapterOptions,
@@ -114,11 +143,14 @@ export type {
 } from './walletConnect';
 
 export {
+  CacheDeserializationError,
   IndexedDbCachePersistenceAdapter,
   LocalStorageCachePersistenceAdapter,
   MemoryCachePersistenceAdapter,
   ReadCache,
   createReadCacheKey,
+  escapeCacheKeyComponent,
+  escapeKeyComponent,
 } from './cache';
 export type { CachePersistenceAdapter, PersistedCacheEntry, ReadCacheOptions } from './cache';
 
@@ -137,24 +169,29 @@ export {
   AccountNotFundedError,
   AlreadyClaimedError,
   AlreadyVotedError,
+  BatchNetworkMismatchError,
   BeneficiaryNotFoundError,
   BeneficiaryValidationError,
   CheckinNotDueError,
+  CheckinPeriodExceedsTtlError,
   ConfirmationWindowExpiredError,
   DuplicateBeneficiaryError,
   DuplicateGuardianError,
+  DuplicateOperationError,
   ExorbitantFeeError,
   FixedAmountExceedsBalanceError,
   FreighterInstallCheckError,
+  FreighterNotAvailableError,
   GracePeriodExpiredError,
   GracePeriodNotExpiredError,
   GuardianCooldownActiveError,
   HookExecutionError,
-  HookReturnValueError,
+  HookRecursionError,
   InsufficientBalanceError,
   InvalidBeneficiaryAddressError,
   InvalidContractIdError,
   InvalidDayCountError,
+  InvalidGuardianSignatureError,
   InvalidGuardianThresholdError,
   InvalidPaginationOptionsError,
   InvalidPercentageError,
@@ -177,6 +214,7 @@ export {
   NotSameOwnerError,
   OwnerCannotBeGuardianError,
   RequestTimeoutError,
+  RequestQueueOverflowError,
   SameWillIdError,
   SignTransactionTimeoutError,
   SimulationError,
@@ -210,14 +248,22 @@ export {
 export type { ContractErrorFactory } from './errors';
 
 export {
+  DEFAULT_MAX_QUEUE_SIZE,
   RequestQueue,
   RequestPriority,
   getSharedRequestQueue,
   releaseSharedRequestQueue,
+  computeBackoffDelay,
+  isRateLimitError,
+  MAX_BACKOFF_MS,
 } from './requestQueue';
 export type { RequestQueueOptions } from './requestQueue';
 
+export { DebugLogger, DEFAULT_REDACTED_KEYS, REDACTED } from './debugLogger';
+export type { DebugLoggerOptions } from './debugLogger';
+
 export { buildSep7TxUri, parseSep7Callback } from './sep7';
+export { SEP7_MAX_ENVELOPE_BYTES, SEP7_MAX_URI_LENGTH } from './sep7';
 export type { BuildSep7TxUriOptions, Sep7CallbackResult } from './sep7';
 
 export {
@@ -240,6 +286,7 @@ export {
   MAX_BENEFICIARIES,
   MAX_GUARDIANS,
   calculateShares,
+  deepFreezeObject,
   formatDeadline,
   formatTokenAmount,
   formatUSDC,

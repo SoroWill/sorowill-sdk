@@ -49,7 +49,10 @@ const { mockRegistry, specFromWasmSpy } = vi.hoisted(() => {
   return { mockRegistry, specFromWasmSpy };
 });
 
-vi.mock('@stellar/stellar-sdk', () => {
+vi.mock('@stellar/stellar-sdk', async () => {
+  const { StrKey } = await vi.importActual<typeof import('@stellar/stellar-sdk')>(
+    '@stellar/stellar-sdk',
+  );
   class MockAccount {
     constructor(
       public readonly accountId: string,
@@ -134,6 +137,7 @@ vi.mock('@stellar/stellar-sdk', () => {
     Account: MockAccount,
     BASE_FEE: '100',
     Contract: MockContract,
+    StrKey,
     Networks: { PUBLIC: 'PUBLIC', TESTNET: 'TESTNET' },
     Transaction: MockTransaction,
     TransactionBuilder: MockTransactionBuilder,
