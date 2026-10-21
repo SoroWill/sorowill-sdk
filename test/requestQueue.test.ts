@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { RequestQueue, RequestPriority } from '../src/requestQueue';
 import { RequestTimeoutError } from '../src/errors';
@@ -45,27 +45,23 @@ describe('RequestQueue', () => {
     });
 
     it('respects requestsPerSecond rate limit', async () => {
-      const queue = new RequestQueue({ maxConcurrent: 100, requestsPerSecond: 3 });
-      const starts: number[] = [];
+      vi.useFakeTimers();
+      try {
+        const queue = new RequestQueue({ maxConcurrent: 100, requestsPerSecond: 3 });
+        const starts: number[] = [];
+        const requests = Array.from({ length: 6 }, () =>
+          queue.enqueue(async () => { starts.push(Date.now()); }),
+        );
 
-      await Promise.all(
-        Array.from({ length: 6 }, () =>
-          queue.enqueue(() => {
-            starts.push(Date.now());
-            return Promise.resolve();
-          }),
-        ),
-      );
-
-      expect(starts.length).toBe(6);
-      const firstStart = starts[0]!;
-      const firstSecondStarts = starts.filter((t) => t <= firstStart + 1000);
-
-      // With requestsPerSecond=3, requests should be rate-limited
-      // Allow some tolerance for fast CI machines
-      expect(firstSecondStarts.length).toBeLessThanOrEqual(4);
-      // Not all 6 should start in the first second with requestsPerSecond=3
-      expect(firstSecondStarts.length).toBeLessThan(6);
+        await vi.advanceTimersByTimeAsync(999);
+        expect(starts).toHaveLength(3);
+        await vi.advanceTimersByTimeAsync(1);
+        await Promise.all(requests);
+        expect(starts).toHaveLength(6);
+        expect(starts[3]! - starts[0]!).toBe(1000);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('rejects with RangeError for invalid timeoutMs', async () => {

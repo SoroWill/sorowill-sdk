@@ -97,7 +97,7 @@ describe('Issue #211: EventSubscriptionOptions.pageSize ignored by WebSocket tra
 
     client = new SoroWillClient({
       network: 'testnet',
-      contractId: 'TESTCONTRACT',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       webSocketFactory: webSocketFactory,
       eventStreamUrl: 'ws://test-stream.local',
     });
@@ -123,7 +123,7 @@ describe('Issue #211: EventSubscriptionOptions.pageSize ignored by WebSocket tra
 
     expect(parsed).toEqual({
       type: 'subscribe',
-      contractId: 'TESTCONTRACT',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       cursor: undefined,
     });
     expect(parsed.pageSize).toBeUndefined();
@@ -150,7 +150,7 @@ describe('Issue #211: EventSubscriptionOptions.pageSize ignored by WebSocket tra
 
     expect(parsed.pageSize).toBeUndefined();
     expect(parsed.cursor).toBe('test_cursor_123');
-    expect(parsed.contractId).toBe('TESTCONTRACT');
+    expect(parsed.contractId).toBe('CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR');
   });
 
   it('should document that pageSize silently ignored in WebSocket subscribe', async () => {
@@ -182,7 +182,7 @@ describe('Issue #211: EventSubscriptionOptions.pageSize ignored by WebSocket tra
 
     client = new SoroWillClient({
       network: 'testnet',
-      contractId: 'TESTCONTRACT',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       fetch: async (url, options) => {
         const body = JSON.parse((options as any).body);
         capturedPageSize = body.params.pagination.limit;
@@ -230,7 +230,7 @@ describe('Issue #211: EventSubscriptionOptions.pageSize ignored by WebSocket tra
     let pollingPageSize: number | undefined;
     client = new SoroWillClient({
       network: 'testnet',
-      contractId: 'TESTCONTRACT',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       fetch: async (url, options) => {
         const body = JSON.parse((options as any).body);
         pollingPageSize = body.params.pagination.limit;

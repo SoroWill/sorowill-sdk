@@ -97,7 +97,7 @@ describe('Issue #210: WebSocket reconnect/fallback handling for post-open connec
 
     client = new SoroWillClient({
       network: 'testnet',
-      contractId: 'TESTCONTRACT',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       webSocketFactory: webSocketFactory,
       eventStreamUrl: 'ws://test-stream.local',
     });
@@ -197,7 +197,7 @@ describe('Issue #210: WebSocket reconnect/fallback handling for post-open connec
 
     client = new SoroWillClient({
       network: 'testnet',
-      contractId: 'TESTCONTRACT',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       webSocketFactory: () => mockWebSocket,
       eventStreamUrl: 'ws://test-stream.local',
       fetchImpl: async () => {
@@ -241,7 +241,7 @@ describe('Issue #210: WebSocket reconnect/fallback handling for post-open connec
 
     const newClient = new SoroWillClient({
       network: 'testnet',
-      contractId: 'TESTCONTRACT',
+      contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       webSocketFactory: () => {
         const failingSocket = {
           send: vi.fn(),
@@ -302,7 +302,7 @@ describe('Issue #210: WebSocket reconnect/fallback handling for post-open connec
                 createdAt: 123456,
                 ledger: 100,
                 ledgerClosedAt: '2024-01-01T00:00:00Z',
-                contractId: 'TESTCONTRACT',
+                contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
                 txHash: 'tx-hash-1',
                 topics: [],
                 data: {},
@@ -332,7 +332,7 @@ describe('Issue #210: WebSocket reconnect/fallback handling for post-open connec
                 createdAt: 123457,
                 ledger: 101,
                 ledgerClosedAt: '2024-01-01T00:00:01Z',
-                contractId: 'TESTCONTRACT',
+                contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
                 txHash: 'tx-hash-2',
                 topics: [],
                 data: {},
