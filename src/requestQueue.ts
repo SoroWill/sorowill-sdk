@@ -1,4 +1,11 @@
-import { RequestTimeoutError } from './errors';
+import { RequestQueueOverflowError, RequestTimeoutError } from './errors';
+
+/**
+ * Default cap on the number of requests that may be waiting in the queue at
+ * once. Requests beyond this limit are rejected with a
+ * {@link RequestQueueOverflowError} instead of accumulating without bound (#525).
+ */
+export const DEFAULT_MAX_QUEUE_SIZE = 1_000;
 
 /**
  * Rate and concurrency controls used by the client's shared RPC request queue.
@@ -10,7 +17,7 @@ import { RequestTimeoutError } from './errors';
  * were already being processed.
  */
 export interface RequestQueueOptions {
-  /** Maximum number of RPC requests in flight at once. Defaults to 4. */
+  /** Maximum number of RPC requests in flight at once. Must be an integer >= 1. Defaults to 4. */
   maxConcurrent?: number;
   /**
    * Maximum number of RPC requests started in any rolling one-second window. Defaults to 10.
@@ -20,12 +27,73 @@ export interface RequestQueueOptions {
    */
   requestsPerSecond?: number;
   /**
+   * Maximum number of requests allowed to wait in the queue at once. Defaults
+   * to 1000. When the queue is full, further {@link RequestQueue.enqueue}
+   * calls are rejected with a {@link RequestQueueOverflowError} instead of
+   * growing the queue without bound (#525).
+   */
+  maxQueueSize?: number;
+  /**
    * Optional account key. When provided, all {@link RequestQueue} instances
    * created with the same key share a single underlying queue, so operations
    * for a given account are serialized even if multiple clients (or multiple
    * queues) are created for that account in rapid succession.
    */
   account?: string;
+  /**
+   * Maximum number of times a request that fails with a rate-limit error
+   * (HTTP 429 / "too many requests") is retried before the error is surfaced.
+   * Defaults to 3. Set to 0 to disable rate-limit retries.
+   */
+  maxRateLimitRetries?: number;
+  /**
+   * Base delay in milliseconds for rate-limit retries. The n-th retry waits
+   * `2^n * retryBaseDelayMs` (capped by {@link maxBackoffMs}). Defaults to 500.
+   */
+  retryBaseDelayMs?: number;
+  /** Upper bound in milliseconds for a single backoff delay. Defaults to 60 000 (60s). */
+  maxBackoffMs?: number;
+}
+
+/** Default cap applied to a single exponential backoff delay (60 seconds). */
+export const MAX_BACKOFF_MS = 60_000;
+
+/**
+ * Computes the exponential backoff delay for a retry: `2^attempt * baseDelayMs`,
+ * capped at `maxBackoffMs`. `attempt` is zero-based (the first retry is attempt 0).
+ */
+export function computeBackoffDelay(
+  attempt: number,
+  baseDelayMs: number,
+  maxBackoffMs: number = MAX_BACKOFF_MS,
+): number {
+  const delay = 2 ** attempt * baseDelayMs;
+  return Number.isFinite(delay) ? Math.min(delay, maxBackoffMs) : maxBackoffMs;
+}
+
+/**
+ * Returns true when `error` signals that the RPC endpoint rate-limited the
+ * request (HTTP 429 or a "too many requests" / "rate limit" message).
+ */
+export function isRateLimitError(error: unknown): boolean {
+  if (error === null || error === undefined) return false;
+  if (typeof error === 'object') {
+    const candidate = error as {
+      status?: unknown;
+      statusCode?: unknown;
+      response?: { status?: unknown };
+    };
+    if (
+      candidate.status === 429 ||
+      candidate.statusCode === 429 ||
+      candidate.response?.status === 429
+    ) {
+      return true;
+    }
+  }
+  const text = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  const lower = text.toLowerCase();
+  return lower.includes('too many requests') || lower.includes('rate limit') || /\b429\b/.test(text);
 }
 
 /** Priority level for requests in the queue. Higher priority requests are processed first within FIFO ordering constraints. */
@@ -47,6 +115,17 @@ interface PendingRequest<T> {
   abortListener: (() => void) | undefined;
   priority: RequestPriority;
   enqueuedAt: number;
+  method: string | undefined;
+}
+
+/**
+ * Throws a RangeError unless `value` is an integer >= 1. Rejects 0, negative
+ * numbers, NaN, Infinity, fractions, and non-number values (issue #582).
+ */
+function assertPositiveInteger(name: string, value: unknown): asserts value is number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    throw new RangeError(`${name} must be a positive integer (>= 1), received ${String(value)}`);
+  }
 }
 
 /**
@@ -57,15 +136,17 @@ interface PendingRequest<T> {
 class QueueCore {
   readonly maxConcurrent: number;
   readonly requestsPerSecond: number;
+  readonly maxQueueSize: number;
   readonly pending: Array<PendingRequest<unknown>> = [];
   readonly starts: number[] = [];
   active = 0;
   wakeTimer: ReturnType<typeof setTimeout> | undefined;
   refCount = 0;
 
-  constructor(maxConcurrent: number, requestsPerSecond: number) {
+  constructor(maxConcurrent: number, requestsPerSecond: number, maxQueueSize: number) {
     this.maxConcurrent = maxConcurrent;
     this.requestsPerSecond = requestsPerSecond;
+    this.maxQueueSize = maxQueueSize;
   }
 }
 
@@ -86,35 +167,61 @@ export class RequestQueue {
   constructor(options: RequestQueueOptions = {}) {
     const maxConcurrent = options.maxConcurrent ?? 4;
     const requestsPerSecond = options.requestsPerSecond ?? 10;
+    const maxQueueSize = options.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE;
     if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1) {
       throw new RangeError('maxConcurrent must be a positive integer');
     }
     if (!Number.isInteger(requestsPerSecond) || requestsPerSecond < 1) {
       throw new RangeError('requestsPerSecond must be a positive integer');
     }
+    if (!Number.isInteger(maxQueueSize) || maxQueueSize < 1) {
+      throw new RangeError('maxQueueSize must be a positive integer');
+    }
     this.account = options.account;
     if (this.account !== undefined) {
       let core = sharedCores.get(this.account);
       if (core === undefined) {
-        core = new QueueCore(maxConcurrent, requestsPerSecond);
+        core = new QueueCore(maxConcurrent, requestsPerSecond, maxQueueSize);
         sharedCores.set(this.account, core);
       }
       core.refCount += 1;
       this.core = core;
     } else {
-      this.core = new QueueCore(maxConcurrent, requestsPerSecond);
+      this.core = new QueueCore(maxConcurrent, requestsPerSecond, maxQueueSize);
     }
   }
 
-  enqueue<T>(run: () => Promise<T>, timeoutMs?: number, signal?: AbortSignal, priority: RequestPriority = RequestPriority.Normal): Promise<T> {
+  enqueue<T>(
+    run: () => Promise<T>,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+    priority: RequestPriority = RequestPriority.Normal,
+    method?: string,
+  ): Promise<T> {
     if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
       return Promise.reject(new RangeError('timeoutMs must be greater than zero'));
     }
     if (signal?.aborted) {
       return Promise.reject(signal.reason);
     }
+    // Enforce the queue size cap (#525): when requests are produced faster
+    // than concurrency + rate limits allow them to start, reject the excess
+    // immediately rather than letting the pending list grow without bound.
+    if (this.core.pending.length >= this.core.maxQueueSize) {
+      return Promise.reject(new RequestQueueOverflowError(this.core.maxQueueSize));
+    }
     return new Promise<T>((resolve, reject) => {
-      const request: PendingRequest<T> = { run, resolve, reject, timeoutMs, signal, abortListener: undefined, priority, enqueuedAt: Date.now() };
+      const request: PendingRequest<T> = {
+        run,
+        resolve,
+        reject,
+        timeoutMs,
+        signal,
+        abortListener: undefined,
+        priority,
+        enqueuedAt: Date.now(),
+        method,
+      };
       if (signal) {
         request.abortListener = () => {
           // Drop the request from the queue so an aborted request never runs.
@@ -223,7 +330,6 @@ export class RequestQueue {
   }
 
   private async execute<T>(request: PendingRequest<T>): Promise<void> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const result =
         request.timeoutMs === undefined
@@ -232,7 +338,13 @@ export class RequestQueue {
               request.run(),
               new Promise<never>((_, reject) => {
                 timer = setTimeout(
-                  () => reject(new RequestTimeoutError(request.timeoutMs as number)),
+                  () =>
+                    reject(
+                      new RequestTimeoutError(
+                        request.timeoutMs as number,
+                        request.method,
+                      ),
+                    ),
                   request.timeoutMs,
                 );
               }),
@@ -241,11 +353,46 @@ export class RequestQueue {
     } catch (error) {
       request.reject(error);
     } finally {
-      if (timer !== undefined) clearTimeout(timer);
       this.removeAbortListener(request);
       this.core.active -= 1;
       this.drain();
     }
+  }
+
+  private async runAttempt<T>(request: PendingRequest<T>): Promise<T> {
+    if (request.timeoutMs === undefined) {
+      return request.run();
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        request.run(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new RequestTimeoutError(request.timeoutMs as number)),
+            request.timeoutMs,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
+  /** Waits `ms` milliseconds, rejecting early with the abort reason if `signal` fires. */
+  private sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+    if (signal?.aborted) return Promise.reject(signal.reason);
+    return new Promise<void>((resolve, reject) => {
+      const onAbort = (): void => {
+        clearTimeout(timer);
+        reject(signal?.reason);
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
   }
 }
 
