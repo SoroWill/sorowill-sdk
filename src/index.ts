@@ -92,6 +92,7 @@ export type {
   WalletConnection,
   WalletSession,
 } from './wallet';
+export type { WalletAdapter, WalletConnection, WalletSessionOptions } from './wallet';
 
 export { createAlbedoAdapter } from './adapters/albedo';
 export type { AlbedoAdapterOptions } from './adapters/albedo';
@@ -148,6 +149,7 @@ export {
   GracePeriodNotExpiredError,
   GuardianCooldownActiveError,
   HookExecutionError,
+  HookRecursionError,
   InsufficientBalanceError,
   InvalidContractIdError,
   InvalidDayCountError,
@@ -238,6 +240,7 @@ export {
   MAX_BENEFICIARIES,
   MAX_GUARDIANS,
   calculateShares,
+  deepFreezeObject,
   formatDeadline,
   formatTokenAmount,
   formatUSDC,
