@@ -148,6 +148,7 @@ export {
   InvalidPreimageError,
   InvalidPublicKeyError,
   InvalidSecretKeyError,
+  InvalidSignedXdrEncodingError,
   InvalidSplitError,
   InvalidTokenError,
   InvalidTransactionXdrError,
