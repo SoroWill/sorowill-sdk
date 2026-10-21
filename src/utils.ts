@@ -1,6 +1,6 @@
 import { StrKey } from '@stellar/stellar-sdk';
 
-import { BeneficiaryValidationError } from './errors';
+import { BeneficiaryValidationError, InvalidBeneficiaryAddressError } from './errors';
 import type { Beneficiary, Will } from './types';
 import { WillStatus } from './types';
 
@@ -256,11 +256,77 @@ export const MAX_BENEFICIARIES = 10;
  */
 export const MAX_GUARDIANS = 3;
 
+/** Length of a StrKey-encoded Stellar account address. */
+const STELLAR_ADDRESS_LENGTH = 56;
+
+/**
+ * Returns a human-readable reason why `address` is not a valid Stellar
+ * account address usable as a beneficiary, or `null` when it is valid.
+ *
+ * Only Ed25519 account addresses (`G...`) are accepted. Contract (`C...`)
+ * and muxed (`M...`) addresses, secret keys, and non-Stellar addresses (e.g.
+ * Ethereum `0x...`) are rejected with a specific reason.
+ */
+export function describeInvalidBeneficiaryAddress(address: unknown): string | null {
+  if (typeof address !== 'string') {
+    return `expected a string, received ${address === null ? 'null' : typeof address}`;
+  }
+  if (address.length === 0) {
+    return 'address is empty';
+  }
+  if (address.trim() !== address) {
+    return 'address contains leading or trailing whitespace';
+  }
+  if (/^0x[0-9a-fA-F]*$/.test(address)) {
+    return 'this looks like an Ethereum/EVM address, not a Stellar address';
+  }
+  if (address !== address.toUpperCase()) {
+    return 'Stellar addresses are uppercase';
+  }
+  if (StrKey.isValidEd25519SecretSeed(address)) {
+    return 'this is a secret key, not a public address — never share it';
+  }
+  if (StrKey.isValidContract(address)) {
+    return 'contract addresses ("C...") are not supported as beneficiaries';
+  }
+  if (StrKey.isValidMed25519PublicKey(address)) {
+    return 'muxed addresses ("M...") are not supported as beneficiaries';
+  }
+  if (!address.startsWith('G')) {
+    return 'Stellar account addresses start with "G"';
+  }
+  if (address.length !== STELLAR_ADDRESS_LENGTH) {
+    return `expected ${STELLAR_ADDRESS_LENGTH} characters, received ${address.length}`;
+  }
+  if (!StrKey.isValidEd25519PublicKey(address)) {
+    return 'checksum or encoding is invalid';
+  }
+  return null;
+}
+
+/**
+ * Asserts that every beneficiary address is a valid Stellar account address.
+ *
+ * @throws {InvalidBeneficiaryAddressError} For the first invalid address,
+ *   naming the address and the reason it was rejected.
+ */
+export function assertValidBeneficiaryAddresses(beneficiaries: Beneficiary[]): void {
+  for (const b of beneficiaries) {
+    const reason = describeInvalidBeneficiaryAddress(b?.address);
+    if (reason !== null) {
+      throw new InvalidBeneficiaryAddressError(b?.address, reason);
+    }
+  }
+}
+
 /**
  * Validates that a beneficiary list is well-formed: non-empty, at most
  * {@link MAX_BENEFICIARIES} entries, no duplicate addresses (compared
  * case-insensitively), every percentage is a positive integer, and
- * percentages sum to exactly 100.
+ * percentages sum to exactly 100. Every address must be a valid Stellar
+ * account address (see {@link describeInvalidBeneficiaryAddress}); use
+ * {@link assertValidBeneficiaryAddresses} to get an error naming the
+ * offending address instead of `false`.
  *
  * Percentages are on the SDK's 0-100 scale. `SoroWillClient` scales them to
  * the contract's basis points (summing to 10,000) when it submits a
@@ -276,7 +342,7 @@ export function validateBeneficiaries(beneficiaries: Beneficiary[]): boolean {
   if (beneficiaries.length === 0 || beneficiaries.length > MAX_BENEFICIARIES) {
     return false;
   }
-  if (!beneficiaries.every((b) => StrKey.isValidEd25519PublicKey(b.address))) {
+  if (!beneficiaries.every((b) => describeInvalidBeneficiaryAddress(b.address) === null)) {
     return false;
   }
   if (hasDuplicateBeneficiaries(beneficiaries)) {

@@ -145,6 +145,7 @@ export {
   HookExecutionError,
   HookReturnValueError,
   InsufficientBalanceError,
+  InvalidBeneficiaryAddressError,
   InvalidContractIdError,
   InvalidDayCountError,
   InvalidGuardianThresholdError,
@@ -243,6 +244,8 @@ export {
   isGuardian,
   toStroops,
   validateBeneficiaries,
+  describeInvalidBeneficiaryAddress,
+  assertValidBeneficiaryAddresses,
   validateGuardians,
 } from './utils';
 export type { NextActionableState } from './utils';

@@ -61,7 +61,12 @@ import {
   WalletNetworkMismatchError,
   WebSocketNotConfiguredError,
 } from './errors';
-import { hasDuplicateBeneficiaries, MAX_GUARDIANS, validateBeneficiaries } from './utils';
+import {
+  assertValidBeneficiaryAddresses,
+  hasDuplicateBeneficiaries,
+  MAX_GUARDIANS,
+  validateBeneficiaries,
+} from './utils';
 import { RequestQueue } from './requestQueue';
 import { InFlightTracker } from './inFlightTracker';
 import { RpcEndpointPool } from './rpc';
@@ -938,12 +943,15 @@ export class SoroWillClient {
    * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout.
    * @throws {WillContractError} Mapped contract-level errors (e.g. InvalidPercentagesError,
    *   TooManyBeneficiariesError, ZeroAmountError).
+   * @throws {InvalidBeneficiaryAddressError} If a beneficiary address is not a valid
+   *   Stellar account address (`G...`).
    * @throws {Error} If the wallet is not connected or fails to sign.
    */
   async createWill(
     params: CreateWillParams,
     options?: RequestOptions,
   ): Promise<{ willId: string; txHash: string }> {
+    assertValidBeneficiaryAddresses(params.beneficiaries);
     if (hasDuplicateBeneficiaries(params.beneficiaries)) {
       throw new BeneficiaryValidationError('Invalid beneficiaries: duplicate beneficiary addresses are not allowed.');
     }
@@ -1119,6 +1127,7 @@ export class SoroWillClient {
     options?: RequestOptions,
   ): Promise<{ txHash: string }> {
     parseWillId(params.willId);
+    assertValidBeneficiaryAddresses(params.beneficiaries);
     if (hasDuplicateBeneficiaries(params.beneficiaries)) {
       throw new BeneficiaryValidationError('Invalid beneficiaries: duplicate beneficiary addresses are not allowed.');
     }

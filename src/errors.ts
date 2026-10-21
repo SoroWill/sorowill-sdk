@@ -262,6 +262,31 @@ export class BeneficiaryValidationError extends SoroWillError {
 }
 
 /**
+ * Raised by {@link SoroWillClient.createWill} and
+ * {@link SoroWillClient.updateBeneficiaries} when a beneficiary address is not
+ * a valid Stellar account address (a `G...` Ed25519 public key). Catching it
+ * before submission prevents a will from being created whose funds can never
+ * be released to that beneficiary.
+ */
+export class InvalidBeneficiaryAddressError extends BeneficiaryValidationError {
+  /** The offending beneficiary address, exactly as supplied. */
+  readonly address: unknown;
+  /** Human-readable reason the address was rejected. */
+  readonly reason: string;
+
+  constructor(address: unknown, reason: string, options?: ErrorOptions) {
+    const shown = typeof address === 'string' ? `"${address}"` : String(address);
+    super(
+      `Invalid beneficiary address ${shown}: ${reason}. ` +
+        'Beneficiaries must be Stellar account addresses: 56-character uppercase strings starting with "G".',
+      options,
+    );
+    this.address = address;
+    this.reason = reason;
+  }
+}
+
+/**
  * Raised by `createWill` before any RPC call when the guardian list is
  * invalid: a malformed Stellar address, a duplicate entry, or the owner's own
  * address. `reason` names the problem and `guardian` the offending address.
