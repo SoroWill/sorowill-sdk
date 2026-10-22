@@ -220,6 +220,7 @@ export {
   OwnerCannotBeGuardianError,
   RequestTimeoutError,
   RequestQueueOverflowError,
+  ReadOnlyModeError,
   SameWillIdError,
   SignTransactionTimeoutError,
   SimulationError,

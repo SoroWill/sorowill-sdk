@@ -4,3 +4,21 @@ docs/api/
 .DS_Store
 *.log
 issue.md
+
+# Test snapshots
+**/__snapshots__/
+*.snap
+
+# Coverage reports
+coverage/
+
+# Build / type-check caches
+*.tsbuildinfo
+.cache/
+
+# Editor directories
+.vscode/
+.idea/
+
+# OS files
+Thumbs.db

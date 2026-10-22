@@ -252,6 +252,12 @@ export async function isTransactionResolved(
   }
 }
 
+/**
+ * Maximum number of recent latency samples kept per endpoint for weighted
+ * selection. Older samples are evicted to keep the window current.
+ */
+export const LATENCY_HISTORY_WINDOW = 10;
+
 export class RpcEndpointPool {
   private readonly servers: SoroWillRpcServer[] = [];
   private readonly rpcUrls: string[] = [];
@@ -262,9 +268,21 @@ export class RpcEndpointPool {
   private readonly timeoutRetryBaseDelayMs: number;
   private readonly circuitBreakerThreshold: number;
   private readonly circuitBreakerCooldownMs: number;
+  private readonly endpointBackoffBaseMs: number;
+  private readonly endpointBackoffMaxMs: number;
   private activeIndex = 0;
   private lastFailoverAt: number | null = null;
   private readonly circuitStates: EndpointCircuitState[];
+  /** Per-endpoint exponential-backoff deadline timestamps (ms epoch). */
+  private readonly backoffUntil: number[];
+  /** Per-endpoint count of consecutive failures for backoff scheduling. */
+  private readonly consecutiveFailures: number[];
+  /**
+   * Per-endpoint latency history (ms per successful request). Each array holds
+   * at most {@link LATENCY_HISTORY_WINDOW} recent samples; oldest samples are
+   * shifted out as new ones arrive. Used for weighted endpoint selection (#636).
+   */
+  private readonly latencyHistory: number[][];
 
   /**
    * @param serverOverride - When provided (e.g. `SoroWillClientOptions.rpcServer`
@@ -317,10 +335,15 @@ export class RpcEndpointPool {
     this.timeoutRetryBaseDelayMs = timeoutRetryBaseDelayMs;
     this.circuitBreakerThreshold = circuitBreaker?.threshold ?? DEFAULT_CIRCUIT_BREAKER_THRESHOLD;
     this.circuitBreakerCooldownMs = circuitBreaker?.cooldownMs ?? DEFAULT_CIRCUIT_BREAKER_COOLDOWN_MS;
+    this.endpointBackoffBaseMs = DEFAULT_RPC_ENDPOINT_BACKOFF_BASE_MS;
+    this.endpointBackoffMaxMs = DEFAULT_RPC_ENDPOINT_BACKOFF_MAX_MS;
     this.circuitStates = uniqueRpcUrls.map(() => ({
       failureCount: 0,
       quarantinedAt: null,
     }));
+    this.backoffUntil = uniqueRpcUrls.map(() => 0);
+    this.consecutiveFailures = uniqueRpcUrls.map(() => 0);
+    this.latencyHistory = uniqueRpcUrls.map(() => []);
     this.servers = serverOverride
       ? uniqueRpcUrls.map(() => serverOverride)
       : uniqueRpcUrls.map(
@@ -358,7 +381,7 @@ export class RpcEndpointPool {
    * exponential backoff: `base * 2^(consecutiveFailures - 1)`, capped at
    * `endpointBackoffMaxMs`.
    */
-  private recordEndpointFailure(index: number): void {
+  private recordEndpointBackoff(index: number): void {
     const failures = (this.consecutiveFailures[index] ?? 0) + 1;
     this.consecutiveFailures[index] = failures;
     const exponentialDelay = this.endpointBackoffBaseMs * 2 ** (failures - 1);
@@ -366,31 +389,73 @@ export class RpcEndpointPool {
   }
 
   /** Clears the backoff state of an endpoint after a successful request. */
-  private recordEndpointSuccess(index: number): void {
+  private clearEndpointBackoff(index: number): void {
     this.consecutiveFailures[index] = 0;
     this.backoffUntil[index] = 0;
   }
 
   /**
-   * Picks the endpoint a request should be routed to: the active endpoint if
-   * it is not backing off, otherwise the next endpoint (in rotation order)
-   * that is not backing off. If every endpoint is backing off, the active
-   * endpoint is used anyway — retrying the least-bad option beats failing
-   * outright, and the request would otherwise never be able to recover.
+   * Records a successful request latency sample for the endpoint at `index`.
+   * Keeps at most {@link LATENCY_HISTORY_WINDOW} recent samples per endpoint.
+   */
+  private recordEndpointLatency(index: number, latencyMs: number): void {
+    const history = this.latencyHistory[index];
+    if (history === undefined) return;
+    history.push(latencyMs);
+    if (history.length > LATENCY_HISTORY_WINDOW) {
+      history.shift();
+    }
+  }
+
+  /**
+   * Returns the average latency (ms) recorded for the endpoint at `index`,
+   * or `Infinity` when no samples exist yet (so unsampled endpoints are
+   * deprioritised relative to known-fast ones but still tried).
+   */
+  getAverageLatency(index: number): number {
+    const history = this.latencyHistory[index];
+    if (!history || history.length === 0) return Infinity;
+    return history.reduce((sum, ms) => sum + ms, 0) / history.length;
+  }
+
+  /**
+   * Returns the latency history samples for the endpoint at `index`.
+   * Exposed for testing and diagnostics.
+   */
+  getLatencyHistory(index: number): readonly number[] {
+    return this.latencyHistory[index] ?? [];
+  }
+
+  /**
+   * Returns the number of endpoints in the pool.
+   */
+  get size(): number {
+    return this.servers.length;
+  }
+
+  /**
+   * Picks the endpoint a request should be routed to using weighted selection
+   * by latency history (#636). Endpoints with lower average latency are
+   * preferred. Endpoints that are backing off or quarantined are skipped.
+   * Falls back to the active endpoint if every candidate is unavailable.
    */
   private selectEndpointIndex(): number {
-    if (!this.isEndpointUnderBackoff(this.activeIndex)) {
-      return this.activeIndex;
-    }
+    let bestIndex = -1;
+    let bestLatency = Infinity;
 
-    for (let offset = 1; offset < this.servers.length; offset += 1) {
+    for (let offset = 0; offset < this.servers.length; offset += 1) {
       const index = (this.activeIndex + offset) % this.servers.length;
-      if (!this.isEndpointUnderBackoff(index)) {
-        return index;
+      if (this.isEndpointUnderBackoff(index)) continue;
+      if (this.isEndpointQuarantined(index)) continue;
+      const avg = this.getAverageLatency(index);
+      if (avg < bestLatency) {
+        bestLatency = avg;
+        bestIndex = index;
       }
     }
 
-    return this.activeIndex;
+    // If every endpoint is backing off or quarantined, fall back to active
+    return bestIndex === -1 ? this.activeIndex : bestIndex;
   }
 
   /**
@@ -475,8 +540,7 @@ export class RpcEndpointPool {
     let lastError: unknown;
 
     for (let attempt = 0; attempt < this.servers.length; attempt += 1) {
-      // Route around endpoints that are still backing off from a previous
-      // failure instead of immediately retrying them.
+      // Route to the latency-weighted best available endpoint.
       const index = this.selectEndpointIndex();
       const rpcUrl = this.rpcUrls[index];
       const server = this.servers[index];
@@ -495,14 +559,19 @@ export class RpcEndpointPool {
         continue;
       }
 
+      const startTime = Date.now();
       try {
         const result = await this.runWithTimeoutRetry(operation, server, rpcUrl);
-        // Success — reset the circuit breaker for this endpoint.
+        const latencyMs = Date.now() - startTime;
+        // Success — record latency, reset circuit breaker and backoff.
+        this.recordEndpointLatency(index, latencyMs);
         this.resetEndpointFailure(index);
+        this.clearEndpointBackoff(index);
         return result;
       } catch (error) {
         lastError = error;
         this.recordEndpointFailure(index);
+        this.recordEndpointBackoff(index);
         if (!isRetryableRpcConnectionError(error) || attempt === this.servers.length - 1) {
           throw error;
         }

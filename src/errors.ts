@@ -1182,6 +1182,39 @@ export class ExorbitantFeeError extends Error {
   }
 }
 
+/**
+ * Raised when a write (state-changing) operation is attempted on a client
+ * that was constructed in read-only mode (`readOnly: true`). Read-only clients
+ * do not require a connected wallet and can be used for query operations only
+ * (#635).
+ *
+ * @example
+ * ```ts
+ * const client = new SoroWillClient({
+ *   network: 'testnet',
+ *   contractId: 'C...',
+ *   readOnly: true,
+ * });
+ *
+ * // This throws ReadOnlyModeError:
+ * await client.checkIn('1');
+ * ```
+ */
+export class ReadOnlyModeError extends SoroWillError {
+  /** The name of the write method that was called. */
+  readonly method: string;
+
+  constructor(method: string) {
+    super(
+      `Cannot call "${method}" on a read-only SoroWillClient. ` +
+        'This client was constructed with readOnly: true and does not support write operations. ' +
+        'Construct a new client with a wallet adapter to perform state-changing operations.',
+    );
+    this.name = 'ReadOnlyModeError';
+    this.method = method;
+  }
+}
+
 export function registerContractError(_code: number, _errorFactory: ContractErrorFactory): void {
   // Stub implementation - actual error registry would be managed elsewhere
 }
