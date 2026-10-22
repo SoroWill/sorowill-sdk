@@ -458,6 +458,7 @@ export class RequestQueue {
           : await Promise.race([
               request.run(),
               new Promise<never>((_, reject) => {
+                let timer: ReturnType<typeof setTimeout> | undefined;
                 timer = setTimeout(
                   () =>
                     reject(
@@ -468,6 +469,7 @@ export class RequestQueue {
                     ),
                   request.timeoutMs,
                 );
+                void timer; // referenced in the closure above
               }),
             ]);
       request.resolve(result);

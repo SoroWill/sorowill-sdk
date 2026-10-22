@@ -115,15 +115,14 @@ export {
   isWalletNetworkMismatchError,
   isWalletSessionError,
   signTransaction,
-  WalletSessionError,
 } from './wallet';
 export type {
   WalletAdapter,
   WalletAdapterError,
   WalletConnection,
   WalletSession,
+  WalletSessionOptions,
 } from './wallet';
-export type { WalletAdapter, WalletConnection, WalletSessionOptions } from './wallet';
 
 export { createAlbedoAdapter } from './adapters/albedo';
 export type { AlbedoAdapterOptions } from './adapters/albedo';
@@ -210,6 +209,7 @@ export {
   InvalidStellarAddressError,
   InvalidTokenError,
   InvalidTransactionXdrError,
+  InvalidWebSocketUrlError,
   InvokeFailedError,
   KeeperBountyExceedsMaxError,
   MergeWouldExceedLimitsError,
@@ -233,7 +233,9 @@ export {
   TooManyIdsError,
   TooManyWillsError,
   TransactionSubmissionError,
+  WalletConnectChainIdMismatchError,
   WalletNetworkMismatchError,
+  CheckInDuringGracePeriodError,
   WebSocketNotConfiguredError,
   WillContractError,
   WillNotActiveError,
@@ -294,6 +296,7 @@ export type {
 export {
   MAX_BENEFICIARIES,
   MAX_GUARDIANS,
+  PERCENTAGE_SUM_EPSILON,
   assertValidStellarAddress,
   calculateShares,
   deepFreezeObject,

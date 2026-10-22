@@ -60,12 +60,14 @@ import {
   BeneficiaryValidationError,
   GuardianValidationError,
   CheckinPeriodExceedsTtlError,
+  CheckInDuringGracePeriodError,
   InvalidDayCountError,
   InvalidContractIdError,
   InvalidCursorError,
   InvalidGuardianSignatureError,
   InvalidPaginationOptionsError,
   InvalidPublicKeyError,
+  InvalidWebSocketUrlError,
   InvokeFailedError,
   RequestTimeoutError,
   mapContractError,
@@ -1064,6 +1066,11 @@ export class SoroWillClient {
     this.specJsonOverride = options.specJson;
     this.eventRpcUrl = options.eventRpcUrl ?? rpcUrl;
     this.eventStreamUrl = options.eventStreamUrl;
+    if (this.eventStreamUrl !== undefined) {
+      if (!this.eventStreamUrl.startsWith('wss://')) {
+        throw new InvalidWebSocketUrlError(this.eventStreamUrl);
+      }
+    }
     this.defaultPollIntervalMs = options.defaultPollIntervalMs ?? 5_000;
     if (!Number.isFinite(this.defaultPollIntervalMs) || this.defaultPollIntervalMs <= 0) {
       throw new RangeError('defaultPollIntervalMs must be a finite number greater than zero');
@@ -1416,6 +1423,13 @@ export class SoroWillClient {
     let will: Awaited<ReturnType<typeof this.getWill>> | null = null;
     if (!options?.skipExistenceCheck) {
       will = await this.getWill(willId, options);
+    }
+    // If the will is in the Triggered state (grace period active), the contract
+    // will reject check_in with WillNotActiveError. Detect this early and throw
+    // a descriptive CheckInDuringGracePeriodError so callers know to use
+    // emergencyCheckIn() instead.
+    if (will?.status === WillStatus.Triggered) {
+      throw new CheckInDuringGracePeriodError(willId);
     }
     const { txHash, createdAt } = await this.invoke(
       'check_in',

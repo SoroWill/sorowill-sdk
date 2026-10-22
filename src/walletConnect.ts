@@ -1,4 +1,5 @@
-import { SignTransactionTimeoutError } from './errors';
+import { SignTransactionTimeoutError, WalletConnectChainIdMismatchError } from './errors';
+export { WalletConnectChainIdMismatchError } from './errors';
 import type { WalletAdapter, WalletConnection, SignTransactionOptions } from './wallet';
 
 export interface WalletConnectSessionNamespace {
@@ -480,7 +481,17 @@ export class WalletConnectAdapter implements WalletAdapter {
     const method = this.getSignTransactionMethod();
     assertSessionSupportsMethod(session, method);
 
-    const chainId = this.options.requestChainId ?? getDefaultChainId(session);
+    const sessionChainId = getDefaultChainId(session);
+    const chainId = this.options.requestChainId ?? sessionChainId;
+
+    // Validate that a caller-supplied requestChainId matches the session's chain.
+    // An explicit requestChainId that differs from the session chain means the
+    // request would be sent to a different network than what the session is
+    // connected to, which is a likely misconfiguration.
+    if (this.options.requestChainId && this.options.requestChainId !== sessionChainId) {
+      throw new WalletConnectChainIdMismatchError(this.options.requestChainId, sessionChainId);
+    }
+
     const network = this.resolveNetwork(session);
     const params = this.options.getSignTransactionParams?.(xdr, network.networkPassphrase) ?? { xdr };
 
