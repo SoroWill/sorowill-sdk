@@ -1175,6 +1175,32 @@ export class MultisigTimeoutError extends Error {
   }
 }
 
+/**
+ * Raised by {@link SoroWillClient.releaseInheritance} when the will's grace
+ * period has not yet expired. The grace period begins when the will is
+ * triggered and must elapse before the inheritance can be released.
+ * Throwing this client-side avoids a wasted signing round-trip that the
+ * contract would reject with {@link GracePeriodNotExpiredError}.
+ */
+export class GracePeriodActiveError extends SoroWillError {
+  /** The will ID whose grace period is still active. */
+  readonly willId: string;
+  /** The UTC time at which the grace period expires. */
+  readonly expiresAt: Date;
+
+  constructor(willId: string, expiresAt: Date, options?: ErrorOptions) {
+    const isoExpiry = expiresAt.toISOString();
+    super(
+      `Cannot release inheritance for will "${willId}": the grace period is still active and expires at ${isoExpiry}. ` +
+        'Wait until the grace period has elapsed before calling releaseInheritance().',
+      options,
+    );
+    this.name = 'GracePeriodActiveError';
+    this.willId = willId;
+    this.expiresAt = expiresAt;
+  }
+}
+
 export class ExorbitantFeeError extends Error {
   constructor(fee: string, maxFee: string) {
     super(`Fee ${fee} exceeds maximum allowed ${maxFee}`);

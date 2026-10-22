@@ -347,6 +347,32 @@ export class DebugLogger {
     // Structured, JSON-serializable output covering multiple log levels
     // (not just warn/error), so console.log is intentional here.
     // eslint-disable-next-line no-console
-    console.log(JSON.stringify(log));
+    console.log(this.safeStringify(log));
+  }
+
+  /**
+   * Safely stringifies a log entry, guarding against circular references that
+   * would otherwise cause `JSON.stringify` to throw a `TypeError` and crash
+   * the calling application. Circular objects are replaced with the string
+   * `"[Circular]"` so the log entry is always emitted, even if some detail
+   * values reference their own ancestors (#632).
+   */
+  private safeStringify(value: unknown): string {
+    const seen = new WeakSet<object>();
+    try {
+      return JSON.stringify(value, (_key, currentValue) => {
+        if (currentValue !== null && typeof currentValue === 'object') {
+          if (seen.has(currentValue)) {
+            return '[Circular]';
+          }
+          seen.add(currentValue);
+        }
+        return currentValue;
+      });
+    } catch {
+      // Last-resort fallback: if stringify still fails (e.g. custom toJSON
+      // that throws), emit a safe placeholder rather than propagating.
+      return JSON.stringify({ error: '[DebugLogger: failed to serialize log entry]' });
+    }
   }
 }

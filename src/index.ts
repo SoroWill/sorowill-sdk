@@ -185,6 +185,7 @@ export {
   FixedAmountExceedsBalanceError,
   FreighterInstallCheckError,
   FreighterNotAvailableError,
+  GracePeriodActiveError,
   GracePeriodExpiredError,
   GracePeriodNotExpiredError,
   GuardianCooldownActiveError,
