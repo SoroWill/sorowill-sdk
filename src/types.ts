@@ -535,8 +535,13 @@ export const SOROBAN_EVENT_TYPES = ['contract', 'system', 'diagnostic'] as const
 
 export type SorobanEventType = (typeof SOROBAN_EVENT_TYPES)[number];
 
-export interface EventSubscriptionOptions {
-  transport?: EventSubscriptionTransport;
+/**
+ * Simple event filter: match events of specific types.
+ *
+ * For compound filters (AND/OR logic), use {@link EventFilter} in the
+ * `eventFilter` option instead.
+ */
+export interface SimpleEventFilter {
   /**
    * Only deliver events of these types. Each entry must be one of
    * {@link SOROBAN_EVENT_TYPES}; anything else is rejected with
@@ -544,6 +549,26 @@ export interface EventSubscriptionOptions {
    * silently matches nothing. Omit to receive events of every type.
    */
   eventTypes?: SorobanEventType[];
+}
+
+export interface EventSubscriptionOptions {
+  transport?: EventSubscriptionTransport;
+  /**
+   * Only deliver events of these types. Each entry must be one of
+   * {@link SOROBAN_EVENT_TYPES}; anything else is rejected with
+   * `InvalidEventTypeFilterError` rather than producing a subscription that
+   * silently matches nothing. Omit to receive events of every type.
+   *
+   * @deprecated Use `eventFilter` instead for compound conditions (AND/OR).
+   */
+  eventTypes?: SorobanEventType[];
+  /**
+   * Compound event filter supporting AND/OR logic and multiple conditions.
+   * Overrides `eventTypes` when provided.
+   *
+   * @see {@link EventFilter} for usage examples.
+   */
+  eventFilter?: import('./events').EventFilter;
   retryAttempts?: number;
   retryDelayMs?: number;
   websocketConnectTimeoutMs?: number;
