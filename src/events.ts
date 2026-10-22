@@ -15,6 +15,96 @@ export interface WillEventSource {
 }
 
 /**
+ * Compound event filter supporting AND/OR logical operators (#627).
+ *
+ * Allows combining multiple conditions with AND (all must match) or OR (any can match).
+ * Filters can be nested for complex logic.
+ *
+ * @example
+ * ```ts
+ * // Match either willCreated OR willUpdated events
+ * const filter: EventFilter = {
+ *   OR: [
+ *     { eventType: 'willCreated' },
+ *     { eventType: 'willUpdated' },
+ *   ],
+ * };
+ *
+ * // Match willCreated events WITH willId = '123' (AND logic)
+ * const filter: EventFilter = {
+ *   AND: [
+ *     { eventType: 'willCreated' },
+ *     { willId: '123' },
+ *   ],
+ * };
+ *
+ * // Complex: (willCreated OR willUpdated) AND hasPayload
+ * const filter: EventFilter = {
+ *   AND: [
+ *     {
+ *       OR: [
+ *         { eventType: 'willCreated' },
+ *         { eventType: 'willUpdated' },
+ *       ],
+ *     },
+ *     { hasPayload: true },
+ *   ],
+ * };
+ * ```
+ */
+export interface EventFilter {
+  /** All conditions must match (logical AND). */
+  AND?: EventFilter[];
+  /** Any condition can match (logical OR). */
+  OR?: EventFilter[];
+  /** Match events of this type. */
+  eventType?: SorobanEventType;
+  /** Match events with this willId. */
+  willId?: string;
+  /** Match events with/without a payload. */
+  hasPayload?: boolean;
+}
+
+/**
+ * Evaluates an event against a compound filter (AND/OR logic).
+ *
+ * @param event - The event to test.
+ * @param filter - The filter to apply.
+ * @returns true when the event matches the filter.
+ *
+ * @internal Used by event subscription handlers to apply compound filters.
+ */
+export function matchesEventFilter(event: WillEvent, filter: EventFilter): boolean {
+  // AND: all sub-filters must match
+  if (filter.AND) {
+    return filter.AND.every((subFilter) => matchesEventFilter(event, subFilter));
+  }
+
+  // OR: any sub-filter can match
+  if (filter.OR) {
+    return filter.OR.some((subFilter) => matchesEventFilter(event, subFilter));
+  }
+
+  // Atomic conditions
+  if (filter.eventType !== undefined && event.type !== filter.eventType) {
+    return false;
+  }
+
+  if (filter.willId !== undefined && event.willId !== filter.willId) {
+    return false;
+  }
+
+  if (filter.hasPayload !== undefined) {
+    const hasPayload = event.payload !== undefined && event.payload !== null;
+    if (hasPayload !== filter.hasPayload) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
  * Known SoroWill event types that can be subscribed to.
  */
 export const SORO_WILL_EVENT_TYPES = [

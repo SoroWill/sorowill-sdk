@@ -158,10 +158,12 @@ export type { CachePersistenceAdapter, PersistedCacheEntry, ReadCacheOptions } f
 
 export {
   addEventListener,
+  matchesEventFilter,
   unsubscribeFromWillEvents,
   validateEventTypeFilter,
 } from './events';
 export type {
+  EventFilter,
   WillEvent,
   WillEventListener,
   WillEventSource,
@@ -259,8 +261,10 @@ export {
   getSharedRequestQueue,
   releaseSharedRequestQueue,
   computeBackoffDelay,
+  classifyRpcError,
   isRateLimitError,
   MAX_BACKOFF_MS,
+  ErrorTransience,
 } from './requestQueue';
 export type { RequestQueueOptions } from './requestQueue';
 

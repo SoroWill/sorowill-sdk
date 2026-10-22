@@ -927,6 +927,40 @@ function getDefaultEnv(): EnvSource {
  *
  * @see https://developers.stellar.org/docs/learn/fundamentals/lumens
  */
+
+/**
+ * Validates that a contract ID has the correct format for Stellar contracts.
+ *
+ * Throws {@link InvalidContractIdError} if the contract ID is missing, not a
+ * string, or does not match the Stellar contract ID format (StrKey encoding
+ * starting with 'C'). This allows configuration errors to be caught during
+ * client initialization rather than on the first operation.
+ *
+ * @param contractId - The contract ID to validate.
+ * @throws InvalidContractIdError when the contract ID format is invalid.
+ *
+ * @example
+ * ```ts
+ * // Validates during client construction
+ * try {
+ *   const client = new SoroWillClient({
+ *     network: 'testnet',
+ *     contractId: 'INVALID',  // Bad format
+ *   });
+ * } catch (error) {
+ *   if (error instanceof InvalidContractIdError) {
+ *     console.error('Configuration error:', error.message);
+ *     // Client is never created, so no risk of cryptic errors on first operation
+ *   }
+ * }
+ * ```
+ */
+function validateContractIdFormat(contractId: unknown): asserts contractId is string {
+  if (typeof contractId !== 'string' || !StrKey.isValidContract(contractId)) {
+    throw new InvalidContractIdError(contractId ?? '');
+  }
+}
+
 export class SoroWillClient {
   private readonly server: SoroWillRpcServer;
   private readonly rpcPool: RpcEndpointPool;
@@ -998,10 +1032,10 @@ export class SoroWillClient {
   private readonly signedTransactionHashes: Set<string>;
 
   constructor(options: SoroWillClientOptions) {
-    // Stellar SDK names its contract StrKey validator isValidContract.
-    if (typeof options.contractId !== 'string' || !StrKey.isValidContract(options.contractId)) {
-      throw new InvalidContractIdError(options.contractId ?? '');
-    }
+    // Validate contract ID format on initialization (#626).
+    // This catches configuration errors early, before the first operation.
+    validateContractIdFormat(options.contractId);
+
     const config = NETWORK_CONFIG[options.network];
     const rpcUrl = options.rpcUrl ?? config.rpcUrls[0]!;
 
