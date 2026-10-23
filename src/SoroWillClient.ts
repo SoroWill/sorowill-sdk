@@ -69,6 +69,7 @@ import {
   InvalidPublicKeyError,
   InvalidWebSocketUrlError,
   InvokeFailedError,
+  ReadOnlyModeError,
   RequestTimeoutError,
   mapContractError,
   SimulationError,
@@ -451,6 +452,32 @@ export interface SoroWillClientOptions {
    * checked and the network is only verified for adapters that can report it.
    */
   requireWalletNetwork?: boolean;
+  /**
+   * When `true`, the client operates in read-only mode. No wallet is required,
+   * and all write (state-changing) operations will throw a {@link ReadOnlyModeError}
+   * instead of attempting to sign and submit a transaction. Ideal for server-side
+   * rendering, analytics dashboards, or any context where only query methods are
+   * needed (#635).
+   *
+   * When `readOnly: true`, the `wallet` option is ignored and no default
+   * wallet adapter is loaded.
+   *
+   * @example
+   * ```ts
+   * const client = new SoroWillClient({
+   *   network: 'testnet',
+   *   contractId: 'C...',
+   *   readOnly: true,
+   * });
+   *
+   * // Works fine:
+   * const will = await client.getWill('1');
+   *
+   * // Throws ReadOnlyModeError:
+   * await client.checkIn('1');
+   * ```
+   */
+  readOnly?: boolean;
 }
 
 /** The raw, snake_case shape of a `Will` as decoded straight off the contract spec. */
@@ -602,7 +629,22 @@ function mapWillList(raw: unknown): Will[] {
         'This usually means the deployed contract spec and this SDK version have drifted apart.',
     );
   }
-  return sortWillsById(raw.map(mapWill));
+  return sortWillsById(deduplicateWillsById(raw.map(mapWill)));
+}
+
+/**
+ * Removes duplicate will entries by `id`. When the RPC response contains the
+ * same will more than once (e.g. due to overlapping pagination cursors on the
+ * contract side), only the first occurrence is kept. The input order is
+ * preserved before the subsequent {@link sortWillsById} step (#634).
+ */
+function deduplicateWillsById(wills: Will[]): Will[] {
+  const seen = new Set<string>();
+  return wills.filter((will) => {
+    if (seen.has(will.id)) return false;
+    seen.add(will.id);
+    return true;
+  });
 }
 
 /**
@@ -1013,6 +1055,7 @@ export class SoroWillClient {
   private readonly autoFeeBumpOnTimeout: boolean;
   private readonly transactionTimeoutSeconds: number;
   private readonly deepFreeze: boolean;
+  private readonly readOnly: boolean;
   /**
    * How long (in milliseconds) the lazily-fetched contract spec is considered
    * fresh. After this TTL elapses the next call will re-fetch the spec from the
@@ -1057,7 +1100,19 @@ export class SoroWillClient {
     this.networkPassphrase = options.networkPassphrase ?? config.networkPassphrase;
     this.network = options.network;
     this.hooks = options.hooks ?? new HookManager();
-    this.wallet = options.wallet ?? getDefaultWalletAdapter();
+    this.readOnly = options.readOnly ?? false;
+    this.wallet = this.readOnly
+      ? // In read-only mode, provide a no-op stub so write methods can throw
+        // ReadOnlyModeError before ever touching the wallet.
+        (options.wallet ?? {
+          isConnected: async () => false,
+          connect: async () => { throw new ReadOnlyModeError('connect'); },
+          reconnect: async () => { throw new ReadOnlyModeError('reconnect'); },
+          disconnect: async () => undefined,
+          getPublicKey: async () => { throw new ReadOnlyModeError('getPublicKey'); },
+          signTransaction: async () => { throw new ReadOnlyModeError('signTransaction'); },
+        } as WalletAdapter)
+      : (options.wallet ?? getDefaultWalletAdapter());
     this.requireWalletNetwork = options.requireWalletNetwork ?? false;
     this.pollAttempts = options.pollAttempts ?? DEFAULT_POLL_ATTEMPTS;
     if (!Number.isInteger(this.pollAttempts) || this.pollAttempts <= 0) {
@@ -2328,6 +2383,10 @@ export class SoroWillClient {
     if (operations.length === 0) {
       throw new RangeError('A batch must contain at least one operation');
     }
+    // #635: Reject write operations in read-only mode.
+    if (this.readOnly) {
+      throw new ReadOnlyModeError('batch');
+    }
     // #550: every operation must target the same network, and that network
     // must be the one the client is configured for. This runs before any
     // transaction is built, signed, or submitted so a batch can never mix
@@ -3212,6 +3271,10 @@ export class SoroWillClient {
     args: Record<string, unknown>,
     options?: RequestOptions,
   ): Promise<{ txHash: string; createdAt: number; returnValue: ScVal | undefined; events?: Array<{ topics: string[]; data: unknown }> }> {
+    // #635: Reject all write operations when the client is in read-only mode.
+    if (this.readOnly) {
+      throw new ReadOnlyModeError(method);
+    }
     // #520: Validate that the connected wallet's network matches the client's
     // configured network before building or signing any transaction. This is a
     // defense-in-depth check; individual public methods also call
@@ -3660,6 +3723,10 @@ export class SoroWillClient {
     signedTxXdr: string,
     options?: RequestOptions,
   ): Promise<{ txHash: string; createdAt: number; returnValue: ScVal | undefined }> {
+    // #635: Reject write operations in read-only mode.
+    if (this.readOnly) {
+      throw new ReadOnlyModeError('submitSignedTransaction');
+    }
     await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const signedTx = TransactionBuilder.fromXDR(signedTxXdr, this.networkPassphrase);
     if (!(signedTx instanceof Transaction)) {
