@@ -198,6 +198,45 @@ export class InFlightTracker {
     this.failedSequences.delete(this.getKey(willId, method, clientId));
   }
 
+  /**
+   * Like {@link track}, but accepts an arbitrary composite key string instead
+   * of requiring a `(willId, method)` pair. This is useful for deduplicating
+   * read-only RPC calls that are not scoped to a single will (e.g.
+   * `get_wills_by_owner`, `get_wills_by_beneficiary`) where the key should
+   * encode the full argument set rather than just a will ID (#504).
+   *
+   * The scope prefix set on this tracker is **not** applied to the provided
+   * `key` — callers are responsible for constructing a unique key.
+   */
+  trackByKey<T>(
+    key: string,
+    operation: (signal: AbortSignal) => PromiseLike<T>,
+  ): Promise<T> {
+    const existing = this.inFlight.get(key);
+    if (existing) {
+      if (!this.isExpired(existing)) {
+        return existing.promise as Promise<T>;
+      }
+      this.evict(key, existing);
+    }
+
+    this.pruneExpired();
+    if (this.inFlight.size >= this.maxInFlight) {
+      this.evictOldest();
+    }
+
+    const controller = new AbortController();
+    const entry = { controller, createdAt: Date.now() } as InFlightOperation<T>;
+    entry.promise = Promise.resolve(operation(controller.signal)).finally(() => {
+      if (this.inFlight.get(key) === entry) {
+        this.inFlight.delete(key);
+      }
+    });
+
+    this.inFlight.set(key, entry as InFlightOperation<unknown>);
+    return entry.promise;
+  }
+
   track<T>(
     willId: string | bigint,
     method: string,

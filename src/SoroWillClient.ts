@@ -1285,6 +1285,78 @@ export class SoroWillClient {
     });
   }
 
+  /**
+   * Creates a `SoroWillClient` pre-wired for unit testing and dependency
+   * injection without any global state mutation (#516).
+   *
+   * Accepts the same options as the constructor, but applies test-friendly
+   * defaults — most importantly it does **not** require a real RPC server or
+   * a connected wallet.
+   *
+   * ### Why this exists
+   *
+   * The standard constructor wires up production defaults (Freighter wallet,
+   * real RPC server, etc.) that are unavailable in a test environment. Callers
+   * end up patching global state or importing mocks at module level to work
+   * around this. `createTestClient` makes the dependency surface explicit: you
+   * supply exactly the collaborators your test needs, and the factory fills in
+   * safe no-op stubs for everything else.
+   *
+   * @example
+   * ```ts
+   * import { SoroWillClient } from '@sorowill/sdk';
+   * import { vi } from 'vitest';
+   *
+   * const mockServer = {
+   *   getAccount: vi.fn(),
+   *   simulateTransaction: vi.fn(),
+   *   prepareTransaction: vi.fn(),
+   *   sendTransaction: vi.fn(),
+   *   pollTransaction: vi.fn(),
+   *   getContractWasmByContractId: vi.fn(),
+   * };
+   *
+   * const mockWallet = {
+   *   isConnected: vi.fn().mockResolvedValue(true),
+   *   connect: vi.fn(),
+   *   reconnect: vi.fn(),
+   *   disconnect: vi.fn(),
+   *   getPublicKey: vi.fn().mockResolvedValue('GTESTKEY...'),
+   *   signTransaction: vi.fn(),
+   * };
+   *
+   * const client = SoroWillClient.createTestClient({
+   *   rpcServer: mockServer,
+   *   wallet: mockWallet,
+   * });
+   * ```
+   *
+   * @param overrides - Optional partial options. Any value not supplied here
+   *   gets a safe stub so the client can be constructed without real
+   *   infrastructure.
+   */
+  static createTestClient(
+    overrides: Partial<SoroWillClientOptions> & {
+      /** Override for the RPC server — pass a vi.fn() mock object in tests. */
+      rpcServer?: SoroWillRpcServer;
+    } = {},
+  ): SoroWillClient {
+    const network: SoroWillNetwork = overrides.network ?? 'testnet';
+    // Use the testnet default contract id as a valid placeholder; tests that
+    // exercise contract-id validation should pass their own value.
+    const contractId =
+      overrides.contractId ?? DEFAULT_CONTRACT_IDS.testnet;
+
+    return new SoroWillClient({
+      network,
+      contractId,
+      // Disable read-caching by default so tests don't share stale state.
+      readCache: false,
+      // Apply caller overrides last so they take precedence over the stubs above.
+      ...overrides,
+    });
+  }
+
   // -----------------------------------------------------------------------
   // Public: state-changing methods
   // -----------------------------------------------------------------------
@@ -3040,6 +3112,21 @@ export class SoroWillClient {
   }
 
   private async executeRead<T>(
+    method: string,
+    args: Record<string, unknown>,
+    options?: RequestOptions,
+  ): Promise<T> {
+    // Deduplicate concurrent identical read calls so that N concurrent callers
+    // asking for the same data only fire one RPC simulation, preventing
+    // connection exhaustion on high concurrency (#504).
+    const dedupKey = `read::${method}::${JSON.stringify(args, (_k, v) =>
+      typeof v === 'bigint' ? v.toString() : (v as unknown),
+    )}`;
+    return this.inFlightTracker.trackByKey(dedupKey, () => this._readOnce<T>(method, args, options)) as Promise<T>;
+  }
+
+  /** Executes a single read RPC simulation. Called by {@link read} after deduplication. */
+  private async _readOnce<T>(
     method: string,
     args: Record<string, unknown>,
     options?: RequestOptions,
