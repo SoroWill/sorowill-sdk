@@ -85,6 +85,31 @@ export enum WillErrorCode {
 }
 
 /**
+ * Context attached to every log entry produced during a multi-step SDK
+ * operation so that related logs can be correlated and traced end to end.
+ *
+ * @since 0.1.1
+ */
+export interface OperationContext {
+  /**
+   * Unique identifier shared by every log entry emitted for one logical
+   * operation (e.g. a single `createWill` call and all of its steps).
+   * @since 0.1.1
+   */
+  readonly correlationId: string;
+  /**
+   * Human-readable name of the operation (e.g. `createWill`).
+   * @since 0.1.1
+   */
+  readonly operation: string;
+  /**
+   * Optional ID of the parent operation when operations are nested.
+   * @since 0.1.1
+   */
+  readonly parentCorrelationId?: string;
+}
+
+/**
  * A single beneficiary entry: an address and the percentage of the will's
  * balance it is entitled to receive when the inheritance is released.
  *
