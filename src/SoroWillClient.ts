@@ -82,6 +82,7 @@ import {
   WillContractError,
   WebSocketNotConfiguredError,
   WillNotFoundError,
+  GracePeriodActiveError,
 } from './errors';
 import { deepFreezeObject, hasDuplicateBeneficiaries, MAX_GUARDIANS, validateBeneficiaries } from './utils';
 import { RequestQueue } from './requestQueue';
@@ -1704,6 +1705,18 @@ export class SoroWillClient {
     // Resolve beneficiaries from the will so we can validate funding before
     // attempting the on-chain release.
     const will = await this.getWill(willId, options);
+
+    // #631: Validate that the grace period has expired before attempting the
+    // on-chain release. The contract rejects with a cryptic error if called
+    // during the grace period; surface a clear SDK-level error instead.
+    if (will.triggerTime !== null) {
+      const gracePeriodMs = will.gracePeriodDays * 24 * 60 * 60 * 1000;
+      const gracePeriodExpiresAt = new Date(will.triggerTime.getTime() + gracePeriodMs);
+      if (Date.now() < gracePeriodExpiresAt.getTime()) {
+        throw new GracePeriodActiveError(willId, gracePeriodExpiresAt);
+      }
+    }
+
     await this.validateBeneficiariesFunded(will.beneficiaries);
 
     const { txHash } = await this.invoke(
