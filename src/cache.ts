@@ -356,6 +356,18 @@ export class ReadCache {
     await this.delete(key);
   }
 
+  /** Removes every entry from memory and persistent storage. */
+  async invalidateAll(): Promise<void> {
+    await this.readyPromise;
+    this.entries.clear();
+    this.willIdToKeys.clear();
+    try {
+      await this.persist((adapter) => adapter.clear());
+    } catch (err) {
+      this.onPersistenceFailure?.('__clear__', err);
+    }
+  }
+
   async invalidateByWillId(willId: string): Promise<void> {
     await this.readyPromise;
 
@@ -393,6 +405,7 @@ export class ReadCache {
   clear(): void {
     this.clearedBeforeHydration = true;
     this.entries.clear();
+    this.willIdToKeys.clear();
     void this.persistence
       ?.clear()
       .catch((err) => this.onPersistenceFailure?.('__clear__', err));
@@ -439,6 +452,16 @@ export class ReadCache {
 
   private async delete(key: string): Promise<void> {
     this.touchedKeys.add(key);
+    const entry = this.entries.get(key);
+    if (entry) {
+      for (const willId of entry.willIds) {
+        const keys = this.willIdToKeys.get(willId);
+        keys?.delete(key);
+        if (keys?.size === 0) {
+          this.willIdToKeys.delete(willId);
+        }
+      }
+    }
     this.entries.delete(key);
     try {
       await this.persistence?.delete(key);
