@@ -1182,6 +1182,97 @@ export class ExorbitantFeeError extends Error {
   }
 }
 
+/**
+ * Raised when a WalletConnect signing request specifies a `requestChainId`
+ * that does not match the chain ID of the active session. Sending a
+ * transaction to the wrong chain silently succeeds at the wallet level but
+ * would be applied to a different network than intended.
+ *
+ * @example
+ * ```ts
+ * try {
+ *   await adapter.signTransaction(xdr, { networkPassphrase, requestChainId: 'stellar:testnet' });
+ * } catch (err) {
+ *   if (err instanceof WalletConnectChainIdMismatchError) {
+ *     console.error('Chain ID mismatch:', err.requestedChainId, 'vs', err.sessionChainId);
+ *   }
+ * }
+ * ```
+ */
+export class WalletConnectChainIdMismatchError extends SoroWillError {
+  /** The chain ID that was requested via `requestChainId`. */
+  readonly requestedChainId: string;
+  /** The chain ID derived from the active WalletConnect session. */
+  readonly sessionChainId: string;
+
+  constructor(requestedChainId: string, sessionChainId: string, options?: ErrorOptions) {
+    super(
+      `WalletConnect chain ID mismatch: requested "${requestedChainId}" but the active session ` +
+        `is on "${sessionChainId}". Connect a session for the correct chain before signing.`,
+      options,
+    );
+    this.requestedChainId = requestedChainId;
+    this.sessionChainId = sessionChainId;
+  }
+}
+
+/**
+ * Raised when an `eventStreamUrl` passed to {@link SoroWillClient} is not a
+ * valid `wss://` URL. Plaintext `ws://` connections are rejected because they
+ * expose event traffic to eavesdropping and manipulation.
+ *
+ * @example
+ * ```ts
+ * // Throws InvalidWebSocketUrlError
+ * new SoroWillClient({ ..., eventStreamUrl: 'ws://example.com/events' });
+ * ```
+ */
+export class InvalidWebSocketUrlError extends SoroWillError {
+  /** The invalid URL that was supplied. */
+  readonly url: string;
+
+  constructor(url: string, options?: ErrorOptions) {
+    super(
+      `Invalid WebSocket URL "${url}": only secure wss:// URLs are accepted. ` +
+        'Plain ws:// connections are not allowed because they expose event traffic to interception.',
+      options,
+    );
+    this.url = url;
+  }
+}
+
+/**
+ * Raised when {@link SoroWillClient.checkIn} is called for a will that is in
+ * the `Triggered` state (i.e. currently in its grace period). The contract
+ * will reject a `check_in` call in this state; use `emergencyCheckIn` instead
+ * to cancel the grace period and reset the countdown.
+ *
+ * @example
+ * ```ts
+ * try {
+ *   await client.checkIn(willId);
+ * } catch (err) {
+ *   if (err instanceof CheckInDuringGracePeriodError) {
+ *     // Offer the owner the emergency check-in option instead.
+ *     await client.emergencyCheckIn(willId);
+ *   }
+ * }
+ * ```
+ */
+export class CheckInDuringGracePeriodError extends SoroWillError {
+  /** The will ID that is currently in its grace period. */
+  readonly willId: string;
+
+  constructor(willId: string, options?: ErrorOptions) {
+    super(
+      `Cannot check in on will "${willId}": the will is currently in its grace period (Triggered state). ` +
+        'Use emergencyCheckIn() to cancel the grace period and reset the check-in countdown.',
+      options,
+    );
+    this.willId = willId;
+  }
+}
+
 export function registerContractError(_code: number, _errorFactory: ContractErrorFactory): void {
   // Stub implementation - actual error registry would be managed elsewhere
 }

@@ -337,7 +337,6 @@ export class ReadCache {
           this.touchedKeys.delete(key);
         }
       });
-    }
 
     this.evictIfNeeded();
   }
@@ -502,7 +501,7 @@ export class ReadCache {
 
       const entry: CacheEntry = {
         key: persistedEntry.key,
-        value,
+        value: deserializeCacheValue(persistedEntry.value),
         expiresAt: persistedEntry.expiresAt,
         willIds: new Set(persistedEntry.willIds),
       };

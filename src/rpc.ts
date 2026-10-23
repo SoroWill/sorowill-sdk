@@ -265,6 +265,8 @@ export class RpcEndpointPool {
   private activeIndex = 0;
   private lastFailoverAt: number | null = null;
   private readonly circuitStates: EndpointCircuitState[];
+  private readonly backoffUntil: number[] = [];
+  private readonly consecutiveFailures: number[] = [];
 
   /**
    * @param serverOverride - When provided (e.g. `SoroWillClientOptions.rpcServer`

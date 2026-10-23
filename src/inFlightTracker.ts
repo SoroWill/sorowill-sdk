@@ -1,4 +1,4 @@
-import { DuplicateOperationError } from './errors';
+import { DuplicateOperationError, SoroWillError } from './errors';
 
 type OperationKey = string;
 type OperationResult<T> = Promise<T>;
