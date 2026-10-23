@@ -1175,6 +1175,32 @@ export class MultisigTimeoutError extends Error {
   }
 }
 
+/**
+ * Raised by {@link SoroWillClient.releaseInheritance} when the will's grace
+ * period has not yet expired. The grace period begins when the will is
+ * triggered and must elapse before the inheritance can be released.
+ * Throwing this client-side avoids a wasted signing round-trip that the
+ * contract would reject with {@link GracePeriodNotExpiredError}.
+ */
+export class GracePeriodActiveError extends SoroWillError {
+  /** The will ID whose grace period is still active. */
+  readonly willId: string;
+  /** The UTC time at which the grace period expires. */
+  readonly expiresAt: Date;
+
+  constructor(willId: string, expiresAt: Date, options?: ErrorOptions) {
+    const isoExpiry = expiresAt.toISOString();
+    super(
+      `Cannot release inheritance for will "${willId}": the grace period is still active and expires at ${isoExpiry}. ` +
+        'Wait until the grace period has elapsed before calling releaseInheritance().',
+      options,
+    );
+    this.name = 'GracePeriodActiveError';
+    this.willId = willId;
+    this.expiresAt = expiresAt;
+  }
+}
+
 export class ExorbitantFeeError extends Error {
   constructor(fee: string, maxFee: string) {
     super(`Fee ${fee} exceeds maximum allowed ${maxFee}`);
@@ -1183,35 +1209,93 @@ export class ExorbitantFeeError extends Error {
 }
 
 /**
- * Raised when a write (state-changing) operation is attempted on a client
- * that was constructed in read-only mode (`readOnly: true`). Read-only clients
- * do not require a connected wallet and can be used for query operations only
- * (#635).
+ * Raised when a WalletConnect signing request specifies a `requestChainId`
+ * that does not match the chain ID of the active session. Sending a
+ * transaction to the wrong chain silently succeeds at the wallet level but
+ * would be applied to a different network than intended.
  *
  * @example
  * ```ts
- * const client = new SoroWillClient({
- *   network: 'testnet',
- *   contractId: 'C...',
- *   readOnly: true,
- * });
- *
- * // This throws ReadOnlyModeError:
- * await client.checkIn('1');
+ * try {
+ *   await adapter.signTransaction(xdr, { networkPassphrase, requestChainId: 'stellar:testnet' });
+ * } catch (err) {
+ *   if (err instanceof WalletConnectChainIdMismatchError) {
+ *     console.error('Chain ID mismatch:', err.requestedChainId, 'vs', err.sessionChainId);
+ *   }
+ * }
  * ```
  */
-export class ReadOnlyModeError extends SoroWillError {
-  /** The name of the write method that was called. */
-  readonly method: string;
+export class WalletConnectChainIdMismatchError extends SoroWillError {
+  /** The chain ID that was requested via `requestChainId`. */
+  readonly requestedChainId: string;
+  /** The chain ID derived from the active WalletConnect session. */
+  readonly sessionChainId: string;
 
-  constructor(method: string) {
+  constructor(requestedChainId: string, sessionChainId: string, options?: ErrorOptions) {
     super(
-      `Cannot call "${method}" on a read-only SoroWillClient. ` +
-        'This client was constructed with readOnly: true and does not support write operations. ' +
-        'Construct a new client with a wallet adapter to perform state-changing operations.',
+      `WalletConnect chain ID mismatch: requested "${requestedChainId}" but the active session ` +
+        `is on "${sessionChainId}". Connect a session for the correct chain before signing.`,
+      options,
     );
-    this.name = 'ReadOnlyModeError';
-    this.method = method;
+    this.requestedChainId = requestedChainId;
+    this.sessionChainId = sessionChainId;
+  }
+}
+
+/**
+ * Raised when an `eventStreamUrl` passed to {@link SoroWillClient} is not a
+ * valid `wss://` URL. Plaintext `ws://` connections are rejected because they
+ * expose event traffic to eavesdropping and manipulation.
+ *
+ * @example
+ * ```ts
+ * // Throws InvalidWebSocketUrlError
+ * new SoroWillClient({ ..., eventStreamUrl: 'ws://example.com/events' });
+ * ```
+ */
+export class InvalidWebSocketUrlError extends SoroWillError {
+  /** The invalid URL that was supplied. */
+  readonly url: string;
+
+  constructor(url: string, options?: ErrorOptions) {
+    super(
+      `Invalid WebSocket URL "${url}": only secure wss:// URLs are accepted. ` +
+        'Plain ws:// connections are not allowed because they expose event traffic to interception.',
+      options,
+    );
+    this.url = url;
+  }
+}
+
+/**
+ * Raised when {@link SoroWillClient.checkIn} is called for a will that is in
+ * the `Triggered` state (i.e. currently in its grace period). The contract
+ * will reject a `check_in` call in this state; use `emergencyCheckIn` instead
+ * to cancel the grace period and reset the countdown.
+ *
+ * @example
+ * ```ts
+ * try {
+ *   await client.checkIn(willId);
+ * } catch (err) {
+ *   if (err instanceof CheckInDuringGracePeriodError) {
+ *     // Offer the owner the emergency check-in option instead.
+ *     await client.emergencyCheckIn(willId);
+ *   }
+ * }
+ * ```
+ */
+export class CheckInDuringGracePeriodError extends SoroWillError {
+  /** The will ID that is currently in its grace period. */
+  readonly willId: string;
+
+  constructor(willId: string, options?: ErrorOptions) {
+    super(
+      `Cannot check in on will "${willId}": the will is currently in its grace period (Triggered state). ` +
+        'Use emergencyCheckIn() to cancel the grace period and reset the check-in countdown.',
+      options,
+    );
+    this.willId = willId;
   }
 }
 

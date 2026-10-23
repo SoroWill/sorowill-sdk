@@ -5,20 +5,18 @@ docs/api/
 *.log
 issue.md
 
-# Test snapshots
+# Coverage reports — generated locally and in CI; never committed
+coverage/
+
+# Vitest snapshot files
 **/__snapshots__/
 *.snap
 
-# Coverage reports
-coverage/
+# Test output artifacts
+test-results/
+.vitest-cache/
 
-# Build / type-check caches
-*.tsbuildinfo
-.cache/
-
-# Editor directories
-.vscode/
+# Editor and OS artifacts
+.vscode/settings.json
 .idea/
-
-# OS files
 Thumbs.db

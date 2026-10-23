@@ -125,6 +125,13 @@ function stableStringify(value: unknown): string {
       return { __type: 'bigint', value: currentValue.toString() };
     }
 
+    if (typeof currentValue === 'string') {
+      // Encode special characters (colons, commas, slashes, percent signs, etc.)
+      // so that string parameter values containing separator characters cannot
+      // produce a key that collides with a different method/parameter combination.
+      return encodeURIComponent(currentValue);
+    }
+
     if (Array.isArray(currentValue)) {
       return currentValue;
     }
@@ -337,7 +344,6 @@ export class ReadCache {
           this.touchedKeys.delete(key);
         }
       });
-    }
 
     this.evictIfNeeded();
   }
@@ -354,6 +360,18 @@ export class ReadCache {
   async invalidate(key: string): Promise<void> {
     await this.readyPromise;
     await this.delete(key);
+  }
+
+  /** Removes every entry from memory and persistent storage. */
+  async invalidateAll(): Promise<void> {
+    await this.readyPromise;
+    this.entries.clear();
+    this.willIdToKeys.clear();
+    try {
+      await this.persist((adapter) => adapter.clear());
+    } catch (err) {
+      this.onPersistenceFailure?.('__clear__', err);
+    }
   }
 
   async invalidateByWillId(willId: string): Promise<void> {
@@ -393,6 +411,7 @@ export class ReadCache {
   clear(): void {
     this.clearedBeforeHydration = true;
     this.entries.clear();
+    this.willIdToKeys.clear();
     void this.persistence
       ?.clear()
       .catch((err) => this.onPersistenceFailure?.('__clear__', err));
@@ -439,6 +458,16 @@ export class ReadCache {
 
   private async delete(key: string): Promise<void> {
     this.touchedKeys.add(key);
+    const entry = this.entries.get(key);
+    if (entry) {
+      for (const willId of entry.willIds) {
+        const keys = this.willIdToKeys.get(willId);
+        keys?.delete(key);
+        if (keys?.size === 0) {
+          this.willIdToKeys.delete(willId);
+        }
+      }
+    }
     this.entries.delete(key);
     try {
       await this.persistence?.delete(key);
@@ -479,7 +508,7 @@ export class ReadCache {
 
       const entry: CacheEntry = {
         key: persistedEntry.key,
-        value,
+        value: deserializeCacheValue(persistedEntry.value),
         expiresAt: persistedEntry.expiresAt,
         willIds: new Set(persistedEntry.willIds),
       };

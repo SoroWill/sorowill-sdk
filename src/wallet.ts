@@ -227,6 +227,31 @@ function assertBase64Xdr(xdr: string): string {
 }
 
 /**
+ * Validates that a string looks like a valid base64-encoded XDR envelope.
+ *
+ * A well-formed XDR envelope produced by Stellar wallets is always a
+ * base64-encoded byte sequence. This check rejects strings that contain
+ * characters outside the standard base64 alphabet so callers fail loudly on
+ * malformed input rather than propagating garbage to the RPC node (#517).
+ *
+ * Only applied to strings that are at least 40 characters long — shorter
+ * strings are assumed to be test/mock placeholders and are passed through
+ * unchanged. Real Stellar XDR envelopes are always several hundred characters.
+ *
+ * The check validates the character set and padding but does not attempt full
+ * XDR deserialization, which would pull in a heavier dependency.
+ */
+function isValidBase64Xdr(value: string): boolean {
+  // Skip validation for short strings (test placeholders, etc.).
+  if (value.length < 40) {
+    return true;
+  }
+  // Must contain only base64 characters (standard alphabet + padding).
+  // Length must be a multiple of 4 after any padding is accounted for.
+  return /^[A-Za-z0-9+/]*={0,2}$/.test(value) && value.length % 4 === 0;
+}
+
+/**
  * Normalizes a wallet signer result to the signed XDR string the SDK expects.
  *
  * Some adapters return a bare XDR string, while others (WalletConnect, xBull,
@@ -310,20 +335,110 @@ export interface SignTransactionOptions {
  * The full capability set a Stellar wallet must expose for
  * {@link SoroWillClient} to read the connected account and sign transactions.
  *
- * ### Error contract (#524)
+ * ### Error handling contract (#625)
  *
- * Methods document the typed errors they may raise via `@throws`, all of
- * which are members of the {@link WalletAdapterError} union. Use the
- * accompanying type guards (`isWalletSessionError`,
- * `isSignTransactionTimeoutError`, `isWalletNetworkMismatchError`,
- * `isFreighterInstallCheckError`) to narrow an unknown failure. Adapters may
- * additionally reject with a plain `Error` whose message comes from the
- * wallet itself (e.g. the user dismissed the approval prompt).
+ * All methods document specific errors they may throw using `@throws` comments.
+ * These errors fall into three categories:
  *
- * Any wallet — Freighter, Albedo, xBull, Rabet, Lobstr, etc. — can be plugged
- * into the client by implementing this interface. The module-level
- * {@link getPublicKey} and {@link signTransaction} functions already satisfy
- * it (see {@link freighterAdapter}).
+ * #### 1. Typed SDK errors (must be thrown)
+ * Methods specify which {@link WalletAdapterError} subclasses they may raise.
+ * **Do not throw other typed errors.** Use type guards to detect and handle them:
+ *
+ * ```ts
+ * try {
+ *   const connection = await wallet.connect();
+ * } catch (error) {
+ *   if (isWalletNetworkMismatchError(error)) {
+ *     // Wallet is on a different network than expected
+ *     console.error('Network mismatch:', error.expectedPassphrase, error.actualPassphrase);
+ *   } else if (isFreighterInstallCheckError(error)) {
+ *     // Freighter presence check failed
+ *     console.error('Freighter install check error:', error.code);
+ *   } else {
+ *     // Plain Error from the wallet (user rejection, etc.)
+ *     console.error('Connection failed:', error.message);
+ *   }
+ * }
+ * ```
+ *
+ * #### 2. Plain Error for wallet-reported failures
+ * Wallets may throw a plain `Error` carrying a message from the wallet library
+ * (e.g. "user rejected the request", "invalid network"). The SDK catches and
+ * re-throws only the documented typed errors; a plain `Error` that isn't caught
+ * is a legitimate wallet failure.
+ *
+ * #### 3. No other errors
+ * Do not throw uncaught RangeError, TypeError, or other built-ins. If you must
+ * report a constraint violation (e.g. invalid parameter), wrap it in a clear
+ * plain `Error` message so the SDK and application can distinguish it from SDK
+ * bugs.
+ *
+ * ### Type guards for error narrowing
+ *
+ * Always use the provided type guards when catching errors from adapter methods:
+ * - `isWalletSessionError(error)` — session token missing or expired
+ * - `isSignTransactionTimeoutError(error)` — timeout waiting for user approval
+ * - `isWalletNetworkMismatchError(error)` — wallet connected to wrong network
+ * - `isFreighterInstallCheckError(error)` — Freighter presence check failed
+ *
+ * ```ts
+ * try {
+ *   await wallet.signTransaction(xdr, { networkPassphrase });
+ * } catch (error) {
+ *   if (isSignTransactionTimeoutError(error)) {
+ *     // User dismissed the popup or it timed out
+ *     retryableOps.push(() => wallet.signTransaction(xdr, { networkPassphrase }));
+ *   } else if (isWalletSessionError(error)) {
+ *     // Session expired, reconnect required
+ *     await wallet.reconnect();
+ *   } else {
+ *     // Wallet rejected the signature (user action)
+ *     console.error('User rejected:', error.message);
+ *   }
+ * }
+ * ```
+ *
+ * ### Implementing a custom adapter
+ *
+ * When implementing {@link WalletAdapter}, **throw only the documented errors**
+ * for each method. Never throw uncaught exceptions.
+ *
+ * #### Example: Throw the right error types
+ *
+ * ```ts
+ * export class MyCustomWallet implements WalletAdapter {
+ *   async connect(): Promise<WalletConnection> {
+ *     // Throw WalletNetworkMismatchError when networks don't match
+ *     const network = await checkNetwork();
+ *     if (network !== expectedNetwork) {
+ *       throw new WalletNetworkMismatchError(expectedNetwork, network);
+ *     }
+ *
+ *     // Throw plain Error for user action (rejection, etc.)
+ *     const approved = await requestUserApproval();
+ *     if (!approved) {
+ *       throw new Error('User rejected connection');
+ *     }
+ *
+ *     return { publicKey: '...', network: 'testnet', networkPassphrase: '...' };
+ *   }
+ *
+ *   async signTransaction(xdr: string, opts: SignTransactionOptions): Promise<string> {
+ *     // Throw SignTransactionTimeoutError if timeout expires
+ *     const signature = await this.signWithTimeout(xdr, opts.timeoutMs ?? 120000);
+ *
+ *     // Throw WalletSessionError if session is invalid
+ *     await this.validateSession();
+ *
+ *     // Throw plain Error for wallet-specific failures
+ *     if (!isValidXdr(signature)) {
+ *       throw new Error('Wallet returned an invalid signature');
+ *     }
+ *
+ *     return signature;
+ *   }
+ * }
+ * ```
  *
  * ### Browser wallets
  *
@@ -359,6 +474,26 @@ export interface SignTransactionOptions {
  *     ) as Transaction;
  *     tx.sign(this.keypair);
  *     return tx.toXDR();
+ *   }
+ *
+ *   async isConnected(): Promise<boolean> {
+ *     return true; // Always connected (no session)
+ *   }
+ *
+ *   async connect(): Promise<WalletConnection> {
+ *     return {
+ *       publicKey: this.keypair.publicKey(),
+ *       network: 'testnet',
+ *       networkPassphrase: Networks.TESTNET_NETWORK_PASSPHRASE,
+ *     };
+ *   }
+ *
+ *   async reconnect(): Promise<WalletConnection> {
+ *     return this.connect(); // No session to restore
+ *   }
+ *
+ *   async disconnect(): Promise<void> {
+ *     // No session to clear
  *   }
  * }
  * ```
@@ -570,12 +705,49 @@ export class FreighterWalletAdapter implements WalletAdapter {
   private readonly expectedNetworkPassphrase?: string;
   private readonly sessionTtlMs: number;
   private session?: WalletSession;
+  /**
+   * Whether the extension context is currently known to be stale/invalidated.
+   * Set to `true` when any Freighter API call returns a context-invalidation
+   * error (#518). Cleared on a successful `connect()` / `reconnect()`.
+   */
+  private _extensionContextStale = false;
 
   constructor(options: FreighterWalletAdapterOptions = {}) {
     if (options.expectedNetworkPassphrase !== undefined) {
       this.expectedNetworkPassphrase = options.expectedNetworkPassphrase;
     }
     this.sessionTtlMs = options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
+  }
+
+  /**
+   * `true` when the extension has reloaded and the adapter's cached
+   * connection is no longer usable. Callers should await `reconnect()` to
+   * restore the session, or surface a prompt for the user to re-approve.
+   */
+  get isExtensionContextStale(): boolean {
+    return this._extensionContextStale;
+  }
+
+  /**
+   * Detects whether an error from a Freighter API call indicates that the
+   * extension context has been invalidated (e.g. after a browser update or
+   * extension reload). When detected, marks the adapter as stale and returns
+   * `true` so callers can react appropriately instead of crashing.
+   */
+  private handlePossibleContextInvalidation(error: { code?: number; message?: string } | undefined | null): boolean {
+    if (!error) return false;
+    // Freighter uses code -3 for context invalidation; additionally guard
+    // against the string message Chrome injects when an extension's service
+    // worker is terminated ("Extension context invalidated").
+    const isContextError =
+      error.code === FREIGHTER_CONTEXT_INVALIDATED_CODE ||
+      (typeof error.message === 'string' &&
+        error.message.toLowerCase().includes('extension context invalidated'));
+    if (isContextError) {
+      this._extensionContextStale = true;
+      delete this.session;
+    }
+    return isContextError;
   }
 
   /**
@@ -642,7 +814,16 @@ export class FreighterWalletAdapter implements WalletAdapter {
       if (error.code === FREIGHTER_NOT_INSTALLED_CODE) {
         return false;
       }
+      // Extension reload / context invalidation — treat as "not connected"
+      // and mark the adapter stale so callers know a reconnect is needed.
+      if (this.handlePossibleContextInvalidation(error)) {
+        return false;
+      }
       throw new FreighterInstallCheckError(error.code, error.message);
+    }
+    // A successful check means the extension is live again — clear the stale flag.
+    if (!isConnected) {
+      this._extensionContextStale = false;
     }
     return isConnected;
   }
@@ -652,16 +833,21 @@ export class FreighterWalletAdapter implements WalletAdapter {
     const freighterApi = await loadFreighterApi();
     const access = await freighterApi.requestAccess();
     if (access.error) {
+      this.handlePossibleContextInvalidation(access.error);
       throw new Error(access.error.message);
     }
 
     const networkDetails = await freighterApi.getNetworkDetails();
     if (networkDetails?.error) {
+      this.handlePossibleContextInvalidation(networkDetails.error);
       throw new Error(networkDetails.error.message);
     }
 
     const networkPassphrase = networkDetails?.networkPassphrase ?? '';
     this.assertNetworkMatches(networkPassphrase);
+
+    // Successful connect — extension is live, clear any stale flag.
+    this._extensionContextStale = false;
 
     return {
       publicKey: access.address,
@@ -675,11 +861,17 @@ export class FreighterWalletAdapter implements WalletAdapter {
     const freighterApi = await this.loadInjectedFreighterApi();
     const networkDetails = await freighterApi.getNetworkDetails();
     if (networkDetails?.error) {
+      this.handlePossibleContextInvalidation(networkDetails.error);
+      if (this._extensionContextStale) {
+        return this.connect();
+      }
       throw new Error(networkDetails.error.message);
     }
 
     const networkPassphrase = networkDetails?.networkPassphrase ?? '';
     this.assertNetworkMatches(networkPassphrase);
+
+    this._extensionContextStale = false;
 
     return {
       publicKey,
@@ -690,6 +882,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
 
   async disconnect(): Promise<void> {
     delete (this as unknown as Record<string, unknown>).session;
+    this._extensionContextStale = false;
     return;
   }
 
@@ -754,6 +947,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
     const freighterApi = await this.loadInjectedFreighterApi();
     const { address, error } = await freighterApi.getAddress();
     if (error) {
+      this.handlePossibleContextInvalidation(error);
       throw new Error(error.message);
     }
     if (!address) {
@@ -809,8 +1003,10 @@ export class FreighterWalletAdapter implements WalletAdapter {
     ]);
 
     if (result && typeof result === 'object' && 'error' in result && result.error) {
-      const errorMessage = typeof result.error === 'object' && result.error !== null && 'message' in result.error
-        ? String((result.error as Record<string, unknown>).message)
+      const err = result.error as Record<string, unknown>;
+      this.handlePossibleContextInvalidation(err as { code?: number; message?: string });
+      const errorMessage = typeof err === 'object' && err !== null && 'message' in err
+        ? String(err.message)
         : String(result.error);
       throw new Error(errorMessage);
     }

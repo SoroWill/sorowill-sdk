@@ -273,16 +273,8 @@ export class RpcEndpointPool {
   private activeIndex = 0;
   private lastFailoverAt: number | null = null;
   private readonly circuitStates: EndpointCircuitState[];
-  /** Per-endpoint exponential-backoff deadline timestamps (ms epoch). */
-  private readonly backoffUntil: number[];
-  /** Per-endpoint count of consecutive failures for backoff scheduling. */
-  private readonly consecutiveFailures: number[];
-  /**
-   * Per-endpoint latency history (ms per successful request). Each array holds
-   * at most {@link LATENCY_HISTORY_WINDOW} recent samples; oldest samples are
-   * shifted out as new ones arrive. Used for weighted endpoint selection (#636).
-   */
-  private readonly latencyHistory: number[][];
+  private readonly backoffUntil: number[] = [];
+  private readonly consecutiveFailures: number[] = [];
 
   /**
    * @param serverOverride - When provided (e.g. `SoroWillClientOptions.rpcServer`

@@ -115,15 +115,14 @@ export {
   isWalletNetworkMismatchError,
   isWalletSessionError,
   signTransaction,
-  WalletSessionError,
 } from './wallet';
 export type {
   WalletAdapter,
   WalletAdapterError,
   WalletConnection,
   WalletSession,
+  WalletSessionOptions,
 } from './wallet';
-export type { WalletAdapter, WalletConnection, WalletSessionOptions } from './wallet';
 
 export { createAlbedoAdapter } from './adapters/albedo';
 export type { AlbedoAdapterOptions } from './adapters/albedo';
@@ -158,10 +157,12 @@ export type { CachePersistenceAdapter, PersistedCacheEntry, ReadCacheOptions } f
 
 export {
   addEventListener,
+  matchesEventFilter,
   unsubscribeFromWillEvents,
   validateEventTypeFilter,
 } from './events';
 export type {
+  EventFilter,
   WillEvent,
   WillEventListener,
   WillEventSource,
@@ -185,6 +186,7 @@ export {
   FixedAmountExceedsBalanceError,
   FreighterInstallCheckError,
   FreighterNotAvailableError,
+  GracePeriodActiveError,
   GracePeriodExpiredError,
   GracePeriodNotExpiredError,
   GuardianCooldownActiveError,
@@ -208,6 +210,7 @@ export {
   InvalidStellarAddressError,
   InvalidTokenError,
   InvalidTransactionXdrError,
+  InvalidWebSocketUrlError,
   InvokeFailedError,
   KeeperBountyExceedsMaxError,
   MergeWouldExceedLimitsError,
@@ -232,7 +235,9 @@ export {
   TooManyIdsError,
   TooManyWillsError,
   TransactionSubmissionError,
+  WalletConnectChainIdMismatchError,
   WalletNetworkMismatchError,
+  CheckInDuringGracePeriodError,
   WebSocketNotConfiguredError,
   WillContractError,
   WillNotActiveError,
@@ -260,8 +265,10 @@ export {
   getSharedRequestQueue,
   releaseSharedRequestQueue,
   computeBackoffDelay,
+  classifyRpcError,
   isRateLimitError,
   MAX_BACKOFF_MS,
+  ErrorTransience,
 } from './requestQueue';
 export type { RequestQueueOptions } from './requestQueue';
 
@@ -291,6 +298,7 @@ export type {
 export {
   MAX_BENEFICIARIES,
   MAX_GUARDIANS,
+  PERCENTAGE_SUM_EPSILON,
   assertValidStellarAddress,
   calculateShares,
   deepFreezeObject,

@@ -96,6 +96,127 @@ export function isRateLimitError(error: unknown): boolean {
   return lower.includes('too many requests') || lower.includes('rate limit') || /\b429\b/.test(text);
 }
 
+/**
+ * Error classification for RPC failures: transient errors can be retried,
+ * while permanent errors indicate configuration or protocol issues.
+ */
+export enum ErrorTransience {
+  /** Transient: can be retried (timeout, rate limit, temporary network issue). */
+  Transient = 'transient',
+  /** Permanent: should not be retried (malformed request, authentication, invalid params). */
+  Permanent = 'permanent',
+}
+
+/**
+ * Classifies an RPC error as transient (safe to retry) or permanent.
+ *
+ * Transient errors (timeouts, rate limits, temporary unavailability) can be
+ * retried with backoff. Permanent errors (bad requests, authentication failures,
+ * protocol violations) will always fail and should not be retried.
+ *
+ * @param error - The error to classify.
+ * @returns ErrorTransience enum value indicating retry eligibility.
+ *
+ * @example
+ * ```ts
+ * try {
+ *   const result = await queue.enqueue(async () => rpc.call(...));
+ * } catch (error) {
+ *   const classification = classifyRpcError(error);
+ *   if (classification === ErrorTransience.Transient) {
+ *     // Safe to retry with backoff
+ *     setTimeout(() => retryQueue.enqueue(...), 1000);
+ *   } else {
+ *     // Permanent failure, propagate immediately
+ *     throw error;
+ *   }
+ * }
+ * ```
+ */
+export function classifyRpcError(error: unknown): ErrorTransience {
+  if (error === null || error === undefined) {
+    return ErrorTransience.Permanent;
+  }
+
+  // Timeouts are always transient (network/timing issue)
+  if (error instanceof RequestTimeoutError) {
+    return ErrorTransience.Transient;
+  }
+
+  // Rate limits are transient (wait and retry)
+  if (isRateLimitError(error)) {
+    return ErrorTransience.Transient;
+  }
+
+  // HTTP status codes classify error transience
+  if (typeof error === 'object') {
+    const candidate = error as {
+      status?: unknown;
+      statusCode?: unknown;
+      response?: { status?: unknown };
+    };
+
+    const status =
+      candidate.status ?? candidate.statusCode ?? candidate.response?.status;
+
+    if (typeof status === 'number') {
+      // 5xx server errors are transient (server temporarily unavailable)
+      if (status >= 500 && status < 600) {
+        return ErrorTransience.Transient;
+      }
+
+      // 4xx client errors are permanent (bad request, auth failure, etc.)
+      if (status >= 400 && status < 500) {
+        return ErrorTransience.Permanent;
+      }
+
+      // 3xx redirects and others are permanent
+      if (status !== 200 && status !== 201) {
+        return ErrorTransience.Permanent;
+      }
+    }
+  }
+
+  // Network-related messages: transient
+  const text = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  const lower = text.toLowerCase();
+
+  const transientPatterns = [
+    'econnrefused', // Connection refused
+    'econnreset', // Connection reset
+    'etimedout', // Timeout
+    'ehostunreach', // Host unreachable
+    'enetunreach', // Network unreachable
+    'temporarily unavailable',
+    'temporarily unable',
+    'service temporarily unavailable',
+  ];
+
+  if (transientPatterns.some((pattern) => lower.includes(pattern))) {
+    return ErrorTransience.Transient;
+  }
+
+  // Protocol/request errors: permanent
+  const permanentPatterns = [
+    'parse error', // JSON parsing failed
+    'invalid json', // Malformed response
+    'invalid request', // Malformed request
+    'method not found', // Unknown RPC method
+    'unauthorized', // Auth failure
+    'forbidden', // Permission denied
+    'invalid params', // Bad parameters
+    'invalid contract', // Invalid contract ID
+  ];
+
+  if (permanentPatterns.some((pattern) => lower.includes(pattern))) {
+    return ErrorTransience.Permanent;
+  }
+
+  // Default: unknown errors are permanent to avoid infinite retries
+  // (safer to surface the error than retry indefinitely)
+  return ErrorTransience.Permanent;
+}
+
 /** Priority level for requests in the queue. Higher priority requests are processed first within FIFO ordering constraints. */
 export enum RequestPriority {
   /** Low priority for background operations (e.g., UI polling). */
@@ -337,6 +458,7 @@ export class RequestQueue {
           : await Promise.race([
               request.run(),
               new Promise<never>((_, reject) => {
+                let timer: ReturnType<typeof setTimeout> | undefined;
                 timer = setTimeout(
                   () =>
                     reject(
@@ -347,6 +469,7 @@ export class RequestQueue {
                     ),
                   request.timeoutMs,
                 );
+                void timer; // referenced in the closure above
               }),
             ]);
       request.resolve(result);

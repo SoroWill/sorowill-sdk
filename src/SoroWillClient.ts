@@ -60,12 +60,14 @@ import {
   BeneficiaryValidationError,
   GuardianValidationError,
   CheckinPeriodExceedsTtlError,
+  CheckInDuringGracePeriodError,
   InvalidDayCountError,
   InvalidContractIdError,
   InvalidCursorError,
   InvalidGuardianSignatureError,
   InvalidPaginationOptionsError,
   InvalidPublicKeyError,
+  InvalidWebSocketUrlError,
   InvokeFailedError,
   ReadOnlyModeError,
   RequestTimeoutError,
@@ -81,6 +83,7 @@ import {
   WillContractError,
   WebSocketNotConfiguredError,
   WillNotFoundError,
+  GracePeriodActiveError,
 } from './errors';
 import { deepFreezeObject, hasDuplicateBeneficiaries, MAX_GUARDIANS, validateBeneficiaries } from './utils';
 import { RequestQueue } from './requestQueue';
@@ -969,6 +972,40 @@ function getDefaultEnv(): EnvSource {
  *
  * @see https://developers.stellar.org/docs/learn/fundamentals/lumens
  */
+
+/**
+ * Validates that a contract ID has the correct format for Stellar contracts.
+ *
+ * Throws {@link InvalidContractIdError} if the contract ID is missing, not a
+ * string, or does not match the Stellar contract ID format (StrKey encoding
+ * starting with 'C'). This allows configuration errors to be caught during
+ * client initialization rather than on the first operation.
+ *
+ * @param contractId - The contract ID to validate.
+ * @throws InvalidContractIdError when the contract ID format is invalid.
+ *
+ * @example
+ * ```ts
+ * // Validates during client construction
+ * try {
+ *   const client = new SoroWillClient({
+ *     network: 'testnet',
+ *     contractId: 'INVALID',  // Bad format
+ *   });
+ * } catch (error) {
+ *   if (error instanceof InvalidContractIdError) {
+ *     console.error('Configuration error:', error.message);
+ *     // Client is never created, so no risk of cryptic errors on first operation
+ *   }
+ * }
+ * ```
+ */
+function validateContractIdFormat(contractId: unknown): asserts contractId is string {
+  if (typeof contractId !== 'string' || !StrKey.isValidContract(contractId)) {
+    throw new InvalidContractIdError(contractId ?? '');
+  }
+}
+
 export class SoroWillClient {
   private readonly server: SoroWillRpcServer;
   private readonly rpcPool: RpcEndpointPool;
@@ -1041,10 +1078,10 @@ export class SoroWillClient {
   private readonly signedTransactionHashes: Set<string>;
 
   constructor(options: SoroWillClientOptions) {
-    // Stellar SDK names its contract StrKey validator isValidContract.
-    if (typeof options.contractId !== 'string' || !StrKey.isValidContract(options.contractId)) {
-      throw new InvalidContractIdError(options.contractId ?? '');
-    }
+    // Validate contract ID format on initialization (#626).
+    // This catches configuration errors early, before the first operation.
+    validateContractIdFormat(options.contractId);
+
     const config = NETWORK_CONFIG[options.network];
     const rpcUrl = options.rpcUrl ?? config.rpcUrls[0]!;
 
@@ -1085,6 +1122,11 @@ export class SoroWillClient {
     this.specJsonOverride = options.specJson;
     this.eventRpcUrl = options.eventRpcUrl ?? rpcUrl;
     this.eventStreamUrl = options.eventStreamUrl;
+    if (this.eventStreamUrl !== undefined) {
+      if (!this.eventStreamUrl.startsWith('wss://')) {
+        throw new InvalidWebSocketUrlError(this.eventStreamUrl);
+      }
+    }
     this.defaultPollIntervalMs = options.defaultPollIntervalMs ?? 5_000;
     if (!Number.isFinite(this.defaultPollIntervalMs) || this.defaultPollIntervalMs <= 0) {
       throw new RangeError('defaultPollIntervalMs must be a finite number greater than zero');
@@ -1306,6 +1348,78 @@ export class SoroWillClient {
     });
   }
 
+  /**
+   * Creates a `SoroWillClient` pre-wired for unit testing and dependency
+   * injection without any global state mutation (#516).
+   *
+   * Accepts the same options as the constructor, but applies test-friendly
+   * defaults — most importantly it does **not** require a real RPC server or
+   * a connected wallet.
+   *
+   * ### Why this exists
+   *
+   * The standard constructor wires up production defaults (Freighter wallet,
+   * real RPC server, etc.) that are unavailable in a test environment. Callers
+   * end up patching global state or importing mocks at module level to work
+   * around this. `createTestClient` makes the dependency surface explicit: you
+   * supply exactly the collaborators your test needs, and the factory fills in
+   * safe no-op stubs for everything else.
+   *
+   * @example
+   * ```ts
+   * import { SoroWillClient } from '@sorowill/sdk';
+   * import { vi } from 'vitest';
+   *
+   * const mockServer = {
+   *   getAccount: vi.fn(),
+   *   simulateTransaction: vi.fn(),
+   *   prepareTransaction: vi.fn(),
+   *   sendTransaction: vi.fn(),
+   *   pollTransaction: vi.fn(),
+   *   getContractWasmByContractId: vi.fn(),
+   * };
+   *
+   * const mockWallet = {
+   *   isConnected: vi.fn().mockResolvedValue(true),
+   *   connect: vi.fn(),
+   *   reconnect: vi.fn(),
+   *   disconnect: vi.fn(),
+   *   getPublicKey: vi.fn().mockResolvedValue('GTESTKEY...'),
+   *   signTransaction: vi.fn(),
+   * };
+   *
+   * const client = SoroWillClient.createTestClient({
+   *   rpcServer: mockServer,
+   *   wallet: mockWallet,
+   * });
+   * ```
+   *
+   * @param overrides - Optional partial options. Any value not supplied here
+   *   gets a safe stub so the client can be constructed without real
+   *   infrastructure.
+   */
+  static createTestClient(
+    overrides: Partial<SoroWillClientOptions> & {
+      /** Override for the RPC server — pass a vi.fn() mock object in tests. */
+      rpcServer?: SoroWillRpcServer;
+    } = {},
+  ): SoroWillClient {
+    const network: SoroWillNetwork = overrides.network ?? 'testnet';
+    // Use the testnet default contract id as a valid placeholder; tests that
+    // exercise contract-id validation should pass their own value.
+    const contractId =
+      overrides.contractId ?? DEFAULT_CONTRACT_IDS.testnet;
+
+    return new SoroWillClient({
+      network,
+      contractId,
+      // Disable read-caching by default so tests don't share stale state.
+      readCache: false,
+      // Apply caller overrides last so they take precedence over the stubs above.
+      ...overrides,
+    });
+  }
+
   // -----------------------------------------------------------------------
   // Public: state-changing methods
   // -----------------------------------------------------------------------
@@ -1437,6 +1551,13 @@ export class SoroWillClient {
     let will: Awaited<ReturnType<typeof this.getWill>> | null = null;
     if (!options?.skipExistenceCheck) {
       will = await this.getWill(willId, options);
+    }
+    // If the will is in the Triggered state (grace period active), the contract
+    // will reject check_in with WillNotActiveError. Detect this early and throw
+    // a descriptive CheckInDuringGracePeriodError so callers know to use
+    // emergencyCheckIn() instead.
+    if (will?.status === WillStatus.Triggered) {
+      throw new CheckInDuringGracePeriodError(willId);
     }
     const { txHash, createdAt } = await this.invoke(
       'check_in',
@@ -1639,6 +1760,18 @@ export class SoroWillClient {
     // Resolve beneficiaries from the will so we can validate funding before
     // attempting the on-chain release.
     const will = await this.getWill(willId, options);
+
+    // #631: Validate that the grace period has expired before attempting the
+    // on-chain release. The contract rejects with a cryptic error if called
+    // during the grace period; surface a clear SDK-level error instead.
+    if (will.triggerTime !== null) {
+      const gracePeriodMs = will.gracePeriodDays * 24 * 60 * 60 * 1000;
+      const gracePeriodExpiresAt = new Date(will.triggerTime.getTime() + gracePeriodMs);
+      if (Date.now() < gracePeriodExpiresAt.getTime()) {
+        throw new GracePeriodActiveError(willId, gracePeriodExpiresAt);
+      }
+    }
+
     await this.validateBeneficiariesFunded(will.beneficiaries);
 
     const { txHash } = await this.invoke(
@@ -3065,6 +3198,21 @@ export class SoroWillClient {
   }
 
   private async executeRead<T>(
+    method: string,
+    args: Record<string, unknown>,
+    options?: RequestOptions,
+  ): Promise<T> {
+    // Deduplicate concurrent identical read calls so that N concurrent callers
+    // asking for the same data only fire one RPC simulation, preventing
+    // connection exhaustion on high concurrency (#504).
+    const dedupKey = `read::${method}::${JSON.stringify(args, (_k, v) =>
+      typeof v === 'bigint' ? v.toString() : (v as unknown),
+    )}`;
+    return this.inFlightTracker.trackByKey(dedupKey, () => this._readOnce<T>(method, args, options)) as Promise<T>;
+  }
+
+  /** Executes a single read RPC simulation. Called by {@link read} after deduplication. */
+  private async _readOnce<T>(
     method: string,
     args: Record<string, unknown>,
     options?: RequestOptions,

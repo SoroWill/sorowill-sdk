@@ -173,8 +173,16 @@ export class HookManager {
           // Let recursion errors propagate unwrapped so callers can catch them
           // directly; wrap any other hook error as before.
           if (err instanceof HookRecursionError) throw err;
-          throw new HookExecutionError('beforeInvoke', err);
+          const wrapped = new HookExecutionError('beforeInvoke', err);
+          // #633: Log the hook error before rethrowing so it is always visible
+          // in console output, even if the caller's catch block swallows it.
+          console.error(
+            `[SoroWill] beforeInvoke hook threw an error for method "${ctx.method}":`,
+            wrapped,
+          );
+          throw wrapped;
         }
+        HookManager.assertAllowedHookReturnValue(result, 'beforeInvoke');
         if (result === false) return false;
       }
       return true;
@@ -184,11 +192,12 @@ export class HookManager {
   }
 
   /**
-   * @internal Run all afterInvoke hooks. A throwing hook is swallowed rather
-   * than propagated — afterInvoke hooks are instrumentation/observability
-   * side effects, and a broken one must never convert an otherwise-successful
-   * (or already-failed) invocation into a different outcome for the caller.
-   * Every hook still runs exactly once, in order, even if an earlier one throws.
+   * @internal Run all afterInvoke hooks. A throwing hook is logged and then
+   * swallowed rather than propagated — afterInvoke hooks are
+   * instrumentation/observability side effects, and a broken one must never
+   * convert an otherwise-successful (or already-failed) invocation into a
+   * different outcome for the caller. Every hook still runs exactly once,
+   * in order, even if an earlier one throws (#633).
    */
   async runAfterInvoke(ctx: AfterInvokeContext): Promise<void> {
     if (this.executing) {
@@ -200,9 +209,16 @@ export class HookManager {
         try {
           await hook(ctx);
         } catch (err) {
-          // Let recursion errors propagate unwrapped; swallow any other hook
-          // error — afterInvoke is instrumentation and must not break the call.
+          // Let recursion errors propagate unwrapped; log and swallow any
+          // other hook error — afterInvoke is instrumentation and must not
+          // break the call.
           if (err instanceof HookRecursionError) throw err;
+          // #633: Log swallowed afterInvoke hook errors so they are visible
+          // in console output even though they are not rethrown.
+          console.error(
+            `[SoroWill] afterInvoke hook threw an error for method "${ctx.method}":`,
+            err,
+          );
         }
       }
     } finally {
