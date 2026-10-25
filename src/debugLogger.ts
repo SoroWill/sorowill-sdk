@@ -166,6 +166,11 @@ interface DebugLog {
   severity?: LogLevel;
   method: string;
   willId?: string | undefined;
+  /**
+   * Correlation ID tying together all log entries emitted for a single
+   * multi-step operation (build → simulate → submit → poll → success/error).
+   */
+  correlationId?: string | undefined;
   details: Record<string, unknown>;
 }
 
@@ -181,6 +186,19 @@ const LEVEL_SEVERITY: Record<DebugLog['level'], LogLevel> = {
   success: 'info',
   error: 'error',
 };
+
+/**
+ * Generates a correlation ID for tracing a multi-step operation across logs.
+ * Uses `crypto.randomUUID` when available, otherwise a random fallback.
+ */
+export function generateCorrelationId(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c && typeof c.randomUUID === 'function') {
+    return c.randomUUID();
+  }
+  const rand = (): string => Math.random().toString(16).slice(2, 10);
+  return `${Date.now().toString(16)}-${rand()}-${rand()}`;
+}
 
 export class DebugLogger {
   /**
@@ -208,7 +226,12 @@ export class DebugLogger {
     this.minLevel = resolveLogLevel();
   }
 
-  logOperationBuild(method: string, willId: string | undefined = undefined, details: Record<string, unknown> | undefined = undefined): void {
+  logOperationBuild(
+    method: string,
+    willId: string | undefined = undefined,
+    details: Record<string, unknown> | undefined = undefined,
+    correlationId: string | undefined = undefined,
+  ): void {
     if (!this.isActive) return;
 
     const log: DebugLog = {
@@ -216,6 +239,7 @@ export class DebugLogger {
       level: 'operation-build',
       method,
       willId,
+      correlationId,
       details: details || {},
     };
 
@@ -227,6 +251,7 @@ export class DebugLogger {
     willId: string | undefined = undefined,
     minResourceFee: string | undefined = undefined,
     details: Record<string, unknown> | undefined = undefined,
+    correlationId: string | undefined = undefined,
   ): void {
     if (!this.isActive) return;
 
@@ -235,6 +260,7 @@ export class DebugLogger {
       level: 'simulation',
       method,
       willId,
+      correlationId,
       details: {
         minResourceFee,
         ...details,
@@ -244,7 +270,12 @@ export class DebugLogger {
     this.log(log);
   }
 
-  logSubmission(method: string, willId?: string, txHash?: string): void {
+  logSubmission(
+    method: string,
+    willId?: string,
+    txHash?: string,
+    correlationId?: string,
+  ): void {
     if (!this.isActive) return;
 
     const log: DebugLog = {
@@ -252,13 +283,20 @@ export class DebugLogger {
       level: 'submission',
       method,
       willId,
+      correlationId,
       details: { txHash },
     };
 
     this.log(log);
   }
 
-  logPoll(method: string, willId?: string, attempt?: number, maxAttempts?: number): void {
+  logPoll(
+    method: string,
+    willId?: string,
+    attempt?: number,
+    maxAttempts?: number,
+    correlationId?: string,
+  ): void {
     if (!this.isActive) return;
 
     const log: DebugLog = {
@@ -266,13 +304,20 @@ export class DebugLogger {
       level: 'poll',
       method,
       willId,
+      correlationId,
       details: { attempt, maxAttempts },
     };
 
     this.log(log);
   }
 
-  logSuccess(method: string, willId?: string, txHash?: string, durationMs?: number): void {
+  logSuccess(
+    method: string,
+    willId?: string,
+    txHash?: string,
+    durationMs?: number,
+    correlationId?: string,
+  ): void {
     if (!this.isActive) return;
 
     const log: DebugLog = {
@@ -280,13 +325,19 @@ export class DebugLogger {
       level: 'success',
       method,
       willId,
+      correlationId,
       details: { txHash, durationMs },
     };
 
     this.log(log);
   }
 
-  logError(method: string, willId: string | undefined = undefined, error: string | Error | undefined = undefined): void {
+  logError(
+    method: string,
+    willId: string | undefined = undefined,
+    error: string | Error | undefined = undefined,
+    correlationId: string | undefined = undefined,
+  ): void {
     if (!this.isActive) return;
 
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -298,6 +349,7 @@ export class DebugLogger {
       level: 'error',
       method,
       willId,
+      correlationId,
       details: { error: errorMessage, stack },
     };
 
