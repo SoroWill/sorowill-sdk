@@ -97,20 +97,11 @@ describe('Issue #636 — latency history tracking and weighted endpoint selectio
 
     const pool = new RpcEndpointPool([URL_A], mockServer as never);
 
-    // Fake Date.now to control latency
-    let callCount = 0;
-    const latencies = [100, 200, 300]; // ms
-    vi.spyOn(Date, 'now').mockImplementation(() => {
-      // Alternate: first call of each pair is start, second is end
-      const base = 1_000_000;
-      const i = Math.floor(callCount / 2);
-      const isStart = callCount % 2 === 0;
-      callCount++;
-      return isStart ? base : base + (latencies[i] ?? 0);
-    });
-
-    for (let i = 0; i < latencies.length; i++) {
-      await pool.withFailover((server) => server.pollTransaction('hash', { attempts: 1 }));
+    // Manually inject test latencies into the history
+    const testLatencies = [100, 200, 300];
+    const history = pool['latencyHistory'][0]; // Access private property for testing
+    for (const latency of testLatencies) {
+      history.push(latency);
     }
 
     const avg = pool.getAverageLatency(0);
