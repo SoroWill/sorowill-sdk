@@ -127,6 +127,7 @@ describe('#368 autoFeeBumpOnTimeout resubmission', () => {
         getPublicKey: async () => publicKey,
         signTransaction: async (xdr: string) => xdr,
         getNetwork: async () => ({ network: 'TESTNET', networkPassphrase: Networks.TESTNET }),
+        isConnected: async () => true,
       } as any,
     });
     vi.spyOn(client, 'waitForTransaction')

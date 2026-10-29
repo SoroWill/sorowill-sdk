@@ -40,7 +40,7 @@ vi.mock('@stellar/freighter-api', () => ({
     getAddress: vi.fn(async () => ({ address: mockState.walletPublicKey, error: undefined })),
     requestAccess: vi.fn(),
     getNetworkDetails: vi.fn().mockResolvedValue({ network: 'TESTNET', networkPassphrase: 'Test SDF Network ; September 2015' }),
-    isConnected: vi.fn(),
+    isConnected: vi.fn(async () => true),
     signTransaction: vi.fn(async (xdr: string) => xdr),
   },
 }));
@@ -66,7 +66,7 @@ vi.mock('@stellar/stellar-sdk', async () => {
   }
 
   class MockTransaction {
-    constructor(private readonly xdr: string = 'TX_XDR') {}
+    constructor(private readonly xdr: string = 'VFNfWERSLQo=') {}
     toXDR(): string { return this.xdr; }
   }
 
@@ -84,7 +84,7 @@ vi.mock('@stellar/stellar-sdk', async () => {
         fee: this.options.fee,
         networkPassphrase: this.options.networkPassphrase,
         ops: this.ops,
-        toXDR: () => 'TX_XDR',
+        toXDR: () => 'VFNfWERSLQo=',
       };
     }
     static fromXDR(xdr: string, _np: string) { return new MockTransaction(xdr); }

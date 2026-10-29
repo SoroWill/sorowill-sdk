@@ -83,7 +83,7 @@ vi.mock('@stellar/stellar-sdk', () => {
         fee: this.options.fee,
         networkPassphrase: this.options.networkPassphrase,
         operation: this.operation,
-        toXDR: () => 'TX_XDR',
+        toXDR: () => 'VFNfWERSLQo=',
       };
     }
   }

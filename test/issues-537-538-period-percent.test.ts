@@ -61,7 +61,7 @@ vi.mock('@stellar/stellar-sdk', async () => {
         fee: this.options.fee,
         networkPassphrase: this.options.networkPassphrase,
         operation: this.operation,
-        toXDR: () => 'TX_XDR',
+        toXDR: () => 'VFNfWERSLQo=',
       };
     }
     static fromXDR(_xdr: string, _networkPassphrase: string) { return new MockTransaction(); }
