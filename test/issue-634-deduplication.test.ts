@@ -18,7 +18,7 @@ function makeWill(id: string, owner: string): Will {
     owner,
     token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
     balance: '1000',
-    beneficiaries: [{ address: 'GBENE', percentage: 100 }],
+    beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
     checkinPeriodDays: 90,
     gracePeriodDays: 7,
     lastCheckin: new Date(0),
@@ -58,9 +58,9 @@ describe('Issue #634 — deduplication of getWillsByBeneficiary results', () => 
     const will3 = makeWill('1', 'GOWNER1'); // duplicate of will1
 
     const rawResponse = [
-      { id: 1n, owner: will1.owner, token: will1.token, balance: 1000n, beneficiaries: [{ address: 'GBENE', basis_points: 10000 }], checkin_period_days: 90n, grace_period_days: 7n, last_checkin: 0n, trigger_time: undefined, status: WillStatus.Active, guardians: [], guardian_votes: 0 },
-      { id: 2n, owner: will2.owner, token: will2.token, balance: 1000n, beneficiaries: [{ address: 'GBENE', basis_points: 10000 }], checkin_period_days: 90n, grace_period_days: 7n, last_checkin: 0n, trigger_time: undefined, status: WillStatus.Active, guardians: [], guardian_votes: 0 },
-      { id: 1n, owner: will3.owner, token: will3.token, balance: 1000n, beneficiaries: [{ address: 'GBENE', basis_points: 10000 }], checkin_period_days: 90n, grace_period_days: 7n, last_checkin: 0n, trigger_time: undefined, status: WillStatus.Active, guardians: [], guardian_votes: 0 },
+      { id: 1n, owner: will1.owner, token: will1.token, balance: 1000n, beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', basis_points: 10000 }], checkin_period_days: 90n, grace_period_days: 7n, last_checkin: 0n, trigger_time: undefined, status: WillStatus.Active, guardians: [], guardian_votes: 0 },
+      { id: 2n, owner: will2.owner, token: will2.token, balance: 1000n, beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', basis_points: 10000 }], checkin_period_days: 90n, grace_period_days: 7n, last_checkin: 0n, trigger_time: undefined, status: WillStatus.Active, guardians: [], guardian_votes: 0 },
+      { id: 1n, owner: will3.owner, token: will3.token, balance: 1000n, beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', basis_points: 10000 }], checkin_period_days: 90n, grace_period_days: 7n, last_checkin: 0n, trigger_time: undefined, status: WillStatus.Active, guardians: [], guardian_votes: 0 },
     ];
 
     const internals = client as unknown as {
@@ -73,7 +73,7 @@ describe('Issue #634 — deduplication of getWillsByBeneficiary results', () => 
     // which also calls mapWillList internally
     const result = await (client as unknown as {
       getWillsByOwner(owner: string): Promise<Will[]>;
-    }).getWillsByOwner('GOWNER1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+    }).getWillsByOwner('GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG');
 
     // Should have 2 unique wills, not 3 (duplicate id=1 removed)
     expect(result).toHaveLength(2);
