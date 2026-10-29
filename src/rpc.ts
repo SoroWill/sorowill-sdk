@@ -435,6 +435,15 @@ export class RpcEndpointPool {
     let bestIndex = -1;
     let bestLatency = Infinity;
 
+    // Check if the active endpoint is available (not backed off or quarantined)
+    const activeIsAvailable = !this.isEndpointUnderBackoff(this.activeIndex) &&
+                              !this.isEndpointQuarantined(this.activeIndex);
+    if (activeIsAvailable) {
+      // Prefer the active endpoint when it's available, to maintain sticky
+      // routing and to retry endpoints after their backoff expires.
+      return this.activeIndex;
+    }
+
     for (let offset = 0; offset < this.servers.length; offset += 1) {
       const index = (this.activeIndex + offset) % this.servers.length;
       if (this.isEndpointUnderBackoff(index)) continue;
