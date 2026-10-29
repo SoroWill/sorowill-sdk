@@ -426,6 +426,46 @@ export class RpcEndpointPool {
   }
 
   /**
+   * Adds a new RPC endpoint to the pool. The URL is validated before being
+   * added. If the URL is already in the pool, this is a no-op. Surrounding
+   * whitespace is trimmed.
+   */
+  add(rpcUrl: string): void {
+    const normalizedUrl = rpcUrl.trim();
+
+    if (normalizedUrl.length === 0) {
+      throw new Error(
+        `Invalid RPC URL: "" — must be an absolute http(s) URL, ` +
+          `e.g. "https://soroban-testnet.stellar.org"`,
+      );
+    }
+
+    // Validate the URL format and protocol
+    assertValidRpcUrl(normalizedUrl);
+
+    // Skip if already in the pool
+    if (this.rpcUrls.includes(normalizedUrl)) {
+      return;
+    }
+
+    // Add to tracking arrays
+    this.rpcUrls.push(normalizedUrl);
+    this.circuitStates.push({ failureCount: 0, quarantinedAt: null });
+    this.backoffUntil.push(0);
+    this.consecutiveFailures.push(0);
+    this.latencyHistory.push([]);
+
+    // Create server for the new endpoint
+    const server = this.serverOverride
+      ? this.serverOverride
+      : new rpc.Server(normalizedUrl, {
+          allowHttp: normalizedUrl.startsWith('http://'),
+          timeout: this.timeoutMs,
+        });
+    this.servers.push(server);
+  }
+
+  /**
    * Picks the endpoint a request should be routed to using weighted selection
    * by latency history (#636). Endpoints with lower average latency are
    * preferred. Endpoints that are backing off or quarantined are skipped.
