@@ -149,7 +149,9 @@ export function deserializeCacheValue<T>(value: string): T {
         }
         return date;
       }
-      throw new CacheDeserializationError(`Unknown __type: "${type}"`);
+      // Unknown __type: log warning and return as-is
+      console.warn(`Unknown __type: "${type}" - returning object as-is`);
+      return currentValue;
     }
     return currentValue;
   }) as T;
