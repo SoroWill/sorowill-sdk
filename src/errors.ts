@@ -225,7 +225,7 @@ export class InvalidContractIdError extends SoroWillError {
 
   constructor(contractId: string, options?: ErrorOptions) {
     super(
-      `"${contractId}" is not a valid SoroWill contract address. ` +
+      `"${contractId}" is an invalid SoroWill contract address. ` +
         'A Stellar contract address must be a 56-character StrKey starting with "C".',
       options,
     );
@@ -1322,6 +1322,32 @@ export class ReadOnlyModeError extends SoroWillError {
       options,
     );
     this.name = 'ReadOnlyModeError';
+  }
+}
+
+export class WalletSessionExpiredError extends SoroWillError {
+  constructor(options?: ErrorOptions) {
+    super(
+      'Wallet session has expired or is no longer valid',
+      options,
+    );
+    this.name = 'WalletSessionExpiredError';
+  }
+}
+
+export class HookReturnValueError extends SoroWillError {
+  readonly hookName: string;
+  readonly returnValue: unknown;
+
+  constructor(hookName: string, returnValue: unknown, options?: ErrorOptions) {
+    const valueStr = returnValue === null ? 'null' : (typeof returnValue === 'object' ? JSON.stringify(returnValue) : String(returnValue));
+    super(
+      `${hookName} hook returned an invalid value: ${valueStr}. Hooks must return true, false, or undefined.`,
+      options,
+    );
+    this.name = 'HookReturnValueError';
+    this.hookName = hookName;
+    this.returnValue = returnValue;
   }
 }
 

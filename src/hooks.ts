@@ -1,4 +1,4 @@
-import { HookExecutionError, HookRecursionError } from './errors';
+import { HookExecutionError, HookRecursionError, HookReturnValueError } from './errors';
 
 /**
  * Contains all information about the contract call about to be made.
@@ -141,14 +141,7 @@ export class HookManager {
       return;
     }
 
-    const receivedType = result === null ? 'null' : typeof result;
-    throw new HookExecutionError(
-      hookName,
-      new TypeError(
-        `${hookName} hook returned a value of type "${receivedType}" — hooks must return ` +
-          `a boolean (false aborts the invocation) or void (proceeds).`,
-      ),
-    );
+    throw new HookReturnValueError(hookName, result);
   }
 
   /** @internal Run all beforeInvoke hooks. Returns `false` if any hook aborted.

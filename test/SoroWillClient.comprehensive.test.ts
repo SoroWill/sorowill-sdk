@@ -7,10 +7,10 @@ const VOID_SCVAL = xdr.ScVal.scvVoid();
 function makeStubSpec() {
   const rawWill = {
     id: 1n,
-    owner: 'GOWNER',
+    owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
     token: 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526',
     balance: 1_000_000n,
-    beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+    beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
     checkin_period_days: 90n,
     grace_period_days: 7n,
     last_checkin: 1_700_000_000n,
@@ -256,7 +256,7 @@ describe('SoroWillClient public methods', () => {
     });
     const will = await client.getWill('1');
     expect(will.id).toBe('1');
-    expect(will.owner).toBe('GOWNER');
+    expect(will.owner).toBe('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF');
     expect(will.status).toBe('Active');
   });
 

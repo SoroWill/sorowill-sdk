@@ -222,6 +222,8 @@ export {
   RequestTimeoutError,
   RequestQueueOverflowError,
   ReadOnlyModeError,
+  WalletSessionExpiredError,
+  HookReturnValueError,
   SameWillIdError,
   SignTransactionTimeoutError,
   SimulationError,

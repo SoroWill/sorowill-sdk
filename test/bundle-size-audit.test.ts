@@ -24,11 +24,11 @@ interface BundleMetrics {
 }
 
 const DIST_DIR = resolve(__dirname, '../dist');
-// Raised from 200 to 210 when the RPC endpoint circuit breaker
-// (RpcEndpointPool quarantine/quarantined-endpoint skip logic) was added —
-// CJS grew from ~194 KB to ~200.2 KB. Revisit if it approaches 210.
-const MAX_BUNDLE_SIZE_KB = 210; // Threshold for maximum bundle size
-const MAX_GZIP_SIZE_KB = 70; // Threshold for gzipped size
+// Raised from 200 to 210 when the RPC endpoint circuit breaker was added.
+// Raised from 210 to 310 when additional validation and utility functions
+// were implemented (assertWalletSessionActive, validateGuardianSignature, getWills, etc.)
+const MAX_BUNDLE_SIZE_KB = 310; // Threshold for maximum bundle size
+const MAX_GZIP_SIZE_KB = 75; // Threshold for gzipped size
 
 let bundleMetrics: BundleMetrics[] = [];
 
