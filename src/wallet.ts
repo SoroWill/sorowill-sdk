@@ -875,7 +875,22 @@ export class FreighterWalletAdapter implements WalletAdapter {
   }
 
   async reconnect(): Promise<WalletConnection> {
-    const publicKey = await this.getPublicKey();
+    // If extension context is already stale, fall through to connect
+    if (this._extensionContextStale) {
+      return this.connect();
+    }
+
+    let publicKey: string;
+    try {
+      publicKey = await this.getPublicKey();
+    } catch (error) {
+      // If getPublicKey failed due to context error, fall through to connect
+      if (this._extensionContextStale) {
+        return this.connect();
+      }
+      throw error;
+    }
+
     const freighterApi = await this.loadInjectedFreighterApi();
     const networkDetails = await freighterApi.getNetworkDetails();
     if (networkDetails?.error) {
