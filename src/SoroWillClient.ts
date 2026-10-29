@@ -1015,7 +1015,7 @@ export class SoroWillClient {
    */
   private readonly signedTransactionHashes: Set<string>;
   private stopWatchingWalletNetwork?: (() => void) | undefined;
-  private specVersion?: ContractSpecVersion | undefined;
+  private specVersion: ContractSpecVersion | null = null;
   private expectedContractVersion?: string | undefined;
   private warnedSpecVersions: Set<string> = new Set();
   private requireWalletNetwork: boolean = false;
@@ -3078,7 +3078,7 @@ export class SoroWillClient {
    * Compare `fingerprint` across sessions to detect contract upgrades, and
    * check `compatible` / `missingMethods` to detect an SDK/contract mismatch.
    */
-  get contractSpecVersion(): ContractSpecVersion | undefined {
+  get contractSpecVersion(): ContractSpecVersion | null {
     return this.specVersion;
   }
 
