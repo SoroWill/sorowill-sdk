@@ -376,7 +376,7 @@ describe('updateBeneficiaries — beneficiary validation fast-fail', () => {
   });
 
   it('does NOT throw for a valid two-beneficiary list summing to 100', async () => {
-    freighterApiMock.signTransaction.mockResolvedValue({ envelope_xdr: 'SIGNED_XDR2', error: undefined });
+    freighterApiMock.signTransaction.mockResolvedValue({ envelope_xdr: 'VFNfWERSLQo=', error: undefined });
     mockState.simulateTransaction.mockResolvedValue({
       result: {
         retval: {
@@ -409,7 +409,7 @@ describe('updateBeneficiaries — beneficiary validation fast-fail', () => {
   });
 
   it('throws WillNotFoundError when the will does not exist', async () => {
-    freighterApiMock.signTransaction.mockResolvedValue({ envelope_xdr: 'SIGNED_XDR3', error: undefined });
+    freighterApiMock.signTransaction.mockResolvedValue({ envelope_xdr: 'VFNfWERSLQo=', error: undefined });
     // getWill's simulation returns a WillNotFound contract error (code 1)
     mockState.simulateTransaction.mockResolvedValue({ error: 'Error(Contract, #1)' });
 
