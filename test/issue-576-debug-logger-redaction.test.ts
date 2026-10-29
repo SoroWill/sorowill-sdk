@@ -29,8 +29,8 @@ describe('Issue #576: DebugLogger redacts sensitive data by default', () => {
       API_KEY: 'key',
       nested: { password: 'pw', mnemonic: 'words', ok: 'visible' },
       list: [{ seed: 'seed' }, 'plain'],
-      token: 'CTOKEN',
-      owner: 'GOWNER',
+      token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
+      owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
     });
 
     const { details } = lastLog(consoleLogSpy);
@@ -43,8 +43,8 @@ describe('Issue #576: DebugLogger redacts sensitive data by default', () => {
     expect(details.nested.ok).toBe('visible');
     expect(details.list).toEqual([{ seed: REDACTED }, 'plain']);
     // The will's token contract address is not a secret.
-    expect(details.token).toBe('CTOKEN');
-    expect(details.owner).toBe('GOWNER');
+    expect(details.token).toBe('CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE');
+    expect(details.owner).toBe('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF');
   });
 
   it('scrubs Stellar secret seeds from arbitrary string values and error messages', () => {

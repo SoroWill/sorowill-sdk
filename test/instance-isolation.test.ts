@@ -31,10 +31,10 @@ const { mockRegistry, specFromWasmSpy } = vi.hoisted(() => {
       funcArgsToScVals: () => [],
       funcResToNative: (_method: string, _value: unknown) => ({
         id: 1n,
-        owner: 'GOWNER',
-        token: 'CTOKEN',
+        owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+        token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
         balance: 1_000_000n,
-        beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+        beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
         checkin_period_days: 90n,
         grace_period_days: 7n,
         last_checkin: 1_700_000_000n,

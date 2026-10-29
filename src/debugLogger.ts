@@ -221,9 +221,13 @@ export class DebugLogger {
    */
   readonly minLevel: LogLevel;
 
+  /** Field names to redact from log output. */
+  private readonly redactKeys: readonly string[];
+
   constructor(enabled: boolean) {
     this.isActive = resolveEnabled(enabled);
     this.minLevel = resolveLogLevel();
+    this.redactKeys = DEFAULT_REDACTED_KEYS;
   }
 
   logOperationBuild(

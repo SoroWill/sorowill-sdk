@@ -30,6 +30,7 @@ import {
 import type {
   BatchOperation,
   BatchOperationResult,
+  BatchOperationResults,
   BatchQueueOptions,
   BatchQueueResult,
   BatchResult,
@@ -77,7 +78,6 @@ import {
   SoroWillInvalidAmountError,
   SoroWillRestoreRequiredError,
   TooManyGuardiansError,
-  TooManyIdsError,
   UnsupportedBatchSizeError,
   WalletNetworkMismatchError,
   WillContractError,
@@ -529,38 +529,6 @@ const DEFAULT_RETRY_OPTIONS: RpcRetryOptions = {
  * corrupted `Will`: verifies the value decoded by `funcResToNative` actually
  * has the shape this SDK expects before any of its fields are trusted.
  */
-/**
- * Settles with `promise`, or rejects with the signal's abort reason as soon as
- * `signal` fires — whichever happens first. Lets callers stop waiting on a
- * long-running step (wallet signing, an in-flight RPC) the moment they abort
- * instead of waiting for it to time out (#608).
- */
-function raceAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-  if (!signal) return promise;
-  if (signal.aborted) {
-    // The original promise is abandoned; keep its eventual rejection handled.
-    promise.catch(() => undefined);
-    return Promise.reject(signal.reason);
-  }
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = (): void => {
-      promise.catch(() => undefined);
-      reject(signal.reason);
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener('abort', onAbort);
-        resolve(value);
-      },
-      (error: unknown) => {
-        signal.removeEventListener('abort', onAbort);
-        reject(error);
-      },
-    );
-  });
-}
-
 function isRawWillShape(value: unknown): value is RawWill {
   if (typeof value !== 'object' || value === null) {
     return false;
@@ -813,36 +781,6 @@ function parseCursor(cursor: string | undefined): number {
   return offset;
 }
 
-/** Maximum accepted length of an event-stream cursor (RPC paging token). */
-const MAX_EVENT_CURSOR_LENGTH = 256;
-
-/**
- * Validates an event-subscription cursor (an opaque RPC paging token) before
- * it is forwarded to the RPC node or WebSocket stream. Paging tokens are
- * short alphanumeric strings (e.g. `"0004294967296-0000000001"`), so the
- * SDK only accepts non-empty strings of letters, digits, `-` and `_`.
- */
-function validateEventCursor(cursor: unknown): void {
-  if (cursor === undefined) {
-    return;
-  }
-  if (typeof cursor !== 'string') {
-    throw new InvalidCursorError(String(cursor), `expected a string, received ${typeof cursor}`);
-  }
-  if (cursor.length === 0) {
-    throw new InvalidCursorError(cursor, 'cursor must not be empty');
-  }
-  if (cursor.length > MAX_EVENT_CURSOR_LENGTH) {
-    throw new InvalidCursorError(
-      cursor,
-      `cursor must be at most ${MAX_EVENT_CURSOR_LENGTH} characters`,
-    );
-  }
-  if (!/^[A-Za-z0-9_-]+$/.test(cursor)) {
-    throw new InvalidCursorError(cursor, 'cursor may only contain letters, digits, "-" and "_"');
-  }
-}
-
 function normalizePositiveInteger(value: number | undefined, label: string): number | null {
   if (value === undefined) {
     return null;
@@ -1002,7 +940,7 @@ function getDefaultEnv(): EnvSource {
  */
 function validateContractIdFormat(contractId: unknown): asserts contractId is string {
   if (typeof contractId !== 'string' || !StrKey.isValidContract(contractId)) {
-    throw new InvalidContractIdError(contractId ?? '');
+    throw new InvalidContractIdError(String(contractId ?? ''));
   }
 }
 
@@ -1180,7 +1118,7 @@ export class SoroWillClient {
       throw new RangeError('retry.backoffFactor must be a finite number of at least 1');
     }
     this.debug = options.debug ?? false;
-    this.debugLogger = new DebugLogger(this.debug, options.debugLoggerOptions);
+    this.debugLogger = new DebugLogger(this.debug);
     this.autoFeeBumpOnTimeout = options.autoFeeBumpOnTimeout ?? false;
     this.transactionTimeoutSeconds = options.transactionTimeoutSeconds ?? 30;
     if (!Number.isFinite(this.transactionTimeoutSeconds) || this.transactionTimeoutSeconds <= 0) {
@@ -1465,16 +1403,17 @@ export class SoroWillClient {
     params: CreateWillParams,
     options?: RequestOptions,
   ): Promise<{ willId: string; txHash: string }> {
-    assertValidBeneficiaryAddresses(params.beneficiaries);
-    if (hasDuplicateBeneficiaries(params.beneficiaries)) {
+    const beneficiaries = [...params.beneficiaries];
+    assertValidBeneficiaryAddresses(beneficiaries);
+    if (hasDuplicateBeneficiaries(beneficiaries)) {
       throw new BeneficiaryValidationError('Invalid beneficiaries: duplicate beneficiary addresses are not allowed.');
     }
-    if (!validateBeneficiaries(params.beneficiaries)) {
+    if (!validateBeneficiaries(beneficiaries)) {
       throw new BeneficiaryValidationError(
         'Invalid beneficiaries: list must be 1–10 entries, every percentage must be a positive number, and percentages must sum to 100.',
       );
     }
-    assertBeneficiaryBasisPointsTotal(params.beneficiaries, 'createWill');
+    assertBeneficiaryBasisPointsTotal(beneficiaries, 'createWill');
     // #156: Validate guardians count synchronously before any RPC round-trip.
     if (params.guardians.length > MAX_GUARDIANS) {
       throw new TooManyGuardiansError(params.guardians.length, MAX_GUARDIANS);
@@ -1505,7 +1444,7 @@ export class SoroWillClient {
         owner,
         token: params.token,
         amount: validateAmount(params.amount),
-        beneficiaries: toContractBeneficiaries(params.beneficiaries),
+        beneficiaries: toContractBeneficiaries(beneficiaries),
         checkin_period_days: validateCheckinPeriodDays(params.checkinPeriodDays),
         grace_period_days: validateDays(params.gracePeriodDays, 'gracePeriodDays'),
         guardians: params.guardians,
@@ -1796,7 +1735,7 @@ export class SoroWillClient {
    *   found on-chain or is unfunded.
    */
   private async validateBeneficiariesFunded(
-    beneficiaries: { address: string }[],
+    beneficiaries: readonly { address: string }[],
   ): Promise<void> {
     for (const beneficiary of beneficiaries) {
       try {
@@ -1854,11 +1793,12 @@ export class SoroWillClient {
     options?: RequestOptions,
   ): Promise<{ txHash: string }> {
     parseWillId(params.willId);
-    assertValidBeneficiaryAddresses(params.beneficiaries);
-    if (hasDuplicateBeneficiaries(params.beneficiaries)) {
+    const beneficiaries = [...params.beneficiaries];
+    assertValidBeneficiaryAddresses(beneficiaries);
+    if (hasDuplicateBeneficiaries(beneficiaries)) {
       throw new BeneficiaryValidationError('Invalid beneficiaries: duplicate beneficiary addresses are not allowed.');
     }
-    if (!validateBeneficiaries(params.beneficiaries)) {
+    if (!validateBeneficiaries(beneficiaries)) {
       throw new BeneficiaryValidationError(
         'Invalid beneficiaries: list must be 1–10 entries, every percentage must be a positive number, and percentages must sum to 100.',
       );
@@ -1870,7 +1810,7 @@ export class SoroWillClient {
     const owner = await this.getWalletPublicKey();
     const { txHash } = await this.invoke(
       'update_beneficiaries',
-      { will_id: parseWillId(params.willId), owner, beneficiaries: toContractBeneficiaries(params.beneficiaries) },
+      { will_id: parseWillId(params.willId), owner, beneficiaries: toContractBeneficiaries(beneficiaries) },
       options,
     );
     return { txHash };
@@ -2103,7 +2043,7 @@ export class SoroWillClient {
       const cached = this.readCache.get<Will[]>(cacheKey);
       if (cached !== undefined) {
         const cloned = cached.map(cloneWill);
-        const result = canonicalIds.map((id) => cloned.find((w) => w.id === BigInt(id))!);
+        const result = canonicalIds.map((id) => cloned.find((w) => w.id === id)!);
         return this.deepFreeze
           ? result.map((w) => deepFreezeObject(w))
           : result;
@@ -2114,7 +2054,7 @@ export class SoroWillClient {
     const wills = Array.isArray(raw) ? raw.map(mapWill) : [mapWill(raw)];
     this.readCache?.set(cacheKey, wills.map(cloneWill), uniqueIds);
 
-    const result = canonicalIds.map((id) => wills.find((w) => w.id === BigInt(id))!);
+    const result = canonicalIds.map((id) => wills.find((w) => w.id === id)!);
     return this.deepFreeze
       ? result.map((w) => deepFreezeObject(w))
       : result;
@@ -2512,10 +2452,10 @@ export class SoroWillClient {
         txHash = result.txHash;
         // Soroban allows a single invocation per transaction, so the
         // transaction's return value belongs to the (only) operation.
-        const results = operations.map(({ method, args, decode }) => {
+        const results = operations.map(({ method, args }) => {
           const native =
             result.returnValue === undefined ? undefined : spec.funcResToNative(method, result.returnValue);
-          return { method, args, returnValue: decode ? decode(native) : native };
+          return { method, args, returnValue: native };
         }) as BatchOperationResults<TOperations>;
         const batchResult: BatchResult<TOperations> = {
           success: true,
@@ -4189,3 +4129,6 @@ export class SoroWillClient {
     return this.networkPassphrase;
   }
 }
+
+// Re-export utility functions for convenience (commonly imported with SoroWillClient)
+export { validateGuardianSignature };

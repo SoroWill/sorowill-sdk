@@ -2,6 +2,8 @@ import { StrKey } from '@stellar/stellar-sdk';
 
 import {
   BeneficiaryValidationError,
+  InvalidBeneficiaryAddressError,
+  InvalidGuardianSignatureError,
   InvalidStellarAddressError,
   type InvalidStellarAddressReason,
 } from './errors';
@@ -311,24 +313,76 @@ export function describeInvalidBeneficiaryAddress(address: unknown): string | nu
 }
 
 /** Returns an error reason if `address` is not a valid Stellar account address, or null if valid. */
-export function getStellarAddressError(address: unknown): InvalidStellarAddressReason | null {
+export function getStellarAddressError(
+  address: unknown,
+  options?: { allowContract?: boolean; allowMuxed?: boolean },
+): InvalidStellarAddressReason | null {
   if (typeof address !== 'string') {
-    return 'not a string';
+    return 'not_a_string';
   }
   if (address.length === 0) {
-    return 'empty string';
+    return 'empty';
   }
-  if (!StrKey.isValidEd25519PublicKey(address)) {
-    // Provide more specific error messages for common cases
-    if (address.startsWith('S')) {
-      return 'secret seed, not public key';
-    }
-    if (address.startsWith('M')) {
-      return 'muxed account, not valid';
-    }
-    return 'invalid Stellar address format';
+  if (address !== address.trim()) {
+    return 'whitespace';
   }
-  return null;
+
+  // Check for supported types first (before doing length/checksum validation)
+  if (address.startsWith('S')) {
+    return 'unsupported_type';
+  }
+  if (address.startsWith('M') && !options?.allowMuxed) {
+    return 'unsupported_type';
+  }
+  if (address.startsWith('C') && !options?.allowContract) {
+    return 'unsupported_type';
+  }
+
+  // Validate Ed25519 public key (account address)
+  if (address.startsWith('G')) {
+    if (!StrKey.isValidEd25519PublicKey(address)) {
+      if (address.length !== 56) {
+        return 'wrong_length';
+      }
+      // Check if it contains invalid characters
+      if (!/^[A-Z2-7]+$/.test(address)) {
+        return 'invalid_characters';
+      }
+      return 'invalid_checksum';
+    }
+    return null;
+  }
+
+  // Validate contract address
+  if (address.startsWith('C')) {
+    if (!StrKey.isValidContract(address)) {
+      if (address.length !== 56) {
+        return 'wrong_length';
+      }
+      if (!/^[A-Z2-7]+$/.test(address)) {
+        return 'invalid_characters';
+      }
+      return 'invalid_checksum';
+    }
+    return null;
+  }
+
+  // Validate muxed address
+  if (address.startsWith('M')) {
+    if (!StrKey.isValidMed25519PublicKey(address)) {
+      if (address.length !== 69) {
+        return 'wrong_length';
+      }
+      if (!/^[A-Z2-7]+$/.test(address)) {
+        return 'invalid_characters';
+      }
+      return 'invalid_checksum';
+    }
+    return null;
+  }
+
+  // Unknown address type
+  return 'invalid_characters';
 }
 
 /** Returns whether `address` is a valid Stellar account address. */
@@ -340,12 +394,9 @@ export function isValidStellarAddress(address: unknown): boolean {
 export function assertValidStellarAddress(
   address: unknown,
   field: string = 'address',
-  options?: { allowContract?: boolean },
+  options?: { allowContract?: boolean; allowMuxed?: boolean },
 ): void {
-  if (options?.allowContract && typeof address === 'string' && StrKey.isValidContract(address)) {
-    return;
-  }
-  const reason = getStellarAddressError(address);
+  const reason = getStellarAddressError(address, options);
   if (reason !== null) {
     throw new InvalidStellarAddressError(field, address, reason);
   }
@@ -584,7 +635,50 @@ export function deepFreezeObject<T>(value: T): T {
 }
 
 export function validateGuardianSignature(signature: unknown): void {
-  if (typeof signature !== 'string' || signature.trim().length === 0) {
-    throw new Error('Invalid guardian signature: must be a non-empty string.');
+  const { xdr } = require('@stellar/stellar-sdk');
+
+  // Must be a string
+  if (typeof signature !== 'string') {
+    throw new InvalidGuardianSignatureError(undefined);
   }
+
+  // Must not be empty or whitespace-only
+  if (signature.trim().length === 0) {
+    throw new InvalidGuardianSignatureError(signature);
+  }
+
+  // Try to parse as base64
+  const base64Pattern = /^[A-Za-z0-9+/]*={0,2}$/;
+  const isBase64 = base64Pattern.test(signature) && signature.length % 4 === 0;
+
+  // Try to parse as hex
+  const hexPattern = /^[0-9A-Fa-f]*$/;
+  const isHex = hexPattern.test(signature);
+
+  // For base64: accept 64 bytes (Ed25519 signature) or XDR-encoded DecoratedSignature
+  if (isBase64) {
+    try {
+      const decoded = Buffer.from(signature, 'base64');
+      if (decoded.length === 64) {
+        return; // Valid Ed25519 signature
+      }
+      // Try to parse as XDR DecoratedSignature
+      try {
+        xdr.DecoratedSignature.fromXDR(signature, 'base64');
+        return; // Valid XDR-encoded DecoratedSignature
+      } catch {
+        // Not a valid XDR DecoratedSignature
+      }
+    } catch {
+      // Fall through to error
+    }
+  }
+
+  // For hex: must be exactly 128 characters (64 bytes)
+  if (isHex && signature.length === 128) {
+    return;
+  }
+
+  // If we get here, the signature didn't match any valid format
+  throw new InvalidGuardianSignatureError(signature);
 }

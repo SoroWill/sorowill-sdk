@@ -410,7 +410,7 @@ export interface BatchOperation {
 /** Maps a tuple of operations to a tuple of their typed results, preserving order and length. */
 export type BatchOperationResults<TOperations extends readonly BatchOperation[]> = {
   -readonly [K in keyof TOperations]: TOperations[K] extends BatchOperation
-    ? BatchOperationResult<TOperations[K]>
+    ? BatchOperationResult
     : never;
 };
 

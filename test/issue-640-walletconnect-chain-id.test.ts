@@ -42,7 +42,7 @@ function makeMainnetSession(topic = 'topic-mainnet'): WalletConnectSession {
   };
 }
 
-function makeClient(session: WalletConnectSession, response: unknown = { envelope_xdr: 'SIGNED_XDR' }): WalletConnectClient {
+function makeClient(session: WalletConnectSession, response: unknown = { envelope_xdr: 'VFNfWERSLQo=' }): WalletConnectClient {
   return {
     async connect() {
       return { uri: 'wc:test', async approval() { return session; } };
@@ -67,7 +67,7 @@ describe('Issue #640: WalletConnect chain ID validation', () => {
 
     await expect(
       adapter.signTransaction('UNSIGNED_XDR', { networkPassphrase: 'Test SDF Network ; September 2015' }),
-    ).resolves.toBe('SIGNED_XDR');
+    ).resolves.toBe('VFNfWERSLQo=');
   });
 
   it('signs successfully when requestChainId matches the session chain (pubnet)', async () => {
@@ -79,7 +79,7 @@ describe('Issue #640: WalletConnect chain ID validation', () => {
 
     await expect(
       adapter.signTransaction('UNSIGNED_XDR', { networkPassphrase: 'Public Global Stellar Network ; September 2015' }),
-    ).resolves.toBe('SIGNED_XDR');
+    ).resolves.toBe('VFNfWERSLQo=');
   });
 
   it('throws WalletConnectChainIdMismatchError when requestChainId is testnet but session is pubnet', async () => {
@@ -135,7 +135,7 @@ describe('Issue #640: WalletConnect chain ID validation', () => {
 
     await expect(
       adapter.signTransaction('UNSIGNED_XDR', { networkPassphrase: 'Test SDF Network ; September 2015' }),
-    ).resolves.toBe('SIGNED_XDR');
+    ).resolves.toBe('VFNfWERSLQo=');
   });
 
   it('WalletConnectChainIdMismatchError message mentions both chain IDs', async () => {

@@ -12,7 +12,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { HookExecutionError } from '../src/errors';
+import { HookReturnValueError } from '../src/errors';
 import { HookManager } from '../src/hooks';
 import type { BeforeInvokeContext, BeforeInvokeHook } from '../src/hooks';
 
@@ -35,7 +35,7 @@ describe('HookManager — issue #531: hook return value validation', () => {
     registerViolatingHook(hooks, 'unexpected');
 
     await expect(hooks.runBeforeInvoke(makeCtx())).rejects.toBeInstanceOf(
-      HookExecutionError,
+      HookReturnValueError,
     );
   });
 
@@ -44,7 +44,7 @@ describe('HookManager — issue #531: hook return value validation', () => {
     registerViolatingHook(hooks, 42);
 
     await expect(hooks.runBeforeInvoke(makeCtx())).rejects.toBeInstanceOf(
-      HookExecutionError,
+      HookReturnValueError,
     );
   });
 
@@ -53,7 +53,7 @@ describe('HookManager — issue #531: hook return value validation', () => {
     registerViolatingHook(hooks, { abort: true });
 
     await expect(hooks.runBeforeInvoke(makeCtx())).rejects.toBeInstanceOf(
-      HookExecutionError,
+      HookReturnValueError,
     );
   });
 
@@ -62,7 +62,7 @@ describe('HookManager — issue #531: hook return value validation', () => {
     registerViolatingHook(hooks, null);
 
     await expect(hooks.runBeforeInvoke(makeCtx())).rejects.toBeInstanceOf(
-      HookExecutionError,
+      HookReturnValueError,
     );
   });
 
@@ -74,7 +74,7 @@ describe('HookManager — issue #531: hook return value validation', () => {
     }) as unknown as BeforeInvokeHook);
 
     await expect(hooks.runBeforeInvoke(makeCtx())).rejects.toBeInstanceOf(
-      HookExecutionError,
+      HookReturnValueError,
     );
   });
 
@@ -91,12 +91,12 @@ describe('HookManager — issue #531: hook return value validation', () => {
       caught = err;
     }
 
-    expect(caught).toBeInstanceOf(HookExecutionError);
-    const err = caught as HookExecutionError;
+    expect(caught).toBeInstanceOf(HookReturnValueError);
+    const err = caught as HookReturnValueError;
     expect(err.hookName).toBe('beforeInvoke');
-    expect(err.message).toContain('beforeInvoke hook returned a value of type "string"');
-    expect(err.message).toContain('boolean');
-    expect(err.message).toContain('void');
+    expect(err.message).toContain('beforeInvoke hook returned an invalid value');
+    expect(err.message).toContain('unexpected');
+    expect(err.returnValue).toBe('unexpected');
   });
 
   it('error message reports "null" for a null return value', async () => {
@@ -110,10 +110,11 @@ describe('HookManager — issue #531: hook return value validation', () => {
       caught = err;
     }
 
-    expect((caught as HookExecutionError).message).toContain('type "null"');
+    expect((caught as HookReturnValueError).message).toContain('null');
+    expect((caught as HookReturnValueError).returnValue).toBeNull();
   });
 
-  it('cause is a TypeError describing the violation', async () => {
+  it('captures the invalid return value for inspection', async () => {
     const hooks = new HookManager();
     registerViolatingHook(hooks, 42);
 
@@ -124,7 +125,8 @@ describe('HookManager — issue #531: hook return value validation', () => {
       caught = err;
     }
 
-    expect((caught as HookExecutionError).cause).toBeInstanceOf(TypeError);
+    expect((caught as HookReturnValueError).returnValue).toBe(42);
+    expect((caught as HookReturnValueError).hookName).toBe('beforeInvoke');
   });
 
   it('stops executing subsequent hooks after a return-value violation', async () => {
@@ -134,7 +136,7 @@ describe('HookManager — issue #531: hook return value validation', () => {
     hooks.onBeforeInvoke(second);
 
     await expect(hooks.runBeforeInvoke(makeCtx())).rejects.toBeInstanceOf(
-      HookExecutionError,
+      HookReturnValueError,
     );
     expect(second).not.toHaveBeenCalled();
   });

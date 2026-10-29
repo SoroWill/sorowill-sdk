@@ -70,21 +70,21 @@ describe('createAlbedoAdapter', () => {
   });
 
   it('signs a transaction and returns the signed envelope XDR', async () => {
-    txMock.mockResolvedValue({ signed_envelope_xdr: 'SIGNED_XDR' });
+    txMock.mockResolvedValue({ signed_envelope_xdr: 'VFNfWERSLQo=' });
     const adapter = createAlbedoAdapter();
 
     const signed = await adapter.signTransaction('UNSIGNED_XDR', {
       networkPassphrase: Networks.TESTNET,
     });
 
-    expect(signed).toBe('SIGNED_XDR');
+    expect(signed).toBe('VFNfWERSLQo=');
     expect(txMock).toHaveBeenCalledWith(
       expect.objectContaining({ xdr: 'UNSIGNED_XDR', network: 'testnet' }),
     );
   });
 
   it('maps the public network passphrase to Albedo "public"', async () => {
-    txMock.mockResolvedValue({ signed_envelope_xdr: 'SIGNED_XDR' });
+    txMock.mockResolvedValue({ signed_envelope_xdr: 'VFNfWERSLQo=' });
     const adapter = createAlbedoAdapter();
 
     await adapter.signTransaction('UNSIGNED_XDR', {
@@ -95,7 +95,7 @@ describe('createAlbedoAdapter', () => {
   });
 
   it('passes unknown passphrases through unchanged', async () => {
-    txMock.mockResolvedValue({ signed_envelope_xdr: 'SIGNED_XDR' });
+    txMock.mockResolvedValue({ signed_envelope_xdr: 'VFNfWERSLQo=' });
     const adapter = createAlbedoAdapter();
 
     await adapter.signTransaction('UNSIGNED_XDR', {
@@ -109,7 +109,7 @@ describe('createAlbedoAdapter', () => {
 
   it('pins signatures to the previously selected public key', async () => {
     publicKeyMock.mockResolvedValue({ pubkey: 'GSELECTED' });
-    txMock.mockResolvedValue({ signed_envelope_xdr: 'SIGNED_XDR' });
+    txMock.mockResolvedValue({ signed_envelope_xdr: 'VFNfWERSLQo=' });
     const adapter = createAlbedoAdapter();
 
     await adapter.getPublicKey();
@@ -121,7 +121,7 @@ describe('createAlbedoAdapter', () => {
   });
 
   it('omits pubkey before any account has been selected', async () => {
-    txMock.mockResolvedValue({ signed_envelope_xdr: 'SIGNED_XDR' });
+    txMock.mockResolvedValue({ signed_envelope_xdr: 'VFNfWERSLQo=' });
     const adapter = createAlbedoAdapter();
 
     await adapter.signTransaction('UNSIGNED_XDR', {

@@ -240,7 +240,7 @@ describe('SoroWillClient', () => {
     });
 
     const client = new SoroWillClient({ network: 'testnet', contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR' });
-    const firstPage = await client.getWillsByOwner('GOWNER', { pageSize: 2 });
+    const firstPage = await client.getWillsByOwner('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', { pageSize: 2 });
     if (Array.isArray(firstPage)) throw new Error('Expected paginated result');
     const secondPageOpts: Record<string, unknown> = { pageSize: 2 };
     if (firstPage.nextCursor) secondPageOpts.cursor = firstPage.nextCursor;
@@ -259,7 +259,7 @@ describe('SoroWillClient', () => {
     });
 
     const client = new SoroWillClient({ network: 'testnet', contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR' });
-    const firstPage = await client.getWillsByBeneficiary('GBEN', { pageSize: 1 });
+    const firstPage = await client.getWillsByBeneficiary('GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', { pageSize: 1 });
     if (Array.isArray(firstPage)) throw new Error('Expected paginated result');
     const secondPageOptsB: Record<string, unknown> = { pageSize: 1 };
     if (firstPage.nextCursor) secondPageOptsB.cursor = firstPage.nextCursor;
@@ -278,7 +278,7 @@ describe('SoroWillClient', () => {
     });
 
     const client = new SoroWillClient({ network: 'testnet', contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR' });
-    const wills = await client.getWillsByOwner('GNEWWALLET');
+    const wills = await client.getWillsByOwner('GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG');
 
     expect(wills).toEqual([]);
   });
@@ -289,7 +289,7 @@ describe('SoroWillClient', () => {
     });
 
     const client = new SoroWillClient({ network: 'testnet', contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR' });
-    const wills = await client.getWillsByBeneficiary('GNEWWALLET');
+    const wills = await client.getWillsByBeneficiary('GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG');
 
     expect(wills).toEqual([]);
   });

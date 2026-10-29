@@ -99,7 +99,7 @@ describe('Issue #211: EventSubscriptionOptions.pageSize ignored by WebSocket tra
       network: 'testnet',
       contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       webSocketFactory: webSocketFactory,
-      eventStreamUrl: 'ws://test-stream.local',
+      eventStreamUrl: 'wss://test-stream.local',
     });
   });
 

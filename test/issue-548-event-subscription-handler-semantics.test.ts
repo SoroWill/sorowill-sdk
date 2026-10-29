@@ -69,7 +69,7 @@ describe('issue #548 — event subscription handler semantics', () => {
       network: 'testnet',
       contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
       webSocketFactory: () => socket,
-      eventStreamUrl: 'ws://test-stream.local',
+      eventStreamUrl: 'wss://test-stream.local',
     });
   });
 

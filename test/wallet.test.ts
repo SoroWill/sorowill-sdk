@@ -283,7 +283,7 @@ describe('FreighterWalletAdapter', () => {
 
     it('returns signed XDR on success', async () => {
       freighterApiMock.signTransaction.mockResolvedValue({
-        envelope_xdr: 'SIGNED_XDR',
+        envelope_xdr: 'VFNfWERSLQo=',
         error: undefined,
       });
 
@@ -292,7 +292,7 @@ describe('FreighterWalletAdapter', () => {
         networkPassphrase,
       });
 
-      expect(result).toBe('SIGNED_XDR');
+      expect(result).toBe('VFNfWERSLQo=');
     });
 
     it('throws on user rejection', async () => {

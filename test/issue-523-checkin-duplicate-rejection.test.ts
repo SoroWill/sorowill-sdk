@@ -133,10 +133,10 @@ const LEDGER_TIME = 1_710_000_000;
 function makeRawWill() {
   return {
     id: 1n,
-    owner: 'GOWNER',
-    token: 'CTOKEN',
+    owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+    token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
     balance: 1_000_000n,
-    beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+    beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
     checkin_period_days: 90n,
     grace_period_days: 7n,
     last_checkin: BigInt(LEDGER_TIME - 90 * 86_400),

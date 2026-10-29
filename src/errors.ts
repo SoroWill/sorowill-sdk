@@ -1341,8 +1341,9 @@ export class HookReturnValueError extends SoroWillError {
 
   constructor(hookName: string, returnValue: unknown, options?: ErrorOptions) {
     const valueStr = returnValue === null ? 'null' : (typeof returnValue === 'object' ? JSON.stringify(returnValue) : String(returnValue));
+    const allowedValues = hookName === 'beforeInvoke' ? 'true or undefined' : 'true, false, or undefined';
     super(
-      `${hookName} hook returned an invalid value: ${valueStr}. Hooks must return true, false, or undefined.`,
+      `${hookName} hook returned an invalid value: ${valueStr}. Hooks must return ${allowedValues}.`,
       options,
     );
     this.name = 'HookReturnValueError';

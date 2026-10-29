@@ -211,7 +211,7 @@ describe('createWill — beneficiary validation fast-fail', () => {
 
   it('accepts fractional percentages that sum to 100 (e.g. 33.5 + 66.5)', async () => {
     const client = makeClient();
-    freighterApiMock.signTransaction.mockResolvedValue({ envelope_xdr: 'SIGNED_XDR', error: undefined });
+    freighterApiMock.signTransaction.mockResolvedValue({ envelope_xdr: 'VFNfWERSLQo=', error: undefined });
     mockState.sendTransaction.mockResolvedValue({ status: 'PENDING', hash: 'TXHASH' });
     // The mock Spec's funcResToNative is the identity function, so the return
     // value must already be the decoded will id (a bigint).
@@ -280,7 +280,7 @@ describe('createWill — beneficiary validation fast-fail', () => {
   });
 
   it('does NOT throw for a valid single-beneficiary list summing to 100', async () => {
-    freighterApiMock.signTransaction.mockResolvedValue({ envelope_xdr: 'SIGNED_XDR', error: undefined });
+    freighterApiMock.signTransaction.mockResolvedValue({ envelope_xdr: 'VFNfWERSLQo=', error: undefined });
     mockState.sendTransaction.mockResolvedValue({ status: 'PENDING', hash: 'TXHASH' });
     mockState.pollTransaction.mockResolvedValue({
       status: 'SUCCESS',

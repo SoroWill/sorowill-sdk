@@ -29,7 +29,7 @@ export class ContractSpecWrapper {
    */
   getFunctions(): Record<string, unknown> {
     if (this.functionsCache) {
-      return this.functionsCache as Record<string, unknown>;
+      return Object.fromEntries(this.functionsCache);
     }
 
     const specAny = this.spec as any;

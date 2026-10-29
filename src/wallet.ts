@@ -6,7 +6,10 @@ import {
   InvalidSignedXdrEncodingError,
   SignTransactionTimeoutError,
   WalletNetworkMismatchError,
+  WalletSessionExpiredError,
 } from './errors';
+
+export { WalletSessionExpiredError };
 
 export class WalletSessionError extends Error {
   constructor(message: string, cause?: unknown) {
@@ -127,7 +130,7 @@ export const DEFAULT_FREIGHTER_INJECTION_RETRY_DELAY_MS = 100;
  * Stellar wallet standard) use `window.stellar`.
  */
 function isFreighterInjected(): boolean {
-  const win = (globalThis as { window?: Record<string, unknown> }).window;
+  const win = (globalThis as unknown as { window?: Record<string, unknown> }).window;
   return Boolean(win && (win.freighter || win.stellar));
 }
 
@@ -234,31 +237,6 @@ function assertBase64Xdr(xdr: string): string {
     throw new InvalidSignedXdrEncodingError(xdr.length);
   }
   return xdr;
-}
-
-/**
- * Validates that a string looks like a valid base64-encoded XDR envelope.
- *
- * A well-formed XDR envelope produced by Stellar wallets is always a
- * base64-encoded byte sequence. This check rejects strings that contain
- * characters outside the standard base64 alphabet so callers fail loudly on
- * malformed input rather than propagating garbage to the RPC node (#517).
- *
- * Only applied to strings that are at least 40 characters long — shorter
- * strings are assumed to be test/mock placeholders and are passed through
- * unchanged. Real Stellar XDR envelopes are always several hundred characters.
- *
- * The check validates the character set and padding but does not attempt full
- * XDR deserialization, which would pull in a heavier dependency.
- */
-function isValidBase64Xdr(value: string): boolean {
-  // Skip validation for short strings (test placeholders, etc.).
-  if (value.length < 40) {
-    return true;
-  }
-  // Must contain only base64 characters (standard alphabet + padding).
-  // Length must be a multiple of 4 after any padding is accounted for.
-  return /^[A-Za-z0-9+/]*={0,2}$/.test(value) && value.length % 4 === 0;
 }
 
 /**

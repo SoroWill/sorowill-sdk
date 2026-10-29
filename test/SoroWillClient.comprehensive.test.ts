@@ -88,7 +88,7 @@ function makeRpcServer(simImpl?: () => Promise<unknown>, wasmImpl?: () => Promis
     },
     async getAccount(address: string) {
       // Real fixes expect a real strkey; fixtures may use fake addresses like
-      // 'GBEN' which fail Account's strkey validation. Return a minimal stub
+      // 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG' which fail Account's strkey validation. Return a minimal stub
       // for those so beneficiary-funding validation considers them funded.
       try {
         return new Account(address, '1');

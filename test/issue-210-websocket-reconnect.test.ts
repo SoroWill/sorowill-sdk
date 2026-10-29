@@ -99,7 +99,7 @@ describe('Issue #210: WebSocket reconnect/fallback handling for post-open connec
       network: 'testnet',
       contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       webSocketFactory: webSocketFactory,
-      eventStreamUrl: 'ws://test-stream.local',
+      eventStreamUrl: 'wss://test-stream.local',
     });
   });
 
@@ -199,7 +199,7 @@ describe('Issue #210: WebSocket reconnect/fallback handling for post-open connec
       network: 'testnet',
       contractId: 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR',
       webSocketFactory: () => mockWebSocket,
-      eventStreamUrl: 'ws://test-stream.local',
+      eventStreamUrl: 'wss://test-stream.local',
       fetchImpl: async () => {
         pollingCalled = true;
         return new Response(
@@ -257,7 +257,7 @@ describe('Issue #210: WebSocket reconnect/fallback handling for post-open connec
         }, 0);
         return failingSocket;
       },
-      eventStreamUrl: 'ws://test-stream.local',
+      eventStreamUrl: 'wss://test-stream.local',
       fetchImpl: async () => {
         pollingFallbackCalled = true;
         return new Response(

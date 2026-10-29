@@ -37,10 +37,10 @@ const CHECKIN_PERIOD_DAYS = 90;
 function makePostCheckinRawWill() {
   return {
     id: 1n,
-    owner: 'GOWNER',
-    token: 'CTOKEN',
+    owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+    token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
     balance: 1_000_000n,
-    beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+    beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
     checkin_period_days: BigInt(CHECKIN_PERIOD_DAYS),
     grace_period_days: 7n,
     // After checkIn the contract sets last_checkin to the ledger close time.

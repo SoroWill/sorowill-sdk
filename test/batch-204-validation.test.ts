@@ -198,7 +198,7 @@ describe('Batch-204: Validation improvements', () => {
 
   describe('#624: Account address validation', () => {
     it('accepts valid Stellar public key', () => {
-      const validKey = 'GDZST3XVCDTUJ76ZAV2HA72KYCK5ZBDJDWM7GJ5G2MR5GTKWF3CXYC7';
+      const validKey = 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG';
       expect(() => validateAccountAddress(validKey)).not.toThrow();
     });
 

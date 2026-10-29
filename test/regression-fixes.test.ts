@@ -11,10 +11,10 @@ import type { Will } from '../src/types';
 function makeWill(overrides: Partial<Will> = {}): Will {
   return {
     id: '1',
-    owner: 'GOWNER',
+    owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
     token: 'CABC',
     balance: '1000000000',
-    beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+    beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
     checkinPeriodDays: 90,
     gracePeriodDays: 7,
     lastCheckin: new Date(),
@@ -182,19 +182,19 @@ describe('getNextActionableState — new WillStatus variants', () => {
 
   it('returns all-false for PendingConfirmation regardless of caller role', () => {
     const will = makeWill({ status: WillStatus.PendingConfirmation });
-    expect(getNextActionableState(will, 'GOWNER')).toEqual(ALL_FALSE);
+    expect(getNextActionableState(will, 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF')).toEqual(ALL_FALSE);
     expect(getNextActionableState(will, 'GSTRANGER')).toEqual(ALL_FALSE);
   });
 
   it('returns all-false for Settled regardless of caller role', () => {
     const will = makeWill({ status: WillStatus.Settled });
-    expect(getNextActionableState(will, 'GOWNER')).toEqual(ALL_FALSE);
+    expect(getNextActionableState(will, 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF')).toEqual(ALL_FALSE);
     expect(getNextActionableState(will, 'GSTRANGER')).toEqual(ALL_FALSE);
   });
 
   it('still returns correct actions for Active status after the enum addition', () => {
     const will = makeWill({ status: WillStatus.Active });
-    const state = getNextActionableState(will, 'GOWNER');
+    const state = getNextActionableState(will, 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF');
     expect(state.canCheckIn).toBe(true);
     expect(state.canCancel).toBe(true);
     expect(state.canTrigger).toBe(false); // checkin not overdue

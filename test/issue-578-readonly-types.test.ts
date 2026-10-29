@@ -21,8 +21,8 @@ const BENEFICIARY = 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG';
 function makeWill(): Will {
   return {
     id: '1',
-    owner: 'GOWNER',
-    token: 'CTOKEN',
+    owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+    token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
     balance: '1000',
     beneficiaries: [{ address: BENEFICIARY, percentage: 100 }],
     checkinPeriodDays: 90,
@@ -102,7 +102,7 @@ describe('Issue #578: type definitions use readonly for immutable fields', () =>
   it('still accepts plain mutable arrays where readonly arrays are expected', () => {
     const mutable: Beneficiary[] = [{ address: BENEFICIARY, percentage: 100 }];
     const params: CreateWillParams = {
-      token: 'CTOKEN',
+      token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
       amount: '1',
       beneficiaries: mutable,
       checkinPeriodDays: 90,

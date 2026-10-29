@@ -155,7 +155,7 @@ const VALID_BENEFICIARIES = [
 ];
 
 const BASE_CREATE_WILL_PARAMS = {
-  token: 'CTOKEN',
+  token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
   amount: '1000000',
   beneficiaries: VALID_BENEFICIARIES,
   checkinPeriodDays: 90,
@@ -377,7 +377,7 @@ describe('#154 – FreighterWalletAdapter.signTransaction timeout', () => {
 
   it('resolves with the signed XDR before the timeout fires', async () => {
     freighterApiMock.signTransaction.mockResolvedValue({
-      envelope_xdr: 'SIGNED_XDR',
+      envelope_xdr: 'VFNfWERSLQo=',
       error: undefined,
     });
 
@@ -387,7 +387,7 @@ describe('#154 – FreighterWalletAdapter.signTransaction timeout', () => {
       timeoutMs: 5_000,
     });
 
-    expect(result).toBe('SIGNED_XDR');
+    expect(result).toBe('VFNfWERSLQo=');
   });
 
   it('rejects with SignTransactionTimeoutError when Freighter never resolves', async () => {

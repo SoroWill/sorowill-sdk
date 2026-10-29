@@ -151,7 +151,7 @@ function makeActiveWill() {
   return {
     id: 1n,
     owner: OWNER,
-    token: 'CTOKEN',
+    token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
     balance: 1_000_000n,
     beneficiaries: [{ address: 'GC6HGXZGSXRY2NLLRYGVHCCDNULAQ6N2QX6Q47UUW42FTH2HBAXTM2WO', percentage: 100 }],
     checkin_period_days: 90n,

@@ -134,7 +134,7 @@ const BASE_CREATE_WILL_PARAMS = {
   guardians: [],
 };
 function makeClient() {
-  return new SoroWillClient({ network: 'testnet', contractId: 'CCONTRACT' });
+  return new SoroWillClient({ network: 'testnet', contractId: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE' });
 }
 
 describe('createWill issue 537: checkinPeriodDays TTL boundary', () => {

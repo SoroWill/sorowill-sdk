@@ -44,9 +44,9 @@ describe('README Quick Start error handling (issue #189)', () => {
     try {
       // This simulates the pattern shown in the updated README
       await mockClient.createWill({
-        token: 'CTOKEN',
+        token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
         amount: '1000000',
-        beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+        beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
         checkinPeriodDays: 90,
         gracePeriodDays: 7,
         guardians: [],
@@ -69,9 +69,9 @@ describe('README Quick Start error handling (issue #189)', () => {
 
     try {
       await mockClient.createWill({
-        token: 'CTOKEN',
+        token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
         amount: '1000000',
-        beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+        beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
         checkinPeriodDays: 90,
         gracePeriodDays: 7,
         guardians: [],
@@ -93,9 +93,9 @@ describe('README Quick Start error handling (issue #189)', () => {
 
     try {
       const result = await mockClient.createWill({
-        token: 'CTOKEN',
+        token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
         amount: '1000000',
-        beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+        beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
         checkinPeriodDays: 90,
         gracePeriodDays: 7,
         guardians: [],

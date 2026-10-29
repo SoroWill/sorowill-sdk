@@ -61,7 +61,7 @@
  * // Safe to sign and submit `prepared`.
  * ```
  */
-import { TransactionBuilder, xdr } from '@stellar/stellar-sdk';
+import { Keypair, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
 
 export interface TransactionMatchOptions {
   intendedTransactionXdr: string;

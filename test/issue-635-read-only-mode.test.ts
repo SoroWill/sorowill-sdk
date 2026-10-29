@@ -49,7 +49,7 @@ describe('Issue #635 — read-only mode', () => {
 
     await expect(
       client.createWill({
-        token: 'CTOKEN',
+        token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
         amount: '1000',
         beneficiaries: [{ address: 'GBENE', percentage: 100 }],
         checkinPeriodDays: 90,

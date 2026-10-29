@@ -40,7 +40,7 @@ describe('getStellarAddressError (#612)', () => {
     ['', 'empty'],
     [` ${ACCOUNT}`, 'whitespace'],
     [`${ACCOUNT}\n`, 'whitespace'],
-    ['GOWNER', 'wrong_length'],
+    [`${ACCOUNT.slice(0, -1)}`, 'wrong_length'],
     [`${ACCOUNT}A`, 'wrong_length'],
     [ACCOUNT.toLowerCase(), 'invalid_characters'],
     [`${ACCOUNT.slice(0, -1)}1`, 'invalid_characters'],
@@ -74,7 +74,7 @@ describe('isValidStellarAddress / assertValidStellarAddress (#612)', () => {
   it('throws a typed error naming the field and reason', () => {
     let caught: unknown;
     try {
-      assertValidStellarAddress('GOWNER', 'owner');
+      assertValidStellarAddress(`${ACCOUNT.slice(0, -1)}`, 'owner');
     } catch (err) {
       caught = err;
     }
@@ -83,7 +83,7 @@ describe('isValidStellarAddress / assertValidStellarAddress (#612)', () => {
     const error = caught as InvalidStellarAddressError;
     expect(error.field).toBe('owner');
     expect(error.reason).toBe('wrong_length');
-    expect(error.address).toBe('GOWNER');
+    expect(error.address).toBe(ACCOUNT.slice(0, -1));
     expect(error.message).toContain('owner is not a valid Stellar address');
   });
 
@@ -136,7 +136,7 @@ describe('SoroWillClient rejects malformed addresses before the RPC (#612)', () 
     return { client, server };
   }
 
-  const MALFORMED = ['', 'GOWNER', BAD_CHECKSUM, SECRET_SEED, `${ACCOUNT}'); --`, ` ${ACCOUNT}`];
+  const MALFORMED = ['', `${ACCOUNT.slice(0, -1)}`, BAD_CHECKSUM, SECRET_SEED, `${ACCOUNT}'); --`, ` ${ACCOUNT}`];
 
   it.each(MALFORMED)('getWillsByOwner rejects %j', async (owner) => {
     const { client, server } = makeClient();

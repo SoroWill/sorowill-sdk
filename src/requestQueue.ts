@@ -240,16 +240,6 @@ interface PendingRequest<T> {
 }
 
 /**
- * Throws a RangeError unless `value` is an integer >= 1. Rejects 0, negative
- * numbers, NaN, Infinity, fractions, and non-number values (issue #582).
- */
-function assertPositiveInteger(name: string, value: unknown): asserts value is number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
-    throw new RangeError(`${name} must be a positive integer (>= 1), received ${String(value)}`);
-  }
-}
-
-/**
  * Shared state for a single account. Multiple {@link RequestQueue} instances
  * created for the same account delegate to the same {@link QueueCore}, which
  * guarantees their operations are serialized against one another.
@@ -480,42 +470,6 @@ export class RequestQueue {
       this.core.active -= 1;
       this.drain();
     }
-  }
-
-  private async runAttempt<T>(request: PendingRequest<T>): Promise<T> {
-    if (request.timeoutMs === undefined) {
-      return request.run();
-    }
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        request.run(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new RequestTimeoutError(request.timeoutMs as number)),
-            request.timeoutMs,
-          );
-        }),
-      ]);
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
-    }
-  }
-
-  /** Waits `ms` milliseconds, rejecting early with the abort reason if `signal` fires. */
-  private sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
-    if (signal?.aborted) return Promise.reject(signal.reason);
-    return new Promise<void>((resolve, reject) => {
-      const onAbort = (): void => {
-        clearTimeout(timer);
-        reject(signal?.reason);
-      };
-      const timer = setTimeout(() => {
-        signal?.removeEventListener('abort', onAbort);
-        resolve();
-      }, ms);
-      signal?.addEventListener('abort', onAbort, { once: true });
-    });
   }
 }
 

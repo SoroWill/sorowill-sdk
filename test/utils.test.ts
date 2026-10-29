@@ -6,10 +6,10 @@ import { WillStatus, type Will } from '../src/types';
 function makeWill(overrides: Partial<Will> = {}): Will {
   return {
     id: '1',
-    owner: 'GOWNER',
+    owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
     token: 'CABC',
     balance: '1000000000',
-    beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+    beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
     checkinPeriodDays: 90,
     gracePeriodDays: 7,
     lastCheckin: new Date(),
@@ -89,7 +89,7 @@ describe('tagOnChainOrder', () => {
 describe('getNextActionableState', () => {
   it('lets the owner check in and cancel an active will', () => {
     const will = makeWill({ status: WillStatus.Active, lastCheckin: new Date() });
-    expect(getNextActionableState(will, 'GOWNER')).toEqual({
+    expect(getNextActionableState(will, 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF')).toEqual({
       canCheckIn: true,
       canTrigger: false,
       canEmergencyCheckIn: false,
@@ -107,14 +107,14 @@ describe('getNextActionableState', () => {
       lastCheckin: overdueCheckin,
     });
 
-    expect(getNextActionableState(will, 'GOWNER').canTrigger).toBe(true);
+    expect(getNextActionableState(will, 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF').canTrigger).toBe(true);
     expect(getNextActionableState(will, 'GUNRELATED').canTrigger).toBe(true);
   });
 
   it('lets a guardian vote on an active will', () => {
     const will = makeWill({ status: WillStatus.Active, guardians: ['GGUARD'] });
     expect(getNextActionableState(will, 'GGUARD').canGuardianVote).toBe(true);
-    expect(getNextActionableState(will, 'GBEN').canGuardianVote).toBe(false);
+    expect(getNextActionableState(will, 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG').canGuardianVote).toBe(false);
   });
 
   it('can reflect that the guardian already voted', () => {
@@ -131,27 +131,27 @@ describe('getNextActionableState', () => {
       gracePeriodDays: 7,
       triggerTime,
     });
-    expect(getNextActionableState(withinGrace, 'GOWNER').canEmergencyCheckIn).toBe(true);
+    expect(getNextActionableState(withinGrace, 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF').canEmergencyCheckIn).toBe(true);
 
     const expiredGrace = makeWill({
       status: WillStatus.Triggered,
       gracePeriodDays: 1,
       triggerTime,
     });
-    expect(getNextActionableState(expiredGrace, 'GOWNER').canEmergencyCheckIn).toBe(false);
+    expect(getNextActionableState(expiredGrace, 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF').canEmergencyCheckIn).toBe(false);
   });
 
   it('allows release only once triggered and the grace period has expired, for any address', () => {
     const triggerTime = new Date(Date.now() - 10 * 86_400 * 1000);
     const will = makeWill({ status: WillStatus.Triggered, gracePeriodDays: 7, triggerTime });
 
-    expect(getNextActionableState(will, 'GBEN').canRelease).toBe(true);
+    expect(getNextActionableState(will, 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG').canRelease).toBe(true);
     expect(getNextActionableState(will, 'GUNRELATED').canRelease).toBe(true);
   });
 
   it('disallows every action once the will is released', () => {
     const will = makeWill({ status: WillStatus.Released, guardians: ['GGUARD'] });
-    expect(getNextActionableState(will, 'GOWNER')).toEqual({
+    expect(getNextActionableState(will, 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF')).toEqual({
       canCheckIn: false,
       canTrigger: false,
       canEmergencyCheckIn: false,
@@ -193,7 +193,7 @@ describe('getNextActionableState', () => {
     vi.useFakeTimers();
     vi.setSystemTime(skewedLocalClock);
     try {
-      const state = getNextActionableState(will, 'GOWNER', { now: trustedNow });
+      const state = getNextActionableState(will, 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', { now: trustedNow });
       expect(state.canEmergencyCheckIn).toBe(true);
       expect(state.canRelease).toBe(false);
     } finally {

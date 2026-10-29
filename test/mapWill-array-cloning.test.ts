@@ -7,8 +7,8 @@ describe('mapWill array cloning (issue #187)', () => {
     // Create a stub spec that returns a will with mutable arrays
     const rawWill = {
       id: 1n,
-      owner: 'GOWNER',
-      token: 'CTOKEN',
+      owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
       balance: 1_000_000n,
       beneficiaries: [{ address: 'GBEN1', percentage: 60 }, { address: 'GBEN2', percentage: 40 }],
       checkin_period_days: 90n,
@@ -63,10 +63,10 @@ describe('mapWill array cloning (issue #187)', () => {
   it('returns independent array instances across multiple calls', async () => {
     const rawWill = {
       id: 1n,
-      owner: 'GOWNER',
-      token: 'CTOKEN',
+      owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
       balance: 1_000_000n,
-      beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+      beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
       checkin_period_days: 90n,
       grace_period_days: 7n,
       last_checkin: 1_700_000_000n,
@@ -112,8 +112,8 @@ describe('mapWill array cloning (issue #187)', () => {
   it('does not let a mutated lastCheckin or beneficiary corrupt subsequent reads (issue #399)', async () => {
     const rawWill = {
       id: 1n,
-      owner: 'GOWNER',
-      token: 'CTOKEN',
+      owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
       balance: 1_000_000n,
       beneficiaries: [{ address: 'GBEN1', percentage: 60 }, { address: 'GBEN2', percentage: 40 }],
       checkin_period_days: 90n,

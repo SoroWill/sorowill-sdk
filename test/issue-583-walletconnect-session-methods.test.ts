@@ -21,7 +21,7 @@ function makeSession(methods?: string[]): WalletConnectSession {
 }
 
 function makeClient(session: WalletConnectSession) {
-  const request = vi.fn(async () => 'SIGNED_XDR');
+  const request = vi.fn(async () => 'VFNfWERSLQo=');
   const client: WalletConnectClient = {
     async connect() {
       return {

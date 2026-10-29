@@ -68,10 +68,10 @@ describe('#376 duplicate beneficiaries', () => {
 describe('#377 getWill cache key uses the canonical will id', () => {
   const rawWill = {
     id: 7n,
-    owner: 'GOWNER',
-    token: 'CTOKEN',
+    owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+    token: 'CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE',
     balance: 1_000_000n,
-    beneficiaries: [{ address: 'GBEN', percentage: 10_000 }],
+    beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 10_000 }],
     checkin_period_days: 30n,
     grace_period_days: 7n,
     last_checkin: 1_700_000_000n,

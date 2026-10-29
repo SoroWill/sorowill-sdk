@@ -12,6 +12,17 @@ export interface CachePersistenceAdapter {
   clear(): Promise<void>;
 }
 
+/**
+ * Raised when cache deserialization encounters an invalid __type tag
+ * or malformed tagged value.
+ */
+export class CacheDeserializationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CacheDeserializationError';
+  }
+}
+
 // Share the lock across caches using the same adapter. Serialize all mutations,
 // since adapters may store every key in one read-modify-write document.
 const persistenceLocks = new WeakMap<CachePersistenceAdapter, Promise<void>>();
@@ -104,16 +115,41 @@ export function deserializeCacheValue<T>(value: string): T {
       '__type' in currentValue &&
       'value' in currentValue
     ) {
-      const type = currentValue.__type as string;
+      const type = currentValue.__type;
+      if (typeof type !== 'string') {
+        throw new CacheDeserializationError(
+          `Invalid __type: expected string, got ${typeof type}`,
+        );
+      }
       if (type === 'bigint') {
-        return BigInt(currentValue.value);
+        if (typeof currentValue.value !== 'string') {
+          throw new CacheDeserializationError(
+            `Invalid bigint value: expected string, got ${typeof currentValue.value}`,
+          );
+        }
+        try {
+          return BigInt(currentValue.value);
+        } catch {
+          throw new CacheDeserializationError(
+            `Invalid bigint value: "${currentValue.value}"`,
+          );
+        }
       }
       if (type === 'date') {
-        return new Date(currentValue.value);
+        if (typeof currentValue.value !== 'string') {
+          throw new CacheDeserializationError(
+            `Invalid date value: expected string, got ${typeof currentValue.value}`,
+          );
+        }
+        const date = new Date(currentValue.value);
+        if (isNaN(date.getTime())) {
+          throw new CacheDeserializationError(
+            `Invalid date value: "${currentValue.value}"`,
+          );
+        }
+        return date;
       }
-      console.warn(
-        `[SoroWill] Cache: unknown __type "${type}" encountered during deserialization; returning raw value.`,
-      );
+      throw new CacheDeserializationError(`Unknown __type: "${type}"`);
     }
     return currentValue;
   }) as T;
@@ -264,7 +300,7 @@ export class ReadCache {
 
   /** Configured maximum number of entries before LRU eviction kicks in. */
   get capacity(): number {
-    return this.maxEntries;
+    return this.maxEntries ?? Infinity;
   }
 
   async ready(): Promise<void> {
@@ -307,15 +343,23 @@ export class ReadCache {
   set(key: string, value: unknown, willIds: Iterable<string> = []): void {
     if (this.ttlMs === 0) {
       this.touchedKeys.add(key);
-      void this.persistence
-        ?.delete(key)
-        .catch((err) => this.onPersistenceFailure?.(key, err));
+      if (this.persistence) {
+        void withPersistenceLock(this.persistence, async () => {
+          await this.persistence!.delete(key).catch((err) =>
+            this.onPersistenceFailure?.(key, err),
+          );
+        });
+      }
       return;
     }
 
+    // Serialize immediately to snapshot the object state, then deserialize
+    // back to store a frozen copy. This prevents mutations after set() from
+    // affecting the cached value.
+    const serialized = serializeCacheValue(value);
     const entry: CacheEntry = {
       key,
-      value,
+      value: deserializeCacheValue(serialized),
       expiresAt: this.now() + this.ttlMs,
       willIds: new Set(willIds),
     };
@@ -333,17 +377,21 @@ export class ReadCache {
     // Delete before set so an updated key moves to the most-recent position.
     this.entries.delete(key);
     this.entries.set(key, entry);
-    void this.persistence
-      ?.write(this.toPersistedEntry(entry))
-      .catch((err) => {
-        // Report persistence failure via callback if provided
-        this.onPersistenceFailure?.(key, err);
-        // Optionally roll back the in-memory entry so memory and persistence stay in sync
-        if (this.rollbackOnPersistenceFailure) {
-          this.entries.delete(key);
-          this.touchedKeys.delete(key);
+    if (this.persistence) {
+      void withPersistenceLock(this.persistence, async () => {
+        try {
+          await this.persistence!.write(this.toPersistedEntry(entry));
+        } catch (err) {
+          // Report persistence failure via callback if provided
+          this.onPersistenceFailure?.(key, err);
+          // Optionally roll back the in-memory entry so memory and persistence stay in sync
+          if (this.rollbackOnPersistenceFailure) {
+            this.entries.delete(key);
+            this.touchedKeys.delete(key);
+          }
         }
       });
+    }
 
     this.evictIfNeeded();
   }
@@ -412,13 +460,17 @@ export class ReadCache {
     this.clearedBeforeHydration = true;
     this.entries.clear();
     this.willIdToKeys.clear();
-    void this.persistence
-      ?.clear()
-      .catch((err) => this.onPersistenceFailure?.('__clear__', err));
+    if (this.persistence) {
+      void withPersistenceLock(this.persistence, async () => {
+        await this.persistence!.clear().catch((err) =>
+          this.onPersistenceFailure?.('__clear__', err),
+        );
+      });
+    }
   }
 
   private evictIfNeeded(): void {
-    if (this.entries.size <= this.maxEntries) {
+    if (this.maxEntries === undefined || this.entries.size <= this.maxEntries) {
       return;
     }
 
@@ -426,7 +478,15 @@ export class ReadCache {
     const now = this.now();
     for (const [key, entry] of this.entries) {
       if (entry.expiresAt !== null && entry.expiresAt <= now) {
-        this.removeEvicted(key);
+        this.entries.delete(key);
+        this.touchedKeys.add(key);
+        if (this.persistence) {
+          void withPersistenceLock(this.persistence, async () => {
+            await this.persistence!.delete(key).catch((err) =>
+              this.onPersistenceFailure?.(key, err),
+            );
+          });
+        }
       }
     }
 
@@ -440,9 +500,13 @@ export class ReadCache {
 
       this.entries.delete(oldestKey);
       this.touchedKeys.add(oldestKey);
-      void this.persistence
-        ?.delete(oldestKey)
-        .catch((err) => this.onPersistenceFailure?.(oldestKey, err));
+      if (this.persistence) {
+        void withPersistenceLock(this.persistence, async () => {
+          await this.persistence!.delete(oldestKey).catch((err) =>
+            this.onPersistenceFailure?.(oldestKey, err),
+          );
+        });
+      }
     }
   }
 
@@ -469,10 +533,14 @@ export class ReadCache {
       }
     }
     this.entries.delete(key);
-    try {
-      await this.persistence?.delete(key);
-    } catch (err) {
-      this.onPersistenceFailure?.(key, err);
+    if (this.persistence) {
+      await withPersistenceLock(this.persistence, async () => {
+        try {
+          await this.persistence!.delete(key);
+        } catch (err) {
+          this.onPersistenceFailure?.(key, err);
+        }
+      });
     }
   }
 
@@ -506,9 +574,21 @@ export class ReadCache {
         continue;
       }
 
+      let deserializedValue: unknown;
+      try {
+        deserializedValue = deserializeCacheValue(persistedEntry.value);
+      } catch (err) {
+        console.warn(
+          `[SoroWill] Cache: failed to deserialize entry "${persistedEntry.key}"`,
+          err,
+        );
+        await this.persist((adapter) => adapter.delete(persistedEntry.key));
+        continue;
+      }
+
       const entry: CacheEntry = {
         key: persistedEntry.key,
-        value: deserializeCacheValue(persistedEntry.value),
+        value: deserializedValue,
         expiresAt: persistedEntry.expiresAt,
         willIds: new Set(persistedEntry.willIds),
       };

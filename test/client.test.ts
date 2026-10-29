@@ -94,7 +94,7 @@ function makeWill(overrides: Partial<Will> = {}): Will {
     owner: 'GABC',
     token: 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526',
     balance: '1000000000',
-    beneficiaries: [{ address: 'GBEN', percentage: 100 }],
+    beneficiaries: [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }],
     checkinPeriodDays: 90,
     gracePeriodDays: 7,
     lastCheckin: new Date(),
@@ -123,8 +123,8 @@ describe('getTimeUntilCheckin / isCheckinDue', () => {
 
 describe('calculateShares', () => {
   it('splits evenly for a single beneficiary', () => {
-    const shares = calculateShares('1000000', [{ address: 'GBEN', percentage: 100 }]);
-    expect(shares).toEqual([{ address: 'GBEN', share: '1000000' }]);
+    const shares = calculateShares('1000000', [{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', percentage: 100 }]);
+    expect(shares).toEqual([{ address: 'GA3JE5IXBSOR6DCLZSGN7JIWQWO45RCS7PUFKKVXWSTE4Y75ISIDMHJG', share: '1000000' }]);
   });
 
   it('splits proportionally across multiple beneficiaries', () => {
@@ -294,7 +294,7 @@ describe('validateGuardians', () => {
   });
 
   it('rejects owner address in guardian list when ownerAddress is supplied', () => {
-    expect(validateGuardians(['GA', 'GOWNER'], 'GOWNER')).toBe(false);
+    expect(validateGuardians(['GA', 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'], 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF')).toBe(false);
   });
 
   it('accepts guardian list when owner is not in the list', () => {
@@ -464,8 +464,8 @@ describe('unsubscribeFromWillEvents', () => {
 describe('ReadCache', () => {
   it('builds stable cache keys regardless of argument order', () => {
     expect(
-      createReadCacheKey('get_will', { owner: 'GOWNER', willId: '1' }),
-    ).toBe(createReadCacheKey('get_will', { willId: '1', owner: 'GOWNER' }));
+      createReadCacheKey('get_will', { owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', willId: '1' }),
+    ).toBe(createReadCacheKey('get_will', { willId: '1', owner: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF' }));
   });
 
   it('returns cached values before expiry', () => {

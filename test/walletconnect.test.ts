@@ -61,7 +61,7 @@ describe('WalletConnectAdapter', () => {
         chainId: string;
         request: { method: string; params: unknown };
       }) {
-        return { envelope_xdr: 'SIGNED_XDR' } as T;
+        return { envelope_xdr: 'VFNfWERSLQo=' } as T;
       },
     };
 
@@ -73,7 +73,7 @@ describe('WalletConnectAdapter', () => {
     expect(connection.publicKey).toBe('GABC123');
     expect(connection.network).toBe('testnet');
     expect(await adapter.signTransaction('UNSIGNED_XDR', { networkPassphrase: connection.networkPassphrase })).toBe(
-      'SIGNED_XDR',
+      'VFNfWERSLQo=',
     );
 
     await adapter.disconnect();
@@ -99,7 +99,7 @@ describe('WalletConnectAdapter', () => {
         return topic === session.topic ? session : null;
       },
       async request<T>() {
-        return { envelope_xdr: 'SIGNED_XDR' } as T;
+        return { envelope_xdr: 'VFNfWERSLQo=' } as T;
       },
     };
 
@@ -149,7 +149,7 @@ describe('WalletConnectAdapter', () => {
         return topic === multiNamespaceSession.topic ? multiNamespaceSession : null;
       },
       async request<T>() {
-        return { envelope_xdr: 'SIGNED_XDR' } as T;
+        return { envelope_xdr: 'VFNfWERSLQo=' } as T;
       },
     };
 
@@ -185,7 +185,7 @@ describe('WalletConnectAdapter', () => {
         chainId: string;
         request: { method: string; params: unknown };
       }) {
-        return 'SIGNED_XDR' as T;
+        return 'VFNfWERSLQo=' as T;
       },
     };
 
@@ -584,7 +584,7 @@ describe.skip('WalletConnectAdapter – connection timeout', () => {
         return topic === session.topic ? session : null;
       },
       async request<T>() {
-        return { envelope_xdr: 'SIGNED_XDR' } as T;
+        return { envelope_xdr: 'VFNfWERSLQo=' } as T;
       },
     };
 
@@ -660,7 +660,7 @@ describe.skip('WalletConnectAdapter – connection timeout', () => {
         return topic === session.topic ? session : null;
       },
       async request<T>() {
-        return { envelope_xdr: 'SIGNED_XDR' } as T;
+        return { envelope_xdr: 'VFNfWERSLQo=' } as T;
       },
     };
 
