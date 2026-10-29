@@ -1484,6 +1484,9 @@ export class SoroWillClient {
     willId: string,
     options?: RequestOptions,
   ): Promise<{ txHash: string; nextDeadline: Date }> {
+    if (this.readOnly) {
+      throw new ReadOnlyModeError('check_in');
+    }
     parseWillId(willId);
     await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const owner = await this.getWalletPublicKey();
@@ -3198,6 +3201,12 @@ export class SoroWillClient {
     args: Record<string, unknown>,
     options?: RequestOptions,
   ): Promise<T> {
+    // Never deduplicate reads with AbortSignals, since each caller should control
+    // their own cancellation independently (#619).
+    if (!this.deduplicateReads || options?.signal) {
+      return this._readOnce<T>(method, args, options);
+    }
+
     // Deduplicate concurrent identical read calls so that N concurrent callers
     // asking for the same data only fire one RPC simulation, preventing
     // connection exhaustion on high concurrency (#504).
