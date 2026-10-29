@@ -276,18 +276,26 @@ export class RequestQueue {
   private released = false;
 
   constructor(options: RequestQueueOptions = {}) {
+    // Validate options before applying defaults
+    if (options.maxConcurrent !== undefined) {
+      if (typeof options.maxConcurrent !== 'number' || !Number.isInteger(options.maxConcurrent) || options.maxConcurrent < 1) {
+        throw new RangeError(`maxConcurrent must be a positive integer, received ${options.maxConcurrent}`);
+      }
+    }
+    if (options.requestsPerSecond !== undefined) {
+      if (typeof options.requestsPerSecond !== 'number' || !Number.isInteger(options.requestsPerSecond) || options.requestsPerSecond < 1) {
+        throw new RangeError(`requestsPerSecond must be a positive integer, received ${options.requestsPerSecond}`);
+      }
+    }
+    if (options.maxQueueSize !== undefined) {
+      if (typeof options.maxQueueSize !== 'number' || !Number.isInteger(options.maxQueueSize) || options.maxQueueSize < 1) {
+        throw new RangeError(`maxQueueSize must be a positive integer, received ${options.maxQueueSize}`);
+      }
+    }
+
     const maxConcurrent = options.maxConcurrent ?? 4;
     const requestsPerSecond = options.requestsPerSecond ?? 10;
     const maxQueueSize = options.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE;
-    if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1) {
-      throw new RangeError('maxConcurrent must be a positive integer');
-    }
-    if (!Number.isInteger(requestsPerSecond) || requestsPerSecond < 1) {
-      throw new RangeError('requestsPerSecond must be a positive integer');
-    }
-    if (!Number.isInteger(maxQueueSize) || maxQueueSize < 1) {
-      throw new RangeError('maxQueueSize must be a positive integer');
-    }
     this.account = options.account;
     if (this.account !== undefined) {
       let core = sharedCores.get(this.account);
