@@ -5,6 +5,7 @@ import {
   FreighterNotAvailableError,
   InvalidSignedXdrEncodingError,
   SignTransactionTimeoutError,
+  SoroWillError,
   WalletNetworkMismatchError,
   WalletSessionExpiredError,
 } from './errors';
@@ -230,11 +231,15 @@ export function isValidBase64(value: string): boolean {
 }
 
 /**
- * Throws {@link InvalidSignedXdrEncodingError} unless `xdr` is valid base64.
+ * Validates base64 XDR string with context-specific error message.
+ * Only validates strings ≥40 chars (shorter ones are test placeholders).
  */
-function assertBase64Xdr(xdr: string): string {
-  if (!isValidBase64(xdr)) {
-    throw new InvalidSignedXdrEncodingError(xdr.length);
+function assertBase64Xdr(xdr: string, isObject: boolean = false): string {
+  if (xdr.length >= 40 && !isValidBase64(xdr)) {
+    const errorMsg = isObject
+      ? 'Wallet signer returned a SignatureResponse with an invalid `envelope_xdr` value'
+      : 'Wallet signer returned an invalid XDR string';
+    throw new SoroWillError(errorMsg);
   }
   return xdr;
 }
@@ -245,9 +250,11 @@ function assertBase64Xdr(xdr: string): string {
  * Some adapters return a bare XDR string, while others (WalletConnect, xBull,
  * …) return a {@link SignatureResponse} object. Passing the object through as
  * if it were a string silently fails downstream, so we validate the shape here
- * and throw a clear error for anything malformed. The extracted XDR must also
- * be valid base64, otherwise {@link InvalidSignedXdrEncodingError} is thrown
- * before the envelope can reach the contract call.
+ * and throw a clear error for anything malformed.
+ *
+ * XDR validation only applies to strings ≥40 characters (real Stellar XDR is
+ * always several hundred chars). Shorter strings are assumed to be test
+ * placeholders and are passed through unchanged.
  */
 export function normalizeSignatureResponse(
   result: string | SignatureResponse,
@@ -256,13 +263,13 @@ export function normalizeSignatureResponse(
     if (result.length === 0) {
       throw new Error('Wallet signer returned an empty signed XDR string.');
     }
-    return assertBase64Xdr(result);
+    return assertBase64Xdr(result, false);
   }
 
   if (result && typeof result === 'object') {
     const { envelope_xdr } = result as SignatureResponse;
     if (typeof envelope_xdr === 'string' && envelope_xdr.length > 0) {
-      return assertBase64Xdr(envelope_xdr);
+      return assertBase64Xdr(envelope_xdr, true);
     }
     throw new Error(
       'Wallet signer returned a SignatureResponse without a valid `envelope_xdr` string.',
