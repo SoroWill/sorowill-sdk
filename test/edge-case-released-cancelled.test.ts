@@ -52,6 +52,7 @@ vi.mock('../src/wallet', () => ({
     getPublicKey: async () => TEST_ACCOUNT,
     signTransaction: async (tx: string) => tx,
   })),
+  assertWalletSessionActive: vi.fn(async () => {}),
 }));
 
 import { SoroWillClient, type SoroWillRpcServer } from '../src/SoroWillClient';

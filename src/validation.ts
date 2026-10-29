@@ -167,7 +167,7 @@ export function validateSignatureCollectionOptions(
     throw new RangeError('minSignatures must be a positive integer');
   }
 
-  if (!Number.isFinite(maxSignatures) || maxSignatures < minSignatures) {
+  if (maxSignatures !== Infinity && (!Number.isInteger(maxSignatures) || maxSignatures < minSignatures)) {
     throw new RangeError('maxSignatures must be >= minSignatures');
   }
 

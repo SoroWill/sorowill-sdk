@@ -21,6 +21,7 @@ vi.mock('../src/wallet', () => ({
   getPublicKey: vi.fn(async () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'),
   normalizeSignatureResponse: vi.fn((resp: unknown) => resp),
   signTransaction: vi.fn(async (transactionXdr: string) => transactionXdr),
+  assertWalletSessionActive: vi.fn(async () => {}),
 }));
 
 import { SoroWillClient, DEFAULT_CONTRACT_IDS } from '../src/SoroWillClient';

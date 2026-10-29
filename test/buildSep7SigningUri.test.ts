@@ -14,6 +14,7 @@ vi.mock('../src/wallet', () => ({
     reconnect: vi.fn(),
     disconnect: vi.fn(),
   })),
+  assertWalletSessionActive: vi.fn(async () => {}),
 }));
 
 import { SoroWillClient } from '../src/SoroWillClient';

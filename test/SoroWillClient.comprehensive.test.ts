@@ -60,6 +60,7 @@ vi.mock('../src/wallet', () => ({
   getPublicKey: vi.fn(async () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'),
   signTransaction: vi.fn(async (tx: string) => tx),
   normalizeSignatureResponse: vi.fn((resp: unknown) => resp),
+  assertWalletSessionActive: vi.fn(async () => {}),
   getDefaultWalletAdapter: vi.fn(() => ({
     isConnected: async () => true,
     connect: async () => ({ publicKey: TEST_ACCOUNT, network: 'testnet', networkPassphrase: 'Test SDF Network ; September 2015' }),

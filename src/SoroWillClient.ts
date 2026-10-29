@@ -85,14 +85,14 @@ import {
   WillNotFoundError,
   GracePeriodActiveError,
 } from './errors';
-import { deepFreezeObject, hasDuplicateBeneficiaries, MAX_GUARDIANS, validateBeneficiaries } from './utils';
+import { assertValidBeneficiaryAddresses, assertValidStellarAddress, deepFreezeObject, hasDuplicateBeneficiaries, MAX_GUARDIANS, validateBeneficiaries, validateGuardianSignature } from './utils';
 import { RequestQueue } from './requestQueue';
 import { InFlightTracker } from './inFlightTracker';
 import { RpcEndpointPool } from './rpc';
 import { buildSep7TxUri, type BuildSep7TxUriOptions } from './sep7';
 import { HookManager } from './hooks';
 import type { BeforeInvokeContext, AfterInvokeContext } from './hooks';
-import { assertPreparedTransactionMatchesIntendedOperation } from './txValidation';
+import { assertPreparedTransactionMatchesIntendedOperation, assertSupportedSignatureAlgorithm } from './txValidation';
 import { DebugLogger, type DebugLoggerOptions } from './debugLogger';
 
 /** @internal Local alias for Soroban's `xdr.ScVal`; not part of the public API. */
@@ -1076,6 +1076,11 @@ export class SoroWillClient {
    * sending the signed envelope to the wallet.
    */
   private readonly signedTransactionHashes: Set<string>;
+  private stopWatchingWalletNetwork?: (() => void) | undefined;
+  private specVersion?: ContractSpecVersion | undefined;
+  private expectedContractVersion?: string | undefined;
+  private warnedSpecVersions: Set<string> = new Set();
+  private requireWalletNetwork: boolean = false;
 
   constructor(options: SoroWillClientOptions) {
     // Validate contract ID format on initialization (#626).
@@ -2073,6 +2078,49 @@ export class SoroWillClient {
   }
 
   /**
+   * Fetches multiple wills by ID in a single RPC call. More efficient than
+   * calling `getWill` repeatedly. Does not require a connected wallet.
+   *
+   * De-duplicates IDs in the request but returns results in the original input
+   * order, repeating results for duplicate input IDs.
+   *
+   * @param willIds - Array of will ID strings to fetch.
+   * @param options - Optional request options.
+   * @returns An array of will records in the same order as the input IDs.
+   * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout.
+   */
+  async getWills(willIds: string[], options?: RequestOptions): Promise<Will[]> {
+    if (willIds.length === 0) {
+      return [];
+    }
+
+    const canonicalIds = willIds.map((id) => parseWillId(id).toString());
+    const uniqueIds = Array.from(new Set(canonicalIds));
+    const cacheKey = createReadCacheKey('get_wills', { will_ids: uniqueIds.join(',') });
+
+    if (this.readCache) {
+      await this.readCache.ready();
+      const cached = this.readCache.get<Will[]>(cacheKey);
+      if (cached !== undefined) {
+        const cloned = cached.map(cloneWill);
+        const result = canonicalIds.map((id) => cloned.find((w) => w.id === BigInt(id))!);
+        return this.deepFreeze
+          ? result.map((w) => deepFreezeObject(w))
+          : result;
+      }
+    }
+
+    const raw = await this.read<unknown>('get_wills', { will_ids: uniqueIds.map(BigInt) }, options);
+    const wills = Array.isArray(raw) ? raw.map(mapWill) : [mapWill(raw)];
+    this.readCache?.set(cacheKey, wills.map(cloneWill), uniqueIds);
+
+    const result = canonicalIds.map((id) => wills.find((w) => w.id === BigInt(id))!);
+    return this.deepFreeze
+      ? result.map((w) => deepFreezeObject(w))
+      : result;
+  }
+
+  /**
    * Lists every will owned by `owner`. Does not require a connected wallet.
    *
    * **Immutability guarantee:** The returned `Will[]` array and each element
@@ -2376,6 +2424,14 @@ export class SoroWillClient {
    * console.log(`Batch operation txHash: ${result.txHash}`);
    * ```
    */
+  async batch(
+    operations: readonly BatchOperation[],
+    options?: RequestOptions,
+  ): Promise<BatchResult<readonly BatchOperation[]>>;
+  async batch<const TOperations extends readonly BatchOperation[]>(
+    operations: TOperations,
+    options?: RequestOptions,
+  ): Promise<BatchResult<TOperations>>;
   async batch<const TOperations extends readonly BatchOperation[]>(
     operations: TOperations,
     options?: RequestOptions,
@@ -3079,7 +3135,7 @@ export class SoroWillClient {
    * Compare `fingerprint` across sessions to detect contract upgrades, and
    * check `compatible` / `missingMethods` to detect an SDK/contract mismatch.
    */
-  get contractSpecVersion(): ContractSpecVersion | null {
+  get contractSpecVersion(): ContractSpecVersion | undefined {
     return this.specVersion;
   }
 
@@ -3366,6 +3422,8 @@ export class SoroWillClient {
       }
     }
     };
+
+    const run = () => execute(options);
 
     if (willId === undefined) {
       return run();
@@ -3987,6 +4045,12 @@ export class SoroWillClient {
     const actual = details?.networkPassphrase ?? '';
     if (actual !== network.networkPassphrase) {
       throw new WalletNetworkMismatchError(network.networkPassphrase, actual);
+    }
+  }
+
+  private handleNetworkChange(newNetworkPassphrase: string): void {
+    if (newNetworkPassphrase !== this.networkPassphrase) {
+      this.readCache?.setNetwork(newNetworkPassphrase);
     }
   }
 

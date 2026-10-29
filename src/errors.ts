@@ -1315,4 +1315,14 @@ export function getContractErrorMap(): Map<number, ContractErrorFactory> {
   return new Map();
 }
 
+export class ReadOnlyModeError extends SoroWillError {
+  constructor(operation: string, options?: ErrorOptions) {
+    super(
+      `Operation "${operation}" is not allowed in read-only mode`,
+      options,
+    );
+    this.name = 'ReadOnlyModeError';
+  }
+}
+
 export type ContractErrorFactory = (details: unknown) => Error;

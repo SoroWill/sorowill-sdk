@@ -3,6 +3,7 @@ import type FreighterApi from '@stellar/freighter-api';
 import {
   FreighterInstallCheckError,
   FreighterNotAvailableError,
+  InvalidSignedXdrEncodingError,
   SignTransactionTimeoutError,
   WalletNetworkMismatchError,
 } from './errors';
@@ -104,6 +105,15 @@ function loadFreighterApi(): Promise<typeof FreighterApi> {
   }
   return freighterApiPromise;
 }
+
+/** Freighter error code for context invalidation (extension reload/update). */
+const FREIGHTER_CONTEXT_INVALIDATED_CODE = -3;
+
+/** Default interval (ms) for watching wallet changes. */
+const DEFAULT_FREIGHTER_WATCH_INTERVAL_MS = 1000;
+
+/** Type for network change listeners. */
+type WalletNetworkChangeListener = (network: { network: string; networkPassphrase: string }) => void;
 
 /** Default number of times to check for Freighter's window injection. */
 export const DEFAULT_FREIGHTER_INJECTION_RETRIES = 10;
@@ -798,6 +808,11 @@ export class FreighterWalletAdapter implements WalletAdapter {
     }
   }
 
+  /** Loads the injected Freighter API from the window object. */
+  private async loadInjectedFreighterApi() {
+    return loadFreighterApi();
+  }
+
   /**
    * Reports whether the Freighter extension is present and reachable.
    *
@@ -1121,4 +1136,11 @@ export async function isFreighterInstalled(): Promise<boolean> {
 
 export async function connectWallet(): Promise<WalletConnection> {
   return defaultFreighterWalletAdapter.connect();
+}
+
+export async function assertWalletSessionActive(adapter: WalletAdapter): Promise<void> {
+  const isConnected = await adapter.isConnected();
+  if (!isConnected) {
+    throw new WalletSessionError('Wallet session is not active. Please connect your wallet first.');
+  }
 }

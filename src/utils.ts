@@ -310,6 +310,47 @@ export function describeInvalidBeneficiaryAddress(address: unknown): string | nu
   return null;
 }
 
+/** Returns an error reason if `address` is not a valid Stellar account address, or null if valid. */
+export function getStellarAddressError(address: unknown): InvalidStellarAddressReason | null {
+  if (typeof address !== 'string') {
+    return 'not a string';
+  }
+  if (address.length === 0) {
+    return 'empty string';
+  }
+  if (!StrKey.isValidEd25519PublicKey(address)) {
+    // Provide more specific error messages for common cases
+    if (address.startsWith('S')) {
+      return 'secret seed, not public key';
+    }
+    if (address.startsWith('M')) {
+      return 'muxed account, not valid';
+    }
+    return 'invalid Stellar address format';
+  }
+  return null;
+}
+
+/** Returns whether `address` is a valid Stellar account address. */
+export function isValidStellarAddress(address: unknown): boolean {
+  return getStellarAddressError(address) === null;
+}
+
+/** Asserts that `address` is a valid Stellar account address. */
+export function assertValidStellarAddress(
+  address: unknown,
+  field: string = 'address',
+  options?: { allowContract?: boolean },
+): void {
+  if (options?.allowContract && typeof address === 'string' && StrKey.isValidContract(address)) {
+    return;
+  }
+  const reason = getStellarAddressError(address);
+  if (reason !== null) {
+    throw new InvalidStellarAddressError(field, address, reason);
+  }
+}
+
 /**
  * Asserts that every beneficiary address is a valid Stellar account address.
  *
@@ -540,4 +581,10 @@ export function deepFreezeObject<T>(value: T): T {
   }
 
   return value;
+}
+
+export function validateGuardianSignature(signature: unknown): void {
+  if (typeof signature !== 'string' || signature.trim().length === 0) {
+    throw new Error('Invalid guardian signature: must be a non-empty string.');
+  }
 }

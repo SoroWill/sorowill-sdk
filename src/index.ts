@@ -103,7 +103,6 @@ export { SOROBAN_EVENT_TYPES, WillStatus, WillErrorCode } from './types';
 export {
   FreighterWalletAdapter,
   WalletSessionError,
-  WalletSessionExpiredError,
   assertWalletSessionActive,
   connectWallet,
   freighterAdapter,
@@ -143,11 +142,9 @@ export type {
 } from './walletConnect';
 
 export {
-  CacheDeserializationError,
   IndexedDbCachePersistenceAdapter,
   LocalStorageCachePersistenceAdapter,
   MemoryCachePersistenceAdapter,
-  DEFAULT_MAX_CACHE_ENTRIES,
   ReadCache,
   createReadCacheKey,
   escapeCacheKeyComponent,
@@ -196,6 +193,7 @@ export {
   InvalidBeneficiaryAddressError,
   InvalidContractIdError,
   InvalidDayCountError,
+  InvalidEventTypeFilterError,
   InvalidGuardianSignatureError,
   InvalidGuardianThresholdError,
   InvalidPaginationOptionsError,
@@ -275,13 +273,6 @@ export type { RequestQueueOptions } from './requestQueue';
 export { DebugLogger, DEFAULT_REDACTED_KEYS, REDACTED } from './debugLogger';
 export type { DebugLoggerOptions } from './debugLogger';
 
-export {
-  createCorrelationId,
-  withCorrelationId,
-  getCurrentCorrelationId,
-} from './correlation';
-export type { CorrelationContext } from './correlation';
-
 export { buildSep7TxUri, parseSep7Callback } from './sep7';
 export { SEP7_MAX_ENVELOPE_BYTES, SEP7_MAX_URI_LENGTH } from './sep7';
 export type { BuildSep7TxUriOptions, Sep7CallbackResult } from './sep7';
@@ -325,8 +316,9 @@ export {
   describeInvalidBeneficiaryAddress,
   assertValidBeneficiaryAddresses,
   validateGuardians,
+  validateGuardianSignature,
 } from './utils';
-export type { NextActionableState, StellarAddressValidationOptions } from './utils';
+export type { NextActionableState } from './utils';
 
 export {
   DEFAULT_NETWORK,
