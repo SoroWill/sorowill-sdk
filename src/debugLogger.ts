@@ -221,15 +221,31 @@ export class DebugLogger {
    */
   readonly minLevel: LogLevel;
 
+  /** Correlation ID for grouping related log entries. */
+  readonly correlationId: string;
+
   /** Whether to redact sensitive fields from log output. */
   private readonly redact: boolean;
 
   /** Field names to redact from log output. */
   private readonly redactKeys: readonly string[];
 
-  constructor(enabled?: boolean, options?: DebugLoggerOptions) {
+  constructor(enabled?: boolean, correlationIdOrOptions?: string | DebugLoggerOptions) {
     this.isActive = resolveEnabled(enabled ?? false);
     this.minLevel = resolveLogLevel();
+
+    // Handle correlationId as second parameter (for tests) or extract from options
+    let options: DebugLoggerOptions | undefined;
+    if (typeof correlationIdOrOptions === 'string') {
+      // correlationId passed directly
+      this.correlationId = correlationIdOrOptions;
+    } else {
+      // options object or undefined
+      options = correlationIdOrOptions;
+      // Generate a new correlationId if not provided
+      this.correlationId = generateCorrelationId();
+    }
+
     this.redact = options?.redact !== false; // Default to true
 
     let keys: readonly string[];
@@ -257,7 +273,7 @@ export class DebugLogger {
       level: 'operation-build',
       method,
       willId,
-      correlationId,
+      correlationId: correlationId ?? this.correlationId,
       details: details || {},
     };
 
@@ -278,7 +294,7 @@ export class DebugLogger {
       level: 'simulation',
       method,
       willId,
-      correlationId,
+      correlationId: correlationId ?? this.correlationId,
       details: {
         minResourceFee,
         ...details,
@@ -301,7 +317,7 @@ export class DebugLogger {
       level: 'submission',
       method,
       willId,
-      correlationId,
+      correlationId: correlationId ?? this.correlationId,
       details: { txHash },
     };
 
