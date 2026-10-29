@@ -288,9 +288,6 @@ export function describeInvalidBeneficiaryAddress(address: unknown): string | nu
   if (/^0x[0-9a-fA-F]*$/.test(address)) {
     return 'this looks like an Ethereum/EVM address, not a Stellar address';
   }
-  if (address !== address.toUpperCase()) {
-    return 'Stellar addresses are uppercase';
-  }
   if (StrKey.isValidEd25519SecretSeed(address)) {
     return 'this is a secret key, not a public address — never share it';
   }
@@ -300,8 +297,12 @@ export function describeInvalidBeneficiaryAddress(address: unknown): string | nu
   if (StrKey.isValidMed25519PublicKey(address)) {
     return 'muxed addresses ("M...") are not supported as beneficiaries';
   }
-  if (!address.startsWith('G')) {
+  // For case-insensitive check: if it starts with 'G' or 'g', it's a case issue; otherwise prefix issue
+  if (!address[0]?.toUpperCase().startsWith('G')) {
     return 'Stellar account addresses start with "G"';
+  }
+  if (address !== address.toUpperCase()) {
+    return 'Stellar addresses are uppercase';
   }
   if (address.length !== STELLAR_ADDRESS_LENGTH) {
     return `expected ${STELLAR_ADDRESS_LENGTH} characters, received ${address.length}`;
