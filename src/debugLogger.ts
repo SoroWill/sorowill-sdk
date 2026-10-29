@@ -221,13 +221,27 @@ export class DebugLogger {
    */
   readonly minLevel: LogLevel;
 
+  /** Whether to redact sensitive fields from log output. */
+  private readonly redact: boolean;
+
   /** Field names to redact from log output. */
   private readonly redactKeys: readonly string[];
 
-  constructor(enabled: boolean) {
-    this.isActive = resolveEnabled(enabled);
+  constructor(enabled?: boolean, options?: DebugLoggerOptions) {
+    this.isActive = resolveEnabled(enabled ?? false);
     this.minLevel = resolveLogLevel();
-    this.redactKeys = DEFAULT_REDACTED_KEYS;
+    this.redact = options?.redact !== false; // Default to true
+
+    let keys: readonly string[];
+    if (options?.replaceDefaultRedactKeys && options.redactKeys) {
+      keys = options.redactKeys;
+    } else if (options?.redactKeys) {
+      keys = [...DEFAULT_REDACTED_KEYS, ...options.redactKeys];
+    } else {
+      keys = DEFAULT_REDACTED_KEYS;
+    }
+    // Normalize keys for case-insensitive matching
+    this.redactKeys = keys.map((key) => normalizeKey(key));
   }
 
   logOperationBuild(
@@ -372,7 +386,7 @@ export class DebugLogger {
    */
   private sanitize(value: unknown, seen: WeakSet<object> = new WeakSet()): unknown {
     if (typeof value === 'string') {
-      return redactString(value);
+      return this.redact ? redactString(value) : value;
     }
     if (typeof value === 'bigint') {
       return value.toString();
@@ -392,7 +406,7 @@ export class DebugLogger {
     }
     const result: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
-      result[key] = this.isSensitiveKey(key) ? REDACTED : this.sanitize(item, seen);
+      result[key] = this.redact && this.isSensitiveKey(key) ? REDACTED : this.sanitize(item, seen);
     }
     return result;
   }
@@ -400,10 +414,15 @@ export class DebugLogger {
   private log(log: DebugLog): void {
     const severity: LogLevel = log.severity ?? LEVEL_SEVERITY[log.level];
     if (SEVERITY_PRIORITY[severity] > SEVERITY_PRIORITY[this.minLevel]) return;
+    // Sanitize details before logging
+    const sanitized = {
+      ...log,
+      details: this.sanitize(log.details),
+    };
     // Structured, JSON-serializable output covering multiple log levels
     // (not just warn/error), so console.log is intentional here.
     // eslint-disable-next-line no-console
-    console.log(this.safeStringify(log));
+    console.log(this.safeStringify(sanitized));
   }
 
   /**
