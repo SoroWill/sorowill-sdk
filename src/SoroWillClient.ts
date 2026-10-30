@@ -781,6 +781,28 @@ function parseCursor(cursor: string | undefined): number {
   return offset;
 }
 
+function validateEventCursor(cursor: string | undefined): void {
+  if (cursor === undefined) {
+    return;
+  }
+  if (typeof cursor !== 'string') {
+    throw new InvalidCursorError(String(cursor), `expected a string, received ${typeof cursor}`);
+  }
+  if (cursor.length === 0) {
+    throw new InvalidCursorError(cursor, 'cursor must not be empty');
+  }
+  if (cursor.length > 256) {
+    throw new InvalidCursorError(cursor, 'cursor must not exceed 256 characters');
+  }
+  // RPC paging token format: digits-digits (e.g., '0004294967296-0000000001')
+  if (!/^\d+-\d+$/.test(cursor)) {
+    throw new InvalidCursorError(
+      cursor,
+      'expected RPC paging token format (e.g., "0004294967296-0000000001")',
+    );
+  }
+}
+
 function normalizePositiveInteger(value: number | undefined, label: string): number | null {
   if (value === undefined) {
     return null;
@@ -2777,6 +2799,7 @@ export class SoroWillClient {
     listener: (event: SoroWillEvent) => void,
     options: EventSubscriptionOptions = {},
   ): Promise<EventSubscription> {
+    validateEventCursor(options.cursor);
     const eventTypes = validateEventTypeFilter(options.eventTypes);
     if (eventTypes) {
       const userListener = listener;
