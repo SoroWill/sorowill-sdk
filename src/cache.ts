@@ -215,6 +215,7 @@ export const escapeCacheKeyComponent = escapeKeyComponent;
 export function createReadCacheKey(method: string, args: Record<string, unknown>): string {
   const argsStr = stableStringify(args);
   const argsObj = JSON.parse(argsStr);
+
   return JSON.stringify([method, argsObj]);
 }
 

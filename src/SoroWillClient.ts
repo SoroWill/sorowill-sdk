@@ -3548,8 +3548,10 @@ export class SoroWillClient {
         networkPassphrase: this.networkPassphrase,
       });
       for (const operation of operations) builder.addOperation(operation);
+      options?.signal?.throwIfAborted();
       const builtTx = builder.setTimeout(this.transactionTimeoutSeconds).build();
 
+      options?.signal?.throwIfAborted();
       // prepareTransaction simulates and assembles Soroban data for the whole transaction.
       options?.signal?.throwIfAborted();
       const prepared = await this.rpc(
@@ -3576,9 +3578,11 @@ export class SoroWillClient {
       this.signedTransactionHashes.add(txXdrKey);
       trackedHash = txXdrKey;
 
+      options?.signal?.throwIfAborted();
       const signedTxResponse = await this.wallet.signTransaction(prepared.toXDR(), {
         networkPassphrase: this.networkPassphrase,
       });
+      options?.signal?.throwIfAborted();
       const signedTxXdr = normalizeSignatureResponse(signedTxResponse);
       const signedTx = TransactionBuilder.fromXDR(
         signedTxXdr,
