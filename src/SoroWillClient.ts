@@ -3037,6 +3037,18 @@ export class SoroWillClient {
   }
 
   /**
+   * Attempts to cancel an in-flight operation by its will ID and method name.
+   *
+   * **Operation Type:** Read-only (No state change)
+   *
+   * @readonly
+   * @remarks Returns true if an operation was found and aborted, false if no operation was in flight.
+   */
+  cancelOperation(willId: string | bigint, method: string): boolean {
+    return this.inFlightTracker.abort(willId, method);
+  }
+
+  /**
    * Tears down the client: unsubscribes from any event source, aborts all
    * in-flight tracked operations, and rejects every queued-but-not-yet-started
    * request so nothing continues running in the background after teardown.
@@ -3051,10 +3063,6 @@ export class SoroWillClient {
    * client.destroy();
    * ```
    */
-  cancelOperation(willId: string | bigint, method: string): boolean {
-    return this.inFlightTracker.abort(willId, method);
-  }
-
   destroy(): void {
     if (this.eventSubscription) {
       unsubscribeFromWillEvents(this.eventSubscription);
