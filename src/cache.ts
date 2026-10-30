@@ -163,13 +163,6 @@ function stableStringify(value: unknown): string {
       return { __type: 'bigint', value: currentValue.toString() };
     }
 
-    if (typeof currentValue === 'string') {
-      // Encode special characters (colons, commas, slashes, percent signs, etc.)
-      // so that string parameter values containing separator characters cannot
-      // produce a key that collides with a different method/parameter combination.
-      return encodeURIComponent(currentValue);
-    }
-
     if (Array.isArray(currentValue)) {
       return currentValue;
     }
@@ -219,7 +212,9 @@ export const escapeCacheKeyComponent = escapeKeyComponent;
  * formatted for the previous locale and eliminates collision vulnerabilities.
  */
 export function createReadCacheKey(method: string, args: Record<string, unknown>): string {
-  return `${escapeKeyComponent(method)}:${stableStringify(args)}`;
+  const argsStr = stableStringify(args);
+  const argsObj = JSON.parse(argsStr);
+  return JSON.stringify([method, argsObj]);
 }
 
 /**
