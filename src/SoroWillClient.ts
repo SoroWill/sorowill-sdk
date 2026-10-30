@@ -4015,10 +4015,11 @@ export class SoroWillClient {
     }
   }
 
-  private handleNetworkChange(newNetworkPassphrase: string): void {
-    if (newNetworkPassphrase !== this.networkPassphrase) {
-      this.readCache?.setNetwork(newNetworkPassphrase);
+  handleNetworkChange(newNetworkPassphrase: string): boolean {
+    if (!this.readCache) {
+      return false;
     }
+    return this.readCache.setNetwork(newNetworkPassphrase);
   }
 
   // -----------------------------------------------------------------------
