@@ -292,6 +292,11 @@ export class RequestQueue {
         throw new RangeError(`maxQueueSize must be a positive integer, received ${options.maxQueueSize}`);
       }
     }
+    if (options.maxBackoffMs !== undefined) {
+      if (typeof options.maxBackoffMs !== 'number' || !Number.isFinite(options.maxBackoffMs) || options.maxBackoffMs > MAX_BACKOFF_MS) {
+        throw new RangeError(`maxBackoffMs must be at most ${MAX_BACKOFF_MS}ms, received ${options.maxBackoffMs}`);
+      }
+    }
 
     const maxConcurrent = options.maxConcurrent ?? 4;
     const requestsPerSecond = options.requestsPerSecond ?? 10;
