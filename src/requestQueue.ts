@@ -248,16 +248,29 @@ class QueueCore {
   readonly maxConcurrent: number;
   readonly requestsPerSecond: number;
   readonly maxQueueSize: number;
+  readonly maxRateLimitRetries: number;
+  readonly retryBaseDelayMs: number;
+  readonly maxBackoffMs: number;
   readonly pending: Array<PendingRequest<unknown>> = [];
   readonly starts: number[] = [];
   active = 0;
   wakeTimer: ReturnType<typeof setTimeout> | undefined;
   refCount = 0;
 
-  constructor(maxConcurrent: number, requestsPerSecond: number, maxQueueSize: number) {
+  constructor(
+    maxConcurrent: number,
+    requestsPerSecond: number,
+    maxQueueSize: number,
+    maxRateLimitRetries: number,
+    retryBaseDelayMs: number,
+    maxBackoffMs: number,
+  ) {
     this.maxConcurrent = maxConcurrent;
     this.requestsPerSecond = requestsPerSecond;
     this.maxQueueSize = maxQueueSize;
+    this.maxRateLimitRetries = maxRateLimitRetries;
+    this.retryBaseDelayMs = retryBaseDelayMs;
+    this.maxBackoffMs = maxBackoffMs;
   }
 }
 
@@ -301,17 +314,20 @@ export class RequestQueue {
     const maxConcurrent = options.maxConcurrent ?? 4;
     const requestsPerSecond = options.requestsPerSecond ?? 10;
     const maxQueueSize = options.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE;
+    const maxRateLimitRetries = options.maxRateLimitRetries ?? 3;
+    const retryBaseDelayMs = options.retryBaseDelayMs ?? 500;
+    const maxBackoffMs = options.maxBackoffMs ?? MAX_BACKOFF_MS;
     this.account = options.account;
     if (this.account !== undefined) {
       let core = sharedCores.get(this.account);
       if (core === undefined) {
-        core = new QueueCore(maxConcurrent, requestsPerSecond, maxQueueSize);
+        core = new QueueCore(maxConcurrent, requestsPerSecond, maxQueueSize, maxRateLimitRetries, retryBaseDelayMs, maxBackoffMs);
         sharedCores.set(this.account, core);
       }
       core.refCount += 1;
       this.core = core;
     } else {
-      this.core = new QueueCore(maxConcurrent, requestsPerSecond, maxQueueSize);
+      this.core = new QueueCore(maxConcurrent, requestsPerSecond, maxQueueSize, maxRateLimitRetries, retryBaseDelayMs, maxBackoffMs);
     }
   }
 
@@ -454,27 +470,42 @@ export class RequestQueue {
   }
 
   private async execute<T>(request: PendingRequest<T>): Promise<void> {
-    try {
-      const result =
-        request.timeoutMs === undefined
-          ? await request.run()
-          : await Promise.race([
-              request.run(),
-              new Promise<never>((_, reject) => {
-                let timer: ReturnType<typeof setTimeout> | undefined;
-                timer = setTimeout(
-                  () =>
-                    reject(
-                      new RequestTimeoutError(
-                        request.timeoutMs as number,
-                        request.method,
+    const executeWithRetry = async (attemptNumber: number): Promise<T> => {
+      try {
+        const result =
+          request.timeoutMs === undefined
+            ? await request.run()
+            : await Promise.race([
+                request.run(),
+                new Promise<never>((_, reject) => {
+                  let timer: ReturnType<typeof setTimeout> | undefined;
+                  timer = setTimeout(
+                    () =>
+                      reject(
+                        new RequestTimeoutError(
+                          request.timeoutMs as number,
+                          request.method,
+                        ),
                       ),
-                    ),
-                  request.timeoutMs,
-                );
-                void timer; // referenced in the closure above
-              }),
-            ]);
+                    request.timeoutMs,
+                  );
+                  void timer; // referenced in the closure above
+                }),
+              ]);
+        return result;
+      } catch (error) {
+        // Retry rate-limit errors with exponential backoff
+        if (isRateLimitError(error) && attemptNumber < this.core.maxRateLimitRetries) {
+          const delay = computeBackoffDelay(attemptNumber, this.core.retryBaseDelayMs, this.core.maxBackoffMs);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          return executeWithRetry(attemptNumber + 1);
+        }
+        throw error;
+      }
+    };
+
+    try {
+      const result = await executeWithRetry(0);
       request.resolve(result);
     } catch (error) {
       request.reject(error);
