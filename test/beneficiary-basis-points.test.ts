@@ -160,6 +160,17 @@ describe('beneficiary percentage -> contract basis points', () => {
     mockState.funcArgsCalls.length = 0;
     mockState.sendTransaction.mockClear();
     mockState.pollTransaction.mockClear();
+    mockState.simulateTransaction.mockClear();
+    mockState.simulateTransaction.mockResolvedValue({
+      result: {
+        retval: 1n,
+      },
+    });
+    mockState.pollTransaction.mockResolvedValue({
+      status: 'SUCCESS',
+      createdAt: 1_700_000_000,
+      returnValue: 1n,
+    });
   });
 
   it('scales createWill beneficiary percentages to basis points (30% -> 3000)', async () => {
@@ -182,6 +193,11 @@ describe('beneficiary percentage -> contract basis points', () => {
   });
 
   it('scales updateBeneficiaries percentages to basis points and keeps the sum at 10000', async () => {
+    mockState.simulateTransaction.mockResolvedValueOnce({
+      result: {
+        retval: undefined,
+      },
+    });
     mockState.pollTransaction.mockResolvedValueOnce({
       status: 'SUCCESS',
       createdAt: 1_700_000_000,
