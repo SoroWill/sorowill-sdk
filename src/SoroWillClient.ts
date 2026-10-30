@@ -2057,7 +2057,7 @@ export class SoroWillClient {
     const wills = Array.isArray(raw) ? raw.map(mapWill) : [mapWill(raw)];
     this.readCache?.set(cacheKey, wills.map(cloneWill), uniqueIds);
 
-    const result = canonicalIds.map((id) => wills.find((w) => w.id === id)!);
+    const result = canonicalIds.map((id) => cloneWill(wills.find((w) => w.id === id)!));
     return this.deepFreeze
       ? result.map((w) => deepFreezeObject(w))
       : result;
@@ -2086,9 +2086,16 @@ export class SoroWillClient {
    * **Immutability guarantee:** Same as {@link getWillsByOwner} — returned
    * objects are clones (deep-frozen when `deepFreeze` is enabled).
    *
+   * **Read-only operation** — does not require wallet authentication.
+   *
    * @param owner - The Stellar public key of the will owner.
    * @param options - Pagination options plus optional timeout/abort signal.
    * @returns A paginated page of will records.
+   *
+   * @example
+   * ```ts
+   * const wills = await client.getWillsByOwner('GISSUE559...');
+   * ```
    */
   async getWillsByOwner(
     owner: string,
