@@ -15,7 +15,6 @@ import { SoroWillClient, type SoroWillRpcServer } from '../src/SoroWillClient';
 import { InvalidWebSocketUrlError } from '../src/errors';
 
 const CONTRACT_ID = 'CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR';
-const _TEST_ACCOUNT = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 
 function makeMinimalRpcServer(): SoroWillRpcServer {
   return {

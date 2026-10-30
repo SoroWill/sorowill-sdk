@@ -84,10 +84,7 @@ describe('Issue #639: Beneficiary percentage epsilon-tolerance validation', () =
 
   it('accepts a sum that is 100 minus a sub-epsilon deviation', () => {
     // Manually craft a sum slightly below 100 by less than epsilon.
-    const deviation = PERCENTAGE_SUM_EPSILON / 2;
     // Split as 99.something / 0.something ensuring sum = 100 - deviation
-    const _p1 = 100 - deviation;
-    const _p2 = deviation; // total = 100 exactly but via arithmetic may drift
     // Actually test: two-beneficiary split where JS floating-point sum is
     // within epsilon of 100.
     expect(

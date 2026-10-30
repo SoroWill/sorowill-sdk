@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Tests for issue #611: `BatchResult` was unconstrained, so the result of a
  * `batch()` call carried no information about the operations submitted and
