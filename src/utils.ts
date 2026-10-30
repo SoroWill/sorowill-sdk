@@ -1,4 +1,4 @@
-import { StrKey } from '@stellar/stellar-sdk';
+import { StrKey, xdr } from '@stellar/stellar-sdk';
 
 import {
   BeneficiaryValidationError,
@@ -636,7 +636,6 @@ export function deepFreezeObject<T>(value: T): T {
 }
 
 export function validateGuardianSignature(signature: unknown): void {
-  const { xdr } = require('@stellar/stellar-sdk');
 
   // Must be a string
   if (typeof signature !== 'string') {

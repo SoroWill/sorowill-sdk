@@ -29,7 +29,7 @@ export class OrderedRequestQueue<T> {
     return new Promise<T>((resolve, reject) => {
       const id = `req-${Date.now()}-${Math.random()}`;
       this.queue.push({ id, fn, resolve, reject });
-      this.processQueue();
+      void this.processQueue();
     });
   }
 

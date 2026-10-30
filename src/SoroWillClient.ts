@@ -82,7 +82,6 @@ import {
   WalletNetworkMismatchError,
   WillContractError,
   WebSocketNotConfiguredError,
-  WillNotFoundError,
   GracePeriodActiveError,
 } from './errors';
 import { assertValidBeneficiaryAddresses, assertValidStellarAddress, deepFreezeObject, hasDuplicateBeneficiaries, MAX_GUARDIANS, validateBeneficiaries, validateGuardianSignature } from './utils';
@@ -3373,6 +3372,10 @@ export class SoroWillClient {
     let txHash: string | null = null;
     let error: string | null = null;
 
+    // Set up abort listeners for both signals (outside try so finally can clean up)
+    const abortListeners: Array<() => void> = [];
+    const abortPromises: Array<Promise<never>> = [];
+
     try {
       // Check if any signal is already aborted
       for (const sig of signals) {
@@ -3380,10 +3383,6 @@ export class SoroWillClient {
           throw sig.reason;
         }
       }
-
-      // Set up abort listeners for both signals
-      const abortListeners: Array<() => void> = [];
-      const abortPromises: Array<Promise<never>> = [];
 
       for (const sig of signals) {
         const abortPromise = new Promise<never>((_, reject) => {
@@ -3412,11 +3411,6 @@ export class SoroWillClient {
         Date.now() - startTime,
       );
 
-      // Clean up abort listeners
-      for (let i = 0; i < signals.length; i++) {
-        signals[i]!.removeEventListener('abort', abortListeners[i]!);
-      }
-
       const afterCtx: AfterInvokeContext = {
         method,
         args,
@@ -3433,6 +3427,11 @@ export class SoroWillClient {
       this.debugLogger.logError(method, willId, err instanceof Error ? err : String(err));
       throw err;
     } finally {
+      // Always clean up abort listeners, even on error or abort
+      for (let i = 0; i < signals.length; i++) {
+        signals[i]!.removeEventListener('abort', abortListeners[i]!);
+      }
+
       if (error) {
         const afterCtx: AfterInvokeContext = {
           method,

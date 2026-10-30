@@ -478,8 +478,7 @@ export class RequestQueue {
             : await Promise.race([
                 request.run(),
                 new Promise<never>((_, reject) => {
-                  let timer: ReturnType<typeof setTimeout> | undefined;
-                  timer = setTimeout(
+                  const timer: ReturnType<typeof setTimeout> = setTimeout(
                     () =>
                       reject(
                         new RequestTimeoutError(

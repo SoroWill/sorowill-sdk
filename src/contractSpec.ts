@@ -32,12 +32,12 @@ export class ContractSpecWrapper {
       return Object.fromEntries(this.functionsCache);
     }
 
-    const specAny = this.spec as any;
+    const specAny = this.spec as Record<string, unknown>;
     const functions: Record<string, unknown> = {};
 
     // Extract functions based on spec structure
     if (specAny.functions && Array.isArray(specAny.functions)) {
-      specAny.functions.forEach((fn: any) => {
+      (specAny.functions as Array<Record<string, unknown>>).forEach((fn) => {
         if (fn.name) {
           functions[fn.name] = {
             name: fn.name,
@@ -72,11 +72,11 @@ export class ContractSpecWrapper {
    * Get all data types defined in contract
    */
   getDataTypes(): Record<string, unknown> {
-    const specAny = this.spec as any;
+    const specAny = this.spec as Record<string, unknown>;
     const types: Record<string, unknown> = {};
 
     if (specAny.types && Array.isArray(specAny.types)) {
-      specAny.types.forEach((type: any) => {
+      (specAny.types as Array<Record<string, unknown>>).forEach((type) => {
         if (type.name) {
           types[type.name] = type;
         }
