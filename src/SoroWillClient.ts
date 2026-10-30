@@ -2163,9 +2163,16 @@ export class SoroWillClient {
    * **Immutability guarantee:** Same as {@link getWillsByBeneficiary} —
    * returned objects are clones (deep-frozen when `deepFreeze` is enabled).
    *
+   * **Read-only operation** — does not require wallet authentication.
+   *
    * @param beneficiary - The Stellar public key of the beneficiary.
    * @param options - Pagination options plus optional timeout/abort signal.
    * @returns A paginated page of will records.
+   *
+   * @example
+   * ```ts
+   * const wills = await client.getWillsByBeneficiary('GISSUE559...');
+   * ```
    */
   async getWillsByBeneficiary(
     beneficiary: string,
