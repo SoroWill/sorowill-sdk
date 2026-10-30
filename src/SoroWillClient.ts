@@ -2493,11 +2493,10 @@ export class SoroWillClient {
         txHash = result.txHash;
         // Soroban allows a single invocation per transaction, so the
         // transaction's return value belongs to the (only) operation.
-        const results = operations.map(({ method, args, decode }) => {
+        const results = operations.map(({ method, args }) => {
           const native =
             result.returnValue === undefined ? undefined : spec.funcResToNative(method, result.returnValue);
-          const returnValue = decode ? decode(native) : native;
-          return { method, args, returnValue };
+          return { method, args, returnValue: native };
         }) as BatchOperationResults<TOperations>;
         const batchResult: BatchResult<TOperations> = {
           success: true,

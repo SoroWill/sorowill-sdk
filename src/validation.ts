@@ -130,7 +130,7 @@ export function validateRpcResponseEnvelope(response: unknown): RpcResponseEnvel
     }
   }
 
-  return envelope as RpcResponseEnvelope;
+  return envelope as unknown as RpcResponseEnvelope;
 }
 
 /**

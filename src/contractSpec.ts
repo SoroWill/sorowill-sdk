@@ -38,7 +38,7 @@ export class ContractSpecWrapper {
     // Extract functions based on spec structure
     if (specAny.functions && Array.isArray(specAny.functions)) {
       (specAny.functions as Array<Record<string, unknown>>).forEach((fn) => {
-        if (fn.name) {
+        if (fn.name && typeof fn.name === 'string') {
           functions[fn.name] = {
             name: fn.name,
             inputs: fn.inputs || [],
@@ -77,7 +77,7 @@ export class ContractSpecWrapper {
 
     if (specAny.types && Array.isArray(specAny.types)) {
       (specAny.types as Array<Record<string, unknown>>).forEach((type) => {
-        if (type.name) {
+        if (type.name && typeof type.name === 'string') {
           types[type.name] = type;
         }
       });

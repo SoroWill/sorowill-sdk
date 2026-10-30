@@ -1336,7 +1336,7 @@ export class WalletSessionError extends Error {
 }
 
 export class WalletSessionExpiredError extends WalletSessionError {
-  readonly expiresAt?: number;
+  readonly expiresAt: number | undefined;
 
   constructor(expiresAt?: number, options?: ErrorOptions) {
     super('Wallet session has expired or is no longer valid', options?.cause);

@@ -275,6 +275,7 @@ export class RpcEndpointPool {
   private readonly circuitStates: EndpointCircuitState[];
   private readonly backoffUntil: number[] = [];
   private readonly consecutiveFailures: number[] = [];
+  private readonly latencyHistory: number[][] = [];
 
   /**
    * @param serverOverride - When provided (e.g. `SoroWillClientOptions.rpcServer`
@@ -409,7 +410,7 @@ export class RpcEndpointPool {
   getAverageLatency(index: number): number {
     const history = this.latencyHistory[index];
     if (!history || history.length === 0) return Infinity;
-    return history.reduce((sum, ms) => sum + ms, 0) / history.length;
+    return history.reduce((sum: number, ms: number) => sum + ms, 0) / history.length;
   }
 
   /**

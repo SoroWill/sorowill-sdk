@@ -604,3 +604,5 @@ export interface EventSubscriptionOptions {
 }
 
 export type EventSubscriptionTransport = 'websocket' | 'polling';
+
+export type ContractSpecLike = Record<string, unknown>;
