@@ -3340,12 +3340,16 @@ export class SoroWillClient {
     await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
 
     const willId = args.will_id === undefined ? undefined : String(args.will_id);
-    const execute = async (options: RequestOptions | undefined): Promise<{
+    const execute = async (options: RequestOptions | undefined, trackerSignal: AbortSignal): Promise<{
       txHash: string;
       createdAt: number;
       returnValue: ScVal | undefined;
       events?: Array<{ topics: string[]; data: unknown }>;
     }> => {
+    // Combine tracker signal with user-provided signal from options
+    const userSignal = options?.signal;
+    const signals = userSignal ? [trackerSignal, userSignal] : [trackerSignal];
+
     // Run beforeInvoke hooks
     const beforeCtx: BeforeInvokeContext = {
       method,
@@ -3370,11 +3374,34 @@ export class SoroWillClient {
     let error: string | null = null;
 
     try {
+      // Check if any signal is already aborted
+      for (const sig of signals) {
+        if (sig.aborted) {
+          throw sig.reason;
+        }
+      }
+
+      // Set up abort listeners for both signals
+      const abortListeners: Array<() => void> = [];
+      const abortPromises: Array<Promise<never>> = [];
+
+      for (const sig of signals) {
+        const abortPromise = new Promise<never>((_, reject) => {
+          const listener = () => reject(sig.reason);
+          abortListeners.push(listener);
+          sig.addEventListener('abort', listener);
+        });
+        abortPromises.push(abortPromise);
+      }
+
       const spec = await this.getSpec(options);
       this.debugLogger.logOperationBuild(method, willId);
 
       const operation = this.contract.call(method, ...spec.funcArgsToScVals(method, args));
-      const result = await this.submit([operation], method, options);
+      const result = await Promise.race([
+        this.submit([operation], method, options),
+        ...abortPromises,
+      ]);
 
       txHash = result.txHash;
 
@@ -3384,6 +3411,11 @@ export class SoroWillClient {
         txHash,
         Date.now() - startTime,
       );
+
+      // Clean up abort listeners
+      for (let i = 0; i < signals.length; i++) {
+        signals[i]!.removeEventListener('abort', abortListeners[i]!);
+      }
 
       const afterCtx: AfterInvokeContext = {
         method,
@@ -3425,10 +3457,12 @@ export class SoroWillClient {
     }
     };
 
-    const run = () => execute(options);
+    const run = (signal: AbortSignal) => {
+      return execute(options, signal);
+    };
 
     if (willId === undefined) {
-      return run();
+      return run(new AbortController().signal);
     }
     // Some state-changing methods must never run two concurrent invocations
     // for the same will: a duplicate would submit a second transaction
