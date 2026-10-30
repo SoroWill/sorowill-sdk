@@ -109,13 +109,13 @@ describe('Batch-203: RequestQueue error classification (#628)', () => {
 
 describe('Batch-203: Compound event filters (#627)', () => {
   const exampleEvent: WillEvent = {
-    type: 'willCreated',
+    type: 'contract',
     willId: 'will-123',
     payload: { beneficiary: 'alice' },
   };
 
   const emptyPayloadEvent: WillEvent = {
-    type: 'willUpdated',
+    type: 'system',
     willId: 'will-456',
   };
 

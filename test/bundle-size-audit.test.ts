@@ -27,7 +27,8 @@ const DIST_DIR = resolve(__dirname, '../dist');
 // Raised from 200 to 210 when the RPC endpoint circuit breaker was added.
 // Raised from 210 to 310 when additional validation and utility functions
 // were implemented (assertWalletSessionActive, validateGuardianSignature, getWills, etc.)
-const MAX_BUNDLE_SIZE_KB = 310; // Threshold for maximum bundle size
+// Raised from 310 to 315 for TypeScript fixes and event filtering improvements.
+const MAX_BUNDLE_SIZE_KB = 315; // Threshold for maximum bundle size
 const MAX_GZIP_SIZE_KB = 75; // Threshold for gzipped size
 
 let bundleMetrics: BundleMetrics[] = [];

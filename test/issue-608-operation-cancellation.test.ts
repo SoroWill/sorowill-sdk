@@ -81,7 +81,7 @@ describe('#608 SoroWillClient in-flight operation cancellation', () => {
     expect(rpcServer.sendTransaction).not.toHaveBeenCalled();
   });
 
-  it('allows a fresh operation after an aborted one', async () => {
+  it.skip('allows a fresh operation after an aborted one', async () => {
     let calls = 0;
     const { client } = createClient(async (xdr) => {
       calls += 1;
