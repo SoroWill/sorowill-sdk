@@ -711,6 +711,8 @@ export interface FreighterWalletAdapterOptions extends WalletSessionOptions {
 export class FreighterWalletAdapter implements WalletAdapter {
   private readonly expectedNetworkPassphrase?: string;
   private readonly sessionTtlMs: number;
+  private readonly injectionRetries: number;
+  private readonly injectionRetryDelayMs: number;
   private session?: WalletSession;
   /**
    * Whether the extension context is currently known to be stale/invalidated.
@@ -724,6 +726,15 @@ export class FreighterWalletAdapter implements WalletAdapter {
       this.expectedNetworkPassphrase = options.expectedNetworkPassphrase;
     }
     this.sessionTtlMs = options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
+    this.injectionRetries = options.injectionRetries ?? DEFAULT_FREIGHTER_INJECTION_RETRIES;
+    this.injectionRetryDelayMs = options.injectionRetryDelayMs ?? DEFAULT_FREIGHTER_INJECTION_RETRY_DELAY_MS;
+
+    if (this.injectionRetries <= 0) {
+      throw new RangeError('injectionRetries must be greater than 0');
+    }
+    if (this.injectionRetryDelayMs < 0) {
+      throw new RangeError('injectionRetryDelayMs must be non-negative');
+    }
   }
 
   /**
@@ -971,6 +982,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
   }
 
   async getPublicKey(): Promise<string> {
+    await waitForFreighterInjection(this.injectionRetries, this.injectionRetryDelayMs);
     const freighterApi = await this.loadInjectedFreighterApi();
     const { address, error } = await freighterApi.getAddress();
     if (error) {
