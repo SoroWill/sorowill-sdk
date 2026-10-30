@@ -1831,7 +1831,9 @@ export class SoroWillClient {
     }
     // Validate will existence before submitting, to avoid wasting gas on a
     // non-existent will.
-    await this.getWill(params.willId, options);
+    if (!options?.skipExistenceCheck) {
+      await this.getWill(params.willId, options);
+    }
     await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const owner = await this.getWalletPublicKey();
     const { txHash } = await this.invoke(
