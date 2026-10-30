@@ -280,10 +280,18 @@ export class InFlightTracker {
       return Promise.reject(error);
     }
 
-    const entry = { controller, createdAt: Date.now() } as InFlightOperation<T>;
+    const entry = { controller, createdAt: Date.now(), wallet: walletAddress, released: false } as InFlightOperation<T>;
+
+    // Increment wallet count for this new operation
+    if (walletAddress !== undefined) {
+      const current = this.getWalletInFlightCount(walletAddress);
+      this.walletCounts.set(walletAddress, current + 1);
+    }
+
     entry.promise = Promise.resolve(pending).finally(() => {
       // Only remove the entry this call created; a newer track() may own the key now.
       if (this.inFlight.get(key) === entry) {
+        this.releaseWallet(entry);
         this.inFlight.delete(key);
       }
     });
