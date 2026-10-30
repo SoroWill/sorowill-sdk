@@ -213,10 +213,26 @@ export const escapeCacheKeyComponent = escapeKeyComponent;
  * formatted for the previous locale and eliminates collision vulnerabilities.
  */
 export function createReadCacheKey(method: string, args: Record<string, unknown>): string {
+  function encodeValue(val: unknown): unknown {
+    if (typeof val === 'string') {
+      return encodeURIComponent(val);
+    } else if (Array.isArray(val)) {
+      return val.map(encodeValue);
+    } else if (val !== null && typeof val === 'object') {
+      const encoded: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(val)) {
+        encoded[k] = encodeValue(v);
+      }
+      return encoded;
+    }
+    return val;
+  }
+
   const argsStr = stableStringify(args);
   const argsObj = JSON.parse(argsStr);
-
-  return JSON.stringify([method, argsObj]);
+  const encodedMethod = encodeURIComponent(method);
+  const encodedArgs = encodeValue(argsObj);
+  return JSON.stringify([encodedMethod, encodedArgs]);
 }
 
 /**

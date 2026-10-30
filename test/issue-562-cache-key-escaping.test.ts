@@ -41,8 +41,8 @@ describe('Issue #562: Cache key escaping and collision prevention', () => {
     expect(key1).not.toBe(key3);
     expect(key2).not.toBe(key3);
 
-    expect(key1).toBe('["get:will",{"id":"1"}]');
-    expect(key3).toBe('["get%3Awill",{"id":"1"}]');
+    expect(key1).toBe('["get%3Awill",{"id":"1"}]');
+    expect(key3).toBe('["get%253Awill",{"id":"1"}]');
   });
 
   it('preserves clean method names without modification', () => {
@@ -57,9 +57,10 @@ describe('Issue #562: Cache key escaping and collision prevention', () => {
     expect(createReadCacheKey('', {})).toBe('["",{}]');
 
     const unicodeKey = createReadCacheKey('café:über', { key: 'val' });
-    expect(JSON.parse(unicodeKey)).toEqual(['café:über', { key: 'val' }]);
+    // Values are URL-encoded in the key
+    expect(JSON.parse(unicodeKey)).toEqual(['caf%C3%A9%3A%C3%BCber', { key: 'val' }]);
 
     const emojiKey = createReadCacheKey('🔑:🔒', { active: true });
-    expect(JSON.parse(emojiKey)).toEqual(['🔑:🔒', { active: true }]);
+    expect(JSON.parse(emojiKey)).toEqual(['%F0%9F%94%91%3A%F0%9F%94%92', { active: true }]);
   });
 });

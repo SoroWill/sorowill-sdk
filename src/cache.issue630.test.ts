@@ -57,8 +57,8 @@ describe('#630 createReadCacheKey — special character handling', () => {
 
   it('encodes method names with special characters', () => {
     const key = createReadCacheKey('method:with:colons', { a: 1 });
-    // encodeURIComponent turns colons to %3A
-    expect(key.startsWith('method%3Awith%3Acolons:')).toBe(true);
+    // encodeURIComponent turns colons to %3A, JSON array format: ["encoded_method",...]
+    expect(key.startsWith('["method%3Awith%3Acolons"')).toBe(true);
   });
 
   it('encodes percent signs in parameter values to prevent double-decode collisions', () => {

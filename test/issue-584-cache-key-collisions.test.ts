@@ -35,6 +35,11 @@ describe('Issue #584: createReadCacheKey escapes method names and arguments', ()
 
   it('round-trips the method name and arguments unambiguously', () => {
     const key = createReadCacheKey('weird::method:"name"', { owner: 'G::A' });
-    expect(JSON.parse(key)).toEqual(['weird::method:"name"', { owner: 'G::A' }]);
+    // Values are URL-encoded in the cache key
+    const parsed = JSON.parse(key);
+    expect(parsed).toEqual(['weird%3A%3Amethod%3A%22name%22', { owner: 'G%3A%3AA' }]);
+    // Can decode back to originals
+    expect(decodeURIComponent(parsed[0])).toBe('weird::method:"name"');
+    expect(decodeURIComponent(parsed[1].owner)).toBe('G::A');
   });
 });
