@@ -1328,13 +1328,20 @@ export class ReadOnlyModeError extends SoroWillError {
   }
 }
 
-export class WalletSessionExpiredError extends SoroWillError {
-  constructor(options?: ErrorOptions) {
-    super(
-      'Wallet session has expired or is no longer valid',
-      options,
-    );
+export class WalletSessionError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, cause ? { cause } : undefined);
+    this.name = 'WalletSessionError';
+  }
+}
+
+export class WalletSessionExpiredError extends WalletSessionError {
+  readonly expiresAt?: number;
+
+  constructor(expiresAt?: number, options?: ErrorOptions) {
+    super('Wallet session has expired or is no longer valid', options?.cause);
     this.name = 'WalletSessionExpiredError';
+    this.expiresAt = expiresAt;
   }
 }
 

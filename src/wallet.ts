@@ -7,17 +7,11 @@ import {
   SignTransactionTimeoutError,
   SoroWillError,
   WalletNetworkMismatchError,
+  WalletSessionError,
   WalletSessionExpiredError,
 } from './errors';
 
-export { WalletSessionExpiredError };
-
-export class WalletSessionError extends Error {
-  constructor(message: string, cause?: unknown) {
-    super(message, cause ? { cause } : undefined);
-    this.name = 'WalletSessionError';
-  }
-}
+export { WalletSessionError, WalletSessionExpiredError };
 
 /**
  * Union of the typed errors a {@link WalletAdapter} implementation — or the
@@ -1156,9 +1150,41 @@ export async function connectWallet(): Promise<WalletConnection> {
   return defaultFreighterWalletAdapter.connect();
 }
 
-export async function assertWalletSessionActive(adapter: WalletAdapter): Promise<void> {
-  const isConnected = await adapter.isConnected();
-  if (!isConnected) {
-    throw new WalletSessionError('Wallet session is not active. Please connect your wallet first.');
+export async function assertWalletSessionActive(
+  adapter: WalletAdapter,
+  now: number = Date.now(),
+): Promise<void> {
+  if (!adapter.getSession) {
+    return;
+  }
+
+  let session: WalletSession | undefined;
+  try {
+    session = await adapter.getSession();
+  } catch {
+    return;
+  }
+
+  if (!session || !session.expiresAt) {
+    return;
+  }
+
+  if (session.expiresAt > now) {
+    return;
+  }
+
+  if (!adapter.refreshSession) {
+    throw new WalletSessionExpiredError(session.expiresAt);
+  }
+
+  let refreshed: WalletSession;
+  try {
+    refreshed = await adapter.refreshSession();
+  } catch (err) {
+    throw new WalletSessionExpiredError(session.expiresAt, { cause: err });
+  }
+
+  if (!refreshed || !refreshed.expiresAt || refreshed.expiresAt <= now) {
+    throw new WalletSessionExpiredError(refreshed?.expiresAt);
   }
 }
