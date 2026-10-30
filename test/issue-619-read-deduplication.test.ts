@@ -34,7 +34,7 @@ function makeClient(options: { deduplicateReads?: boolean; fail?: boolean } = {}
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const lastArgs: { willId?: bigint } = {};
+  const lastArgs: { willId: bigint | undefined } = { willId: undefined };
 
   const simulateTransaction = vi.fn(async () => {
     await gate;

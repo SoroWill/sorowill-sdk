@@ -35,7 +35,7 @@ describe('Batch-208: Queue ordering, deprecation, hooks, backpressure', () => {
     });
 
     it('processes requests sequentially', async () => {
-      const order: number[] = [];
+      const order: (string | number)[] = [];
 
       const promises = [1, 2, 3].map((i) =>
         queue.enqueue(async () => {
@@ -148,19 +148,19 @@ describe('Batch-208: Queue ordering, deprecation, hooks, backpressure', () => {
       manager.registerHook({
         name: 'pre',
         order: HookExecutionOrder.PreOperation,
-        fn: () => order.push('pre'),
+        fn: () => { order.push('pre'); },
       });
 
       manager.registerHook({
         name: 'post',
         order: HookExecutionOrder.PostOperation,
-        fn: () => order.push('post'),
+        fn: () => { order.push('post'); },
       });
 
       manager.registerHook({
         name: 'success',
         order: HookExecutionOrder.OnSuccess,
-        fn: () => order.push('success'),
+        fn: () => { order.push('success'); },
       });
 
       await manager.executeInOrder();
@@ -197,13 +197,13 @@ describe('Batch-208: Queue ordering, deprecation, hooks, backpressure', () => {
       manager.registerHook({
         name: 'first',
         order: HookExecutionOrder.PreOperation,
-        fn: () => order.push('first'),
+        fn: () => { order.push('first'); },
       });
 
       manager.registerHook({
         name: 'second',
         order: HookExecutionOrder.PreOperation,
-        fn: () => order.push('second'),
+        fn: () => { order.push('second'); },
       });
 
       await manager.executeInOrder();
@@ -225,19 +225,19 @@ describe('Batch-208: Queue ordering, deprecation, hooks, backpressure', () => {
 
       const preHooks = manager.getHooksForOrder(HookExecutionOrder.PreOperation);
       expect(preHooks.length).toBe(2);
-      expect(preHooks[0].name).toBe('pre1');
-      expect(preHooks[1].name).toBe('pre2');
+      expect(preHooks[0]!.name).toBe('pre1');
+      expect(preHooks[1]!.name).toBe('pre2');
     });
   });
 
   describe('#646: Deprecation warnings', () => {
     it('warns on deprecated versions', () => {
-      const consoleSpy = { warn: (msg: string) => msg };
+      const _consoleSpy = { warn: (msg: string) => msg };
       expect(() => checkAndWarnVersion('2.0.0')).not.toThrow();
     });
 
     it('errors on EOL versions', () => {
-      const consoleErrorSpy = { error: (msg: string) => msg };
+      const _consoleErrorSpy = { error: (msg: string) => msg };
       expect(() => checkAndWarnVersion('1.0.0')).not.toThrow();
     });
 

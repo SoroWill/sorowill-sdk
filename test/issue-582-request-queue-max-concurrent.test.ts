@@ -54,7 +54,7 @@ describe('RequestQueue — maxConcurrent validation (#582)', () => {
 
   it('uses the default maxConcurrent when omitted or undefined', async () => {
     expect(() => new RequestQueue()).not.toThrow();
-    const queue = new RequestQueue({ maxConcurrent: undefined });
+    const queue = new RequestQueue({});
     await expect(queue.enqueue(async () => 'ok')).resolves.toBe('ok');
   });
 

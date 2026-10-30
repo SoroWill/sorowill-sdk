@@ -66,8 +66,8 @@ describe('Issue #575: batch read operations', () => {
     expect(wills.map((w) => w.id)).toEqual(['1', '2', '3']);
     expect(simulateTransaction).toHaveBeenCalledTimes(1);
     expect(calls).toHaveLength(1);
-    expect(calls[0].method).toBe('get_wills');
-    expect(calls[0].args.will_ids).toEqual([1n, 2n, 3n]);
+    expect(calls[0]!.method).toBe('get_wills');
+    expect(calls[0]!.args.will_ids).toEqual([1n, 2n, 3n]);
   });
 
   it('is more efficient than calling getWill per id', async () => {
@@ -89,7 +89,7 @@ describe('Issue #575: batch read operations', () => {
     const wills = await client.getWills(['3', '1', '3']);
 
     expect(wills.map((w) => w.id)).toEqual(['3', '1', '3']);
-    expect(calls[0].args.will_ids).toEqual([3n, 1n]);
+    expect(calls[0]!.args.will_ids).toEqual([3n, 1n]);
     expect(wills[0]).not.toBe(wills[2]);
   });
 

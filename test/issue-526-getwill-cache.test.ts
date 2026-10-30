@@ -121,7 +121,7 @@ describe('SoroWillClient.getWill caching (#526)', () => {
 
     const first = await client.getWill('1');
     const originalBalance = first.balance;
-    first.balance = '999999999';
+    (first as any).balance = '999999999';
 
     const second = await client.getWill('1');
     expect(second.balance).toBe(originalBalance);

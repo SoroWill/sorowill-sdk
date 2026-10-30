@@ -49,7 +49,7 @@ describe('SoroWillClient cache invalidation on network change (#603)', () => {
     };
     return {
       wallet,
-      emit: (network) => registered?.(network),
+      emit: (network: { network: string; networkPassphrase: string }) => registered?.(network),
       unsubscribe,
     };
   }

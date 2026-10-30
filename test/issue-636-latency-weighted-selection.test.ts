@@ -19,12 +19,12 @@ describe('Issue #636 — latency history tracking and weighted endpoint selectio
   const URL_B = 'https://rpc-b.example.com';
   const URL_C = 'https://rpc-c.example.com';
 
-  let mockServerA: ReturnType<typeof vi.fn>;
-  let mockServerB: ReturnType<typeof vi.fn>;
+  let _mockServerA: ReturnType<typeof vi.fn>;
+  let _mockServerB: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    mockServerA = vi.fn();
-    mockServerB = vi.fn();
+    _mockServerA = vi.fn();
+    _mockServerB = vi.fn();
   });
 
   afterEach(() => {
@@ -99,7 +99,7 @@ describe('Issue #636 — latency history tracking and weighted endpoint selectio
 
     // Manually inject test latencies into the history
     const testLatencies = [100, 200, 300];
-    const history = pool['latencyHistory'][0]; // Access private property for testing
+    const history = pool['latencyHistory'][0]!; // Access private property for testing
     for (const latency of testLatencies) {
       history.push(latency);
     }
@@ -121,7 +121,7 @@ describe('Issue #636 — latency history tracking and weighted endpoint selectio
       prepareTransaction: vi.fn(),
       sendTransaction: vi.fn(),
     };
-    const serverB = {
+    const _serverB = {
       pollTransaction: vi.fn().mockImplementation(
         () => Promise.resolve({ status: 'SUCCESS' }),
       ),
