@@ -55,6 +55,9 @@ describe('ReadCache — __type validation on deserialization (#581)', () => {
     await writer.ready();
     writer.set('k', { amount: 42n, at: new Date('2026-02-03T04:05:06.000Z') });
 
+    // Yield to allow the writer's async persistence write to complete
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
     const reader = new ReadCache({ persistence });
     await reader.ready();
     const value = reader.get<{ amount: bigint; at: Date }>('k');
