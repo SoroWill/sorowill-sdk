@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { deserializeCacheValue } from '../src/cache';
+import { deserializeCacheValue, CacheDeserializationError } from '../src/cache';
 
 describe('#522 deserializeCacheValue type validation', () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -28,12 +28,10 @@ describe('#522 deserializeCacheValue type validation', () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
-  it('logs a warning for an unknown __type and returns the raw object', () => {
+  it('throws for an unknown __type', () => {
     const json = JSON.stringify({ __type: 'unknown_type', value: 'some-value' });
-    const result = deserializeCacheValue(json);
-    expect(result).toEqual({ __type: 'unknown_type', value: 'some-value' });
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0]![0]).toContain('unknown_type');
+    expect(() => deserializeCacheValue(json)).toThrow(CacheDeserializationError);
+    expect(() => deserializeCacheValue(json)).toThrow(/unknown_type/);
   });
 
   it('logs a warning for a malformed __type object missing value', () => {
@@ -50,16 +48,12 @@ describe('#522 deserializeCacheValue type validation', () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
-  it('handles nested objects with unknown __type gracefully', () => {
+  it('throws for nested objects with unknown __type', () => {
     const json = JSON.stringify({
       outer: { __type: 'bogus', value: 'x' },
       inner: { __type: 'bigint', value: '42' },
     });
-    const result = deserializeCacheValue(json);
-    expect(result).toEqual({
-      outer: { __type: 'bogus', value: 'x' },
-      inner: 42n,
-    });
-    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(() => deserializeCacheValue(json)).toThrow(CacheDeserializationError);
+    expect(() => deserializeCacheValue(json)).toThrow(/bogus/);
   });
 });
