@@ -1424,6 +1424,7 @@ export class SoroWillClient {
     // #537: fail fast when the check-in deadline would outlive the will
     // entry's storage TTL (archived before it can be triggered).
     validateCheckinPeriodDays(params.checkinPeriodDays);
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const owner = await this.getWalletPublicKey();
     const seenGuardians = new Set<string>();
     for (const guardian of params.guardians) {
@@ -3990,7 +3991,9 @@ export class SoroWillClient {
    * await client.assertWalletNetwork({ networkPassphrase: 'Test SDF Network ; September 2015' });
    * ```
    */
-  async assertWalletNetwork(network: { networkPassphrase: string }): Promise<void> {
+  async assertWalletNetwork(network?: { networkPassphrase: string }): Promise<void> {
+    const targetNetwork = network?.networkPassphrase ?? this.networkPassphrase;
+
     if (!this.wallet.getNetwork) {
       if (this.requireWalletNetwork) {
         throw new SoroWillError(
@@ -4007,8 +4010,8 @@ export class SoroWillClient {
       throw new SoroWillError('Failed to read the wallet network; refusing to sign', { cause: error });
     }
     const actual = details?.networkPassphrase ?? '';
-    if (actual !== network.networkPassphrase) {
-      throw new WalletNetworkMismatchError(network.networkPassphrase, actual);
+    if (actual !== targetNetwork) {
+      throw new WalletNetworkMismatchError(targetNetwork, actual);
     }
   }
 
