@@ -7,7 +7,7 @@
  */
 export class OrderedRequestQueue<T> {
   private queue: Array<{ id: string; fn: () => Promise<T>; resolve: (v: T) => void; reject: (e: unknown) => void }> = [];
-  private processing = false;
+  private inflight = 0;
   private maxQueueSize: number;
   private backpressureThreshold: number;
 
@@ -21,8 +21,9 @@ export class OrderedRequestQueue<T> {
    * Rejects with error if queue is full (backpressure)
    */
   async enqueue(fn: () => Promise<T>): Promise<T> {
-    if (this.queue.length >= this.maxQueueSize) {
-      throw new Error(`Queue full: ${this.queue.length}/${this.maxQueueSize}. Apply backpressure.`);
+    const pending = this.queue.length + this.inflight;
+    if (pending >= this.maxQueueSize) {
+      throw new Error(`Queue full: ${pending}/${this.maxQueueSize}. Apply backpressure.`);
     }
 
     return new Promise<T>((resolve, reject) => {
@@ -36,14 +37,15 @@ export class OrderedRequestQueue<T> {
    * Check if backpressure should be applied
    */
   isBackpressureActive(): boolean {
-    return this.queue.length >= this.backpressureThreshold;
+    const pending = this.queue.length + this.inflight;
+    return pending >= this.backpressureThreshold;
   }
 
   /**
    * Get current queue size
    */
   getQueueSize(): number {
-    return this.queue.length;
+    return this.queue.length + this.inflight;
   }
 
   /**
@@ -59,23 +61,21 @@ export class OrderedRequestQueue<T> {
    * Process queue in FIFO order
    */
   private async processQueue(): Promise<void> {
-    if (this.processing || this.queue.length === 0) {
+    if (this.inflight > 0 || this.queue.length === 0) {
       return;
     }
 
-    this.processing = true;
-    try {
-      while (this.queue.length > 0) {
-        const { fn, resolve, reject } = this.queue.shift()!;
-        try {
-          const result = await fn();
-          resolve(result);
-        } catch (err) {
-          reject(err);
-        }
+    while (this.queue.length > 0) {
+      const { fn, resolve, reject } = this.queue.shift()!;
+      this.inflight++;
+      try {
+        const result = await fn();
+        resolve(result);
+      } catch (err) {
+        reject(err);
+      } finally {
+        this.inflight--;
       }
-    } finally {
-      this.processing = false;
     }
   }
 }
