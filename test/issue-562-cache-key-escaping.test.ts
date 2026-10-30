@@ -32,8 +32,7 @@ describe('Issue #562: Cache key escaping and collision prevention', () => {
   });
 
   it('prevents collisions between different method/argument combinations', () => {
-    // Without escaping, method 'get:will' with args {} and method 'get' with args containing 'will'
-    // or method containing colons could collide.
+    // JSON array format naturally prevents collisions through proper quoting
     const key1 = createReadCacheKey('get:will', { id: '1' });
     const key2 = createReadCacheKey('get', { will: { id: '1' } });
     const key3 = createReadCacheKey('get%3Awill', { id: '1' });
@@ -42,25 +41,25 @@ describe('Issue #562: Cache key escaping and collision prevention', () => {
     expect(key1).not.toBe(key3);
     expect(key2).not.toBe(key3);
 
-    expect(key1).toBe('get%3Awill:{"id":"1"}');
-    expect(key3).toBe('get%253Awill:{"id":"1"}');
+    expect(key1).toBe('["get:will",{"id":"1"}]');
+    expect(key3).toBe('["get%3Awill",{"id":"1"}]');
   });
 
   it('preserves clean method names without modification', () => {
-    expect(createReadCacheKey('get_will', { willId: '10' })).toBe('get_will:{"willId":"10"}');
+    expect(createReadCacheKey('get_will', { willId: '10' })).toBe('["get_will",{"willId":"10"}]');
     expect(createReadCacheKey('get_wills_by_owner', { owner: 'G123' })).toBe(
-      'get_wills_by_owner:{"owner":"G123"}',
+      '["get_wills_by_owner",{"owner":"G123"}]',
     );
   });
 
   it('handles edge cases: empty strings, unicode, emojis, control characters', () => {
     expect(escapeKeyComponent('')).toBe('');
-    expect(createReadCacheKey('', {})).toBe(':{}');
+    expect(createReadCacheKey('', {})).toBe('["",{}]');
 
     const unicodeKey = createReadCacheKey('café:über', { key: 'val' });
-    expect(unicodeKey).toContain('caf%C3%A9%3A%C3%BCber');
+    expect(JSON.parse(unicodeKey)).toEqual(['café:über', { key: 'val' }]);
 
     const emojiKey = createReadCacheKey('🔑:🔒', { active: true });
-    expect(emojiKey).toContain('%F0%9F%94%91%3A%F0%9F%94%92');
+    expect(JSON.parse(emojiKey)).toEqual(['🔑:🔒', { active: true }]);
   });
 });
