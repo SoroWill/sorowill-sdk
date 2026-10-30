@@ -52,14 +52,14 @@ function makeRpcServer(will: Will) {
 
 function makeWallet(publicKey = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF') {
   return {
-    isConnected: true,
+    isConnected: vi.fn().mockResolvedValue(true),
     getPublicKey: vi.fn().mockResolvedValue(publicKey),
     signTransaction: vi.fn().mockResolvedValue({ signedTxXdr: '' }),
     getNetwork: vi.fn().mockResolvedValue({ networkPassphrase: 'Test SDF Network ; September 2015' }),
     connect: vi.fn(),
     reconnect: vi.fn(),
     disconnect: vi.fn(),
-  };
+  } as never;
 }
 
 // ---------------------------------------------------------------------------
