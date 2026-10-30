@@ -121,10 +121,10 @@ describe('Batch-203: Compound event filters (#627)', () => {
 
   describe('matchesEventFilter - simple filters', () => {
     it('matches events by type', () => {
-      const filter: EventFilter = { eventType: 'willCreated' };
+      const filter: EventFilter = { eventType: 'contract' };
       expect(matchesEventFilter(exampleEvent, filter)).toBe(true);
 
-      const nomatchFilter: EventFilter = { eventType: 'willClaimed' };
+      const nomatchFilter: EventFilter = { eventType: 'system' };
       expect(matchesEventFilter(exampleEvent, nomatchFilter)).toBe(false);
     });
 
@@ -157,7 +157,7 @@ describe('Batch-203: Compound event filters (#627)', () => {
     it('matches when all AND conditions match', () => {
       const filter: EventFilter = {
         AND: [
-          { eventType: 'willCreated' },
+          { eventType: 'contract' },
           { willId: 'will-123' },
           { hasPayload: true },
         ],
@@ -168,7 +168,7 @@ describe('Batch-203: Compound event filters (#627)', () => {
     it('rejects when any AND condition fails', () => {
       const filter: EventFilter = {
         AND: [
-          { eventType: 'willCreated' },
+          { eventType: 'contract' },
           { willId: 'will-999' }, // Doesn't match
           { hasPayload: true },
         ],
@@ -186,9 +186,9 @@ describe('Batch-203: Compound event filters (#627)', () => {
     it('matches when any OR condition matches', () => {
       const filter: EventFilter = {
         OR: [
-          { eventType: 'willClaimed' }, // Doesn't match
+          { eventType: 'system' }, // Doesn't match
           { willId: 'will-123' }, // Matches
-          { eventType: 'willExecuted' }, // Doesn't match
+          { eventType: 'diagnostic' }, // Doesn't match
         ],
       };
       expect(matchesEventFilter(exampleEvent, filter)).toBe(true);
@@ -197,8 +197,8 @@ describe('Batch-203: Compound event filters (#627)', () => {
     it('rejects when no OR conditions match', () => {
       const filter: EventFilter = {
         OR: [
-          { eventType: 'willClaimed' },
-          { eventType: 'willExecuted' },
+          { eventType: 'system' },
+          { eventType: 'diagnostic' },
           { willId: 'will-999' },
         ],
       };
@@ -218,8 +218,8 @@ describe('Batch-203: Compound event filters (#627)', () => {
         AND: [
           {
             OR: [
-              { eventType: 'willCreated' },
-              { eventType: 'willUpdated' },
+              { eventType: 'contract' },
+              { eventType: 'contract' },
             ],
           },
           { willId: 'will-123' },
@@ -242,8 +242,8 @@ describe('Batch-203: Compound event filters (#627)', () => {
             AND: [
               {
                 OR: [
-                  { eventType: 'willCreated' },
-                  { eventType: 'willUpdated' },
+                  { eventType: 'contract' },
+                  { eventType: 'contract' },
                 ],
               },
               { hasPayload: true },

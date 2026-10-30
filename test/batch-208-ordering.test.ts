@@ -232,12 +232,10 @@ describe('Batch-208: Queue ordering, deprecation, hooks, backpressure', () => {
 
   describe('#646: Deprecation warnings', () => {
     it('warns on deprecated versions', () => {
-      const _consoleSpy = { warn: (msg: string) => msg };
       expect(() => checkAndWarnVersion('2.0.0')).not.toThrow();
     });
 
     it('errors on EOL versions', () => {
-      const _consoleErrorSpy = { error: (msg: string) => msg };
       expect(() => checkAndWarnVersion('1.0.0')).not.toThrow();
     });
 

@@ -19,12 +19,8 @@ describe('Issue #636 — latency history tracking and weighted endpoint selectio
   const URL_B = 'https://rpc-b.example.com';
   const URL_C = 'https://rpc-c.example.com';
 
-  let _mockServerA: ReturnType<typeof vi.fn>;
-  let _mockServerB: ReturnType<typeof vi.fn>;
-
   beforeEach(() => {
-    _mockServerA = vi.fn();
-    _mockServerB = vi.fn();
+    // (unused mock servers kept for future test expansion)
   });
 
   afterEach(() => {
@@ -114,16 +110,6 @@ describe('Issue #636 — latency history tracking and weighted endpoint selectio
     const serverA = {
       pollTransaction: vi.fn().mockImplementation(
         () => new Promise((resolve) => setTimeout(() => resolve({ status: 'SUCCESS' }), 50)),
-      ),
-      getContractWasmByContractId: vi.fn(),
-      simulateTransaction: vi.fn(),
-      getAccount: vi.fn(),
-      prepareTransaction: vi.fn(),
-      sendTransaction: vi.fn(),
-    };
-    const _serverB = {
-      pollTransaction: vi.fn().mockImplementation(
-        () => Promise.resolve({ status: 'SUCCESS' }),
       ),
       getContractWasmByContractId: vi.fn(),
       simulateTransaction: vi.fn(),
