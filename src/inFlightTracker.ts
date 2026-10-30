@@ -365,14 +365,16 @@ export class InFlightTracker {
     this.walletCounts.clear();
   }
 
-  abort(willId: string | bigint, method: string, clientId?: string): void {
+  abort(willId: string | bigint, method: string, clientId?: string): boolean {
     const key = this.getKey(willId, method, clientId);
     const op = this.inFlight.get(key);
     if (op) {
       op.controller.abort();
       this.releaseWallet(op);
       this.inFlight.delete(key);
+      return true;
     }
+    return false;
   }
 
   /**

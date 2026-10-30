@@ -132,7 +132,7 @@ describe('Issue #211: EventSubscriptionOptions.pageSize ignored by WebSocket tra
   it('should show that WebSocket subscribe message does not contain pagination field', async () => {
     const subscriptionPromise = client.subscribeToEvents(
       () => {}, // listener
-      { pageSize: 100, cursor: 'test_cursor_123', transport: 'websocket' },
+      { pageSize: 100, cursor: '0004294967296-0000000001', transport: 'websocket' },
     );
 
     if (mockWebSocket.onopen) {
@@ -149,7 +149,7 @@ describe('Issue #211: EventSubscriptionOptions.pageSize ignored by WebSocket tra
     const parsed = JSON.parse(sentMessage);
 
     expect(parsed.pageSize).toBeUndefined();
-    expect(parsed.cursor).toBe('test_cursor_123');
+    expect(parsed.cursor).toBe('0004294967296-0000000001');
     expect(parsed.contractId).toBe('CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR');
   });
 
@@ -256,7 +256,7 @@ describe('Issue #211: EventSubscriptionOptions.pageSize ignored by WebSocket tra
       () => {}, // listener
       {
         pageSize: 200,
-        cursor: 'explicit_cursor_value',
+        cursor: '0004294967296-0000000002',
         transport: 'websocket',
       },
     );

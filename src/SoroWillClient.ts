@@ -3049,6 +3049,10 @@ export class SoroWillClient {
    * client.destroy();
    * ```
    */
+  cancelOperation(willId: string | bigint, method: string): boolean {
+    return this.inFlightTracker.abort(willId, method);
+  }
+
   destroy(): void {
     if (this.eventSubscription) {
       unsubscribeFromWillEvents(this.eventSubscription);
