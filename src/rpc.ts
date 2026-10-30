@@ -301,6 +301,8 @@ export class RpcEndpointPool {
     timeoutMs: number = DEFAULT_RPC_TIMEOUT_MS,
     timeoutMaxAttempts: number = DEFAULT_RPC_TIMEOUT_MAX_ATTEMPTS,
     timeoutRetryBaseDelayMs: number = DEFAULT_RPC_TIMEOUT_RETRY_BASE_DELAY_MS,
+    endpointBackoffBaseMs: number = DEFAULT_RPC_ENDPOINT_BACKOFF_BASE_MS,
+    endpointBackoffMaxMs: number = DEFAULT_RPC_ENDPOINT_BACKOFF_MAX_MS,
     circuitBreaker?: CircuitBreakerOptions,
   ) {
     const normalizedRpcUrls = rpcUrls
@@ -327,8 +329,8 @@ export class RpcEndpointPool {
     this.timeoutRetryBaseDelayMs = timeoutRetryBaseDelayMs;
     this.circuitBreakerThreshold = circuitBreaker?.threshold ?? DEFAULT_CIRCUIT_BREAKER_THRESHOLD;
     this.circuitBreakerCooldownMs = circuitBreaker?.cooldownMs ?? DEFAULT_CIRCUIT_BREAKER_COOLDOWN_MS;
-    this.endpointBackoffBaseMs = DEFAULT_RPC_ENDPOINT_BACKOFF_BASE_MS;
-    this.endpointBackoffMaxMs = DEFAULT_RPC_ENDPOINT_BACKOFF_MAX_MS;
+    this.endpointBackoffBaseMs = endpointBackoffBaseMs;
+    this.endpointBackoffMaxMs = endpointBackoffMaxMs;
     this.circuitStates = uniqueRpcUrls.map(() => ({
       failureCount: 0,
       quarantinedAt: null,
