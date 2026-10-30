@@ -23,6 +23,9 @@ export class CacheDeserializationError extends Error {
   }
 }
 
+/** Default maximum number of entries to cache before LRU eviction kicks in. */
+export const DEFAULT_MAX_CACHE_ENTRIES = 1000;
+
 // Share the lock across caches using the same adapter. Serialize all mutations,
 // since adapters may store every key in one read-modify-write document.
 const persistenceLocks = new WeakMap<CachePersistenceAdapter, Promise<void>>();
@@ -240,7 +243,7 @@ export class ReadCache {
   private readonly ttlMs: number;
   private readonly now: () => number;
   private readonly persistence: CachePersistenceAdapter | undefined;
-  private readonly maxEntries: number | undefined;
+  private readonly maxEntries: number;
   private readonly onPersistenceFailure: ((key: string, error: unknown) => void) | undefined;
   private readonly rollbackOnPersistenceFailure: boolean;
   private readonly readyPromise: Promise<void>;
@@ -282,9 +285,20 @@ export class ReadCache {
     }
     this.ttlMs = Math.max(0, ttlMs);
 
+    // Validate and set maxEntries
+    if (options.maxEntries !== undefined) {
+      const isInfinity = options.maxEntries === Infinity;
+      const isValidInteger = Number.isInteger(options.maxEntries) && options.maxEntries >= 1;
+      if (typeof options.maxEntries !== 'number' || (!isInfinity && !isValidInteger)) {
+        throw new RangeError(
+          `maxEntries must be a positive integer or Infinity, received ${options.maxEntries}`,
+        );
+      }
+    }
+
     this.now = options.now ?? Date.now;
     this.persistence = options.persistence;
-    this.maxEntries = options.maxEntries;
+    this.maxEntries = options.maxEntries ?? DEFAULT_MAX_CACHE_ENTRIES;
     this.onPersistenceFailure = options.onPersistenceFailure;
     this.rollbackOnPersistenceFailure = options.rollbackOnPersistenceFailure ?? false;
     this.readyPromise = this.hydrate();
@@ -297,7 +311,7 @@ export class ReadCache {
 
   /** Configured maximum number of entries before LRU eviction kicks in. */
   get capacity(): number {
-    return this.maxEntries ?? Infinity;
+    return this.maxEntries;
   }
 
   async ready(): Promise<void> {
@@ -467,7 +481,8 @@ export class ReadCache {
   }
 
   private evictIfNeeded(): void {
-    if (this.maxEntries === undefined || this.entries.size <= this.maxEntries) {
+    // If max entries is infinite, don't evict
+    if (!Number.isFinite(this.maxEntries) || this.entries.size <= this.maxEntries) {
       return;
     }
 
