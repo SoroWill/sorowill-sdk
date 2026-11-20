@@ -1,11 +1,14 @@
 import {
   Account,
+  Address,
   BASE_FEE,
   Contract,
+  FeeBumpTransaction,
   Networks,
   StrKey,
   Transaction,
   TransactionBuilder,
+  nativeToScVal,
   rpc,
   xdr,
   contract as stellarContract,
@@ -22,6 +25,7 @@ import {
   type ReadCacheOptions,
 } from './cache';
 import {
+  EventDeduplicator,
   unsubscribeFromWillEvents,
   validateEventTypeFilter,
   type WillEventSource,
@@ -78,6 +82,7 @@ import {
   SoroWillInvalidAmountError,
   SoroWillRestoreRequiredError,
   TooManyGuardiansError,
+  TransactionNetworkMismatchError,
   UnsupportedBatchSizeError,
   WalletNetworkMismatchError,
   WillContractError,
@@ -96,6 +101,65 @@ import { DebugLogger, type DebugLoggerOptions } from './debugLogger';
 
 /** @internal Local alias for Soroban's `xdr.ScVal`; not part of the public API. */
 type ScVal = xdr.ScVal;
+
+/** Durability tier of a Soroban contract data ledger entry (#663). */
+export type ContractStorageDurability = 'persistent' | 'temporary';
+
+/**
+ * Builds the `xdr.LedgerKey` for a Soroban contract's instance storage entry (#663).
+ *
+ * @param contractId - StrKey contract address (`C...`).
+ * @throws {InvalidContractIdError} If `contractId` is not a valid Stellar contract ID.
+ */
+export function buildContractInstanceLedgerKey(contractId: string): xdr.LedgerKey {
+  if (typeof contractId !== 'string' || !StrKey.isValidContract(contractId)) {
+    throw new InvalidContractIdError(String(contractId));
+  }
+  return xdr.LedgerKey.contractData(
+    new xdr.LedgerKeyContractData({
+      contract: Address.fromString(contractId).toScAddress(),
+      key: xdr.ScVal.scvLedgerKeyContractInstance(),
+      durability: xdr.ContractDataDurability.persistent(),
+    }),
+  );
+}
+
+/**
+ * Builds an `xdr.LedgerKey` for a Soroban contract data storage entry (#663).
+ *
+ * @param contractId - StrKey contract address (`C...`).
+ * @param key - Storage key as an `xdr.ScVal` or a JS value convertible via `nativeToScVal`.
+ * @param durability - Storage durability tier (`'persistent'` or `'temporary'`). Defaults to `'persistent'`.
+ * @throws {InvalidContractIdError} If `contractId` is not a valid Stellar contract ID.
+ * @throws {SoroWillError} If `durability` is not `'persistent'` or `'temporary'`.
+ */
+export function buildContractDataLedgerKey(
+  contractId: string,
+  key: xdr.ScVal | unknown,
+  durability: ContractStorageDurability = 'persistent',
+): xdr.LedgerKey {
+  if (typeof contractId !== 'string' || !StrKey.isValidContract(contractId)) {
+    throw new InvalidContractIdError(String(contractId));
+  }
+  if (durability !== 'persistent' && durability !== 'temporary') {
+    throw new SoroWillError(
+      `Invalid contract storage durability: "${String(durability)}". Expected "persistent" or "temporary".`,
+    );
+  }
+  const scKey = key instanceof xdr.ScVal ? key : nativeToScVal(key);
+  const xdrDurability =
+    durability === 'temporary'
+      ? xdr.ContractDataDurability.temporary()
+      : xdr.ContractDataDurability.persistent();
+
+  return xdr.LedgerKey.contractData(
+    new xdr.LedgerKeyContractData({
+      contract: Address.fromString(contractId).toScAddress(),
+      key: scKey,
+      durability: xdrDurability,
+    }),
+  );
+}
 
 const { Spec } = stellarContract;
 
@@ -2810,6 +2874,20 @@ export class SoroWillClient {
       options = { ...options, eventTypes };
     }
 
+    if (options.deduplicate !== false) {
+      const userListener = listener;
+      const deduplicator = new EventDeduplicator(
+        options.deduplicationWindowSize !== undefined
+          ? { maxSize: options.deduplicationWindowSize }
+          : undefined,
+      );
+      listener = (event) => {
+        if (deduplicator.shouldDeliver(event)) {
+          userListener(event);
+        }
+      };
+    }
+
     const wantsWebSocket = options.transport !== 'polling';
     const canUseWebSocket = wantsWebSocket && !!this.webSocketFactory && !!this.eventStreamUrl;
 
@@ -3548,6 +3626,7 @@ export class SoroWillClient {
       for (const operation of operations) builder.addOperation(operation);
       options?.signal?.throwIfAborted();
       const builtTx = builder.setTimeout(this.transactionTimeoutSeconds).build();
+      this.assertTransactionNetwork(builtTx);
 
       options?.signal?.throwIfAborted();
       // prepareTransaction simulates and assembles Soroban data for the whole transaction.
@@ -3557,6 +3636,7 @@ export class SoroWillClient {
         options,
         `${label}:prepareTransaction`,
       );
+      this.assertTransactionNetwork(prepared);
       this.debugLogger.logSimulation(label, undefined, prepared.fee);
 
       // #573: Prevent duplicate signing of the same transaction. The
@@ -3648,12 +3728,14 @@ export class SoroWillClient {
           });
           for (const operation of operations) feeBumpBuilder.addOperation(operation);
           const feeBumpTx = feeBumpBuilder.setTimeout(this.transactionTimeoutSeconds).build();
+          this.assertTransactionNetwork(feeBumpTx);
 
           const feeBumpPrepared = await this.rpc(
             () => this.rpcPool.withFailover((server) => server.prepareTransaction(feeBumpTx)),
             options,
             `${label}:prepareTransaction`,
           );
+          this.assertTransactionNetwork(feeBumpPrepared);
 
           const feeBumpSignedResponse = await this.signWithWallet(feeBumpPrepared.toXDR());
           const feeBumpSignedXdr = normalizeSignatureResponse(feeBumpSignedResponse);
@@ -3729,6 +3811,8 @@ export class SoroWillClient {
    */
   private async signWithWallet(transactionXdr: string): Promise<string | SignatureResponse> {
     await assertWalletSessionActive(this.wallet);
+    const envelope = TransactionBuilder.fromXDR(transactionXdr, this.networkPassphrase);
+    this.assertTransactionNetwork(envelope);
     return this.wallet.signTransaction(transactionXdr, {
       networkPassphrase: this.networkPassphrase,
     });
@@ -3825,6 +3909,7 @@ export class SoroWillClient {
     }
     await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const signedTx = TransactionBuilder.fromXDR(signedTxXdr, this.networkPassphrase);
+    this.assertTransactionNetwork(signedTx);
     if (!(signedTx instanceof Transaction)) {
       throw new SoroWillError(
         'Expected a plain Transaction envelope after signing, but received FeeBumpTransaction',
@@ -4095,6 +4180,71 @@ export class SoroWillClient {
     return this.readCache.setNetwork(newNetworkPassphrase);
   }
 
+  /**
+   * Validates that a built or prepared transaction envelope targets this
+   * client's configured network passphrase before signing (#659, #664).
+   *
+   * @throws {SoroWillError} If the client's configured network passphrase is empty.
+   * @throws {TransactionNetworkMismatchError} If the transaction envelope's network
+   *   passphrase is missing or does not match the client's network passphrase.
+   */
+  assertTransactionNetwork(transaction: Transaction | FeeBumpTransaction): void {
+    if (!this.networkPassphrase || !this.networkPassphrase.trim()) {
+      throw new SoroWillError(
+        'Client networkPassphrase must be a non-empty string; refusing to sign.',
+      );
+    }
+    const txNetwork = transaction.networkPassphrase ?? '';
+    if (txNetwork !== this.networkPassphrase) {
+      throw new TransactionNetworkMismatchError(this.networkPassphrase, txNetwork);
+    }
+  }
+
+  /**
+   * Returns the `xdr.LedgerKey` for this client's contract instance storage
+   * entry, allowing advanced callers to query contract instance state directly
+   * via Soroban RPC `getLedgerEntries` (#663).
+   */
+  getContractInstanceLedgerKey(): xdr.LedgerKey {
+    return buildContractInstanceLedgerKey(this.contract.contractId());
+  }
+
+  /**
+   * Returns the base64-encoded XDR of this client's contract instance storage
+   * ledger entry key (#663).
+   */
+  getContractInstanceLedgerKeyXdr(): string {
+    return this.getContractInstanceLedgerKey().toXDR('base64');
+  }
+
+  /**
+   * Returns an `xdr.LedgerKey` for a contract data storage entry on this
+   * client's contract (#663).
+   *
+   * @param key - Storage key as an `xdr.ScVal` or a JS value convertible via `nativeToScVal`.
+   * @param durability - Storage durability tier (`'persistent'` or `'temporary'`). Defaults to `'persistent'`.
+   */
+  getContractDataLedgerKey(
+    key: xdr.ScVal | unknown,
+    durability: ContractStorageDurability = 'persistent',
+  ): xdr.LedgerKey {
+    return buildContractDataLedgerKey(this.contract.contractId(), key, durability);
+  }
+
+  /**
+   * Returns the base64-encoded XDR of a contract data storage ledger entry key
+   * on this client's contract (#663).
+   *
+   * @param key - Storage key as an `xdr.ScVal` or a JS value convertible via `nativeToScVal`.
+   * @param durability - Storage durability tier (`'persistent'` or `'temporary'`). Defaults to `'persistent'`.
+   */
+  getContractDataLedgerKeyXdr(
+    key: xdr.ScVal | unknown,
+    durability: ContractStorageDurability = 'persistent',
+  ): string {
+    return this.getContractDataLedgerKey(key, durability).toXDR('base64');
+  }
+
   // -----------------------------------------------------------------------
   // Private: RPC wrapper through queue
   // -----------------------------------------------------------------------
@@ -4188,7 +4338,9 @@ export class SoroWillClient {
       builder.addOperation(operation);
     }
 
-    return builder.setTimeout(this.transactionTimeoutSeconds).build();
+    const transaction = builder.setTimeout(this.transactionTimeoutSeconds).build();
+    this.assertTransactionNetwork(transaction);
+    return transaction;
   }
 
   private async prepareInvocation(

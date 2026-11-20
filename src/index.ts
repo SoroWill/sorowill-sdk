@@ -7,9 +7,16 @@
  * re-exported and may change in any release. Import raw Soroban types from
  * `@stellar/stellar-sdk` directly if you need them.
  */
-export { SoroWillClient, parseWillId, SoroWillInvalidIdError } from './SoroWillClient';
+export {
+  SoroWillClient,
+  parseWillId,
+  SoroWillInvalidIdError,
+  buildContractDataLedgerKey,
+  buildContractInstanceLedgerKey,
+} from './SoroWillClient';
 export { MAX_CHECKIN_PERIOD_DAYS } from './SoroWillClient';
 export type {
+  ContractStorageDurability,
   EventSubscription,
   EventSubscriptionOptions,
   EventSubscriptionTransport,
@@ -153,12 +160,16 @@ export {
 export type { CachePersistenceAdapter, PersistedCacheEntry, ReadCacheOptions } from './cache';
 
 export {
+  EventDeduplicator,
   addEventListener,
+  getEventDeduplicationKey,
   matchesEventFilter,
   unsubscribeFromWillEvents,
   validateEventTypeFilter,
 } from './events';
 export type {
+  DeduplicatableEvent,
+  EventDeduplicatorOptions,
   EventFilter,
   WillEvent,
   WillEventListener,
@@ -234,6 +245,7 @@ export {
   TooManyGuardiansError,
   TooManyIdsError,
   TooManyWillsError,
+  TransactionNetworkMismatchError,
   TransactionSubmissionError,
   WalletConnectChainIdMismatchError,
   WalletNetworkMismatchError,
