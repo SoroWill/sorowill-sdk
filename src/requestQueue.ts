@@ -61,14 +61,20 @@ export const MAX_BACKOFF_MS = 60_000;
 /**
  * Computes the exponential backoff delay for a retry: `2^attempt * baseDelayMs`,
  * capped at `maxBackoffMs`. `attempt` is zero-based (the first retry is attempt 0).
+ * When `jitter` is `true`, applies 50%–100% jitter to prevent retry storms.
  */
 export function computeBackoffDelay(
   attempt: number,
   baseDelayMs: number,
   maxBackoffMs: number = MAX_BACKOFF_MS,
+  jitter: boolean = false,
 ): number {
   const delay = 2 ** attempt * baseDelayMs;
-  return Number.isFinite(delay) ? Math.min(delay, maxBackoffMs) : maxBackoffMs;
+  const capped = Number.isFinite(delay) ? Math.min(delay, maxBackoffMs) : maxBackoffMs;
+  if (!jitter) {
+    return capped;
+  }
+  return Math.floor(capped * (0.5 + Math.random() * 0.5));
 }
 
 /**
