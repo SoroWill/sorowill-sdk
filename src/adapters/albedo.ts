@@ -153,5 +153,9 @@ export function createAlbedoAdapter(options: AlbedoAdapterOptions = {}): WalletA
     async getNetwork(): Promise<{ network: string; networkPassphrase: string }> {
       return { ...networkInfo };
     },
+
+    clearKeyCache(): void {
+      cachedPublicKey = undefined;
+    },
   };
 }
