@@ -54,6 +54,7 @@ import {
   normalizeSignatureResponse,
   type SignatureResponse,
   type WalletAdapter,
+  type WalletConnection,
 } from './wallet';
 import {
   AccountNotFundedError,
@@ -977,6 +978,7 @@ export class SoroWillClient {
   private readonly specOverride: ContractSpecLike | Promise<ContractSpecLike> | undefined;
   private readonly specJsonOverride: Uint8Array | undefined;
   private eventSubscription?: WillEventSubscription | undefined;
+  private readonly eventSource?: WillEventSource | undefined;
   private readonly eventRpcUrl: string;
   private readonly eventStreamUrl: string | undefined;
   private readonly defaultPollIntervalMs: number;
@@ -1036,6 +1038,7 @@ export class SoroWillClient {
    */
   private readonly signedTransactionHashes: Set<string>;
   private stopWatchingWalletNetwork?: (() => void) | undefined;
+  private lastKnownPublicKey?: string | undefined;
   private specVersion: ContractSpecVersion | null = null;
   private expectedContractVersion?: string | undefined;
   private warnedSpecVersions: Set<string> = new Set();
@@ -1163,6 +1166,7 @@ export class SoroWillClient {
       this.handleNetworkChange(networkPassphrase);
     });
 
+    this.eventSource = options.eventSource;
     if (this.readCache && options.eventSource) {
       // Subscribe and automatically clean up the listener if setup throws.
       // Without this guard, a thrown error during subscribe leaves an orphaned
@@ -2434,6 +2438,20 @@ export class SoroWillClient {
     if (operations.length > 1) {
       throw new UnsupportedBatchSizeError(operations.length);
     }
+    const singleOp = operations[0]!;
+    if (singleOp.when) {
+      const shouldRun = Boolean(await singleOp.when([]));
+      if (!shouldRun) {
+        return {
+          success: false,
+          txHash: '',
+          createdAt: 0,
+          results: [
+            { index: 0, method: singleOp.method, status: 'skipped', attempts: 0 },
+          ] as unknown as BatchOperationResults<TOperations>,
+        };
+      }
+    }
     await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const hookContexts = operations.map(({ method, args }) => ({
       before: {
@@ -2561,7 +2579,8 @@ export class SoroWillClient {
     const results: BatchOperationResult[] = [];
     let halted: Error | undefined;
 
-    for (const [index, { method, args }] of operations.entries()) {
+    for (const [index, op] of operations.entries()) {
+      const { method, args } = op;
       if (!halted && requestOptions.signal?.aborted) {
         halted = new SoroWillError('Batch aborted before this operation was submitted', {
           cause: requestOptions.signal.reason,
@@ -2570,6 +2589,27 @@ export class SoroWillClient {
       if (halted) {
         results.push({ index, method, status: 'skipped', error: halted, attempts: 0 });
         continue;
+      }
+
+      if (op.when) {
+        let shouldRun: boolean;
+        try {
+          shouldRun = Boolean(await op.when(results.slice()));
+        } catch (err) {
+          const condError = err instanceof Error ? err : new Error(String(err));
+          results.push({ index, method, status: 'failed', error: condError, attempts: 0 });
+          if (onFailure === 'stop') {
+            halted = new SoroWillError(
+              `Skipped because operation ${index} (${method}) condition failed: ${condError.message}`,
+              { cause: condError },
+            );
+          }
+          continue;
+        }
+        if (!shouldRun) {
+          results.push({ index, method, status: 'skipped', attempts: 0 });
+          continue;
+        }
       }
 
       let attempts = 0;
@@ -4088,7 +4128,60 @@ export class SoroWillClient {
     }
   }
 
+  /**
+   * Reconnects the underlying wallet adapter and automatically recovers
+   * client state (clearing stale caches, in-flight deduplication/tracking
+   * state, fee stats, and refreshing session/event subscriptions) so
+   * subsequent operations do not fail silently against stale state (#665).
+   *
+   * @throws {ReadOnlyModeError} When the client was constructed with `readOnly: true`.
+   * @throws {WalletSessionError} When the reconnected wallet has an invalid or expired session.
+   * @throws {Error} When the wallet adapter fails to reconnect.
+   */
+  async reconnect(): Promise<WalletConnection> {
+    if (this.readOnly) {
+      throw new ReadOnlyModeError('reconnect');
+    }
+    const connection = await this.wallet.reconnect();
+    await this.recoverStateAfterReconnect(connection);
+    return connection;
+  }
+
+  /**
+   * Resets transient client state after a wallet reconnection so subsequent
+   * reads and writes operate against fresh wallet/network/session state.
+   */
+  private async recoverStateAfterReconnect(connection?: WalletConnection): Promise<void> {
+    this.inFlightReads.clear();
+    this.inFlightTracker.clear();
+    this.feeStatsCache.clear();
+    this.lastFeeStatsCachedPassphrase = undefined;
+    this.signedTransactionHashes.clear();
+
+    if (connection?.publicKey) {
+      this.lastKnownPublicKey = connection.publicKey;
+    }
+
+    if (this.readCache) {
+      if (connection?.networkPassphrase) {
+        this.readCache.setNetwork(connection.networkPassphrase);
+      }
+      await this.readCache.invalidateAll();
+    }
+
+    await assertWalletSessionActive(this.wallet);
+
+    if (this.readCache && this.eventSource && !this.eventSubscription) {
+      this.eventSubscription = this.eventSource.subscribe((event) => {
+        void this.readCache?.invalidateByWillId(event.willId);
+      });
+    }
+  }
+
   handleNetworkChange(newNetworkPassphrase: string): boolean {
+    this.inFlightReads.clear();
+    this.feeStatsCache.clear();
+    this.lastFeeStatsCachedPassphrase = undefined;
     if (!this.readCache) {
       return false;
     }
@@ -4207,6 +4300,13 @@ export class SoroWillClient {
     if (!StrKey.isValidEd25519PublicKey(publicKey)) {
       throw new InvalidPublicKeyError('publicKey');
     }
+    if (this.lastKnownPublicKey !== undefined && this.lastKnownPublicKey !== publicKey) {
+      this.inFlightReads.clear();
+      this.feeStatsCache.clear();
+      this.lastFeeStatsCachedPassphrase = undefined;
+      void this.readCache?.invalidateAll();
+    }
+    this.lastKnownPublicKey = publicKey;
     return publicKey;
   }
 
