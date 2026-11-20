@@ -124,6 +124,11 @@ export abstract class InjectedWalletAdapter implements WalletAdapter {
     this.connection = null;
   }
 
+  /** Clears any cached connection/public key state so the next read re-fetches from the provider. */
+  clearKeyCache(): void {
+    this.connection = null;
+  }
+
   async isConnected(): Promise<boolean> {
     if (this.provider.isConnected) {
       return this.provider.isConnected();

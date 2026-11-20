@@ -666,6 +666,63 @@ export class RpcEndpointPool {
    * Resolving the server lazily through this accessor keeps fee queries
    * pinned to the live network context.
    */
+  /**
+   * Probes every configured endpoint's `getHealth()` method in parallel,
+   * updating latency history, failure counts, and backoff state. If the
+   * currently active endpoint is unhealthy and another endpoint is healthy,
+   * automatically fails over to the healthiest (lowest-latency) endpoint.
+   */
+  async checkEndpointsHealth(): Promise<Array<{ url: string; healthy: boolean; latencyMs?: number }>> {
+    const results = await Promise.all(
+      this.servers.map(async (server, index) => {
+        const url = this.rpcUrls[index]!;
+        if (typeof server.getHealth !== 'function') {
+          return { url, healthy: true };
+        }
+        const startTime = Date.now();
+        try {
+          const res = await withTimeout(server.getHealth(), this.timeoutMs);
+          const latencyMs = Date.now() - startTime;
+          const healthy = res?.status === 'healthy';
+          if (healthy) {
+            this.recordEndpointLatency(index, latencyMs);
+            this.resetEndpointFailure(index);
+            this.clearEndpointBackoff(index);
+          } else {
+            this.recordEndpointFailure(index);
+            this.recordEndpointBackoff(index);
+          }
+          return { url, healthy, latencyMs };
+        } catch {
+          this.recordEndpointFailure(index);
+          this.recordEndpointBackoff(index);
+          return { url, healthy: false };
+        }
+      }),
+    );
+
+    if (results[this.activeIndex] && !results[this.activeIndex]!.healthy) {
+      let bestHealthyIndex = -1;
+      let bestLatency = Infinity;
+      for (let i = 0; i < results.length; i += 1) {
+        const entry = results[i];
+        if (entry?.healthy) {
+          const latency = entry.latencyMs ?? Infinity;
+          if (bestHealthyIndex === -1 || latency < bestLatency) {
+            bestHealthyIndex = i;
+            bestLatency = latency;
+          }
+        }
+      }
+      if (bestHealthyIndex !== -1) {
+        this.activeIndex = bestHealthyIndex;
+        this.lastFailoverAt = Date.now();
+      }
+    }
+
+    return results;
+  }
+
   getActiveServer(): SoroWillRpcServer {
     this.maybeRepromotePrimaryEndpoint();
     const server = this.servers[this.activeIndex];

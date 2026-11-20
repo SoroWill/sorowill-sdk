@@ -587,6 +587,12 @@ export interface WalletAdapter {
    */
   onNetworkChange?(listener: WalletNetworkChangeListener): () => void;
   /**
+   * Clears any locally cached public key or session state held by the
+   * adapter, e.g. after a wallet network switch so the next call re-fetches
+   * the key from the active network.
+   */
+  clearKeyCache?(): void;
+  /**
    * Returns the current session token for this wallet, if the adapter issues
    * one. Optional — adapters that do not use session tokens may omit it.
    *
@@ -967,6 +973,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
           const previous = lastPassphrase;
           lastPassphrase = networkPassphrase;
           if (previous !== undefined && previous !== networkPassphrase) {
+            this.clearKeyCache();
             listener({ network, networkPassphrase });
           }
         });
@@ -993,6 +1000,11 @@ export class FreighterWalletAdapter implements WalletAdapter {
       throw new Error('No Freighter account is connected. Call connectWallet() first.');
     }
     return address;
+  }
+
+  /** Clears any cached session/key state so the next operation re-fetches from Freighter. */
+  clearKeyCache(): void {
+    delete this.session;
   }
 
   /** Returns the current session token, if one has been established. */
@@ -1078,6 +1090,12 @@ export class WalletConnectWalletAdapter implements WalletAdapter {
       ): Promise<string | SignatureResponse>;
       getNetwork?(): Promise<{ network: string; networkPassphrase: string }>;
       onNetworkChange?(listener: WalletNetworkChangeListener): () => void;
+  /**
+   * Clears any locally cached public key or session state held by the
+   * adapter, e.g. after a wallet network switch so the next call re-fetches
+   * the key from the active network.
+   */
+  clearKeyCache?(): void;
     },
   ) {
     if (connector.onNetworkChange) {
@@ -1131,6 +1149,7 @@ export const freighterAdapter: WalletAdapter = {
   signTransaction: (xdr: string, opts: SignTransactionOptions) => defaultFreighterWalletAdapter.signTransaction(xdr, opts),
   getNetwork: () => defaultFreighterWalletAdapter.getNetwork(),
   onNetworkChange: (listener: WalletNetworkChangeListener) => defaultFreighterWalletAdapter.onNetworkChange(listener),
+  clearKeyCache: () => defaultFreighterWalletAdapter.clearKeyCache(),
 };
 
 export function getDefaultWalletAdapter(): WalletAdapter {
