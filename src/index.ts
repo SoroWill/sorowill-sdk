@@ -328,3 +328,17 @@ export {
   resolveSoroWillConfig,
 } from './config';
 export type { SoroWillConfig, SoroWillConfigInput } from './config';
+
+export {
+  isBatchOperationResult,
+  isBatchResult,
+  isBeneficiaryRecord,
+  isCreateWillParams,
+  isPaginatedWillsResult,
+  isSoroWillEvent,
+  isTransaction,
+  isUpdateBeneficiariesParams,
+  isWill,
+  isWillStatus,
+} from './typeGuards';
+export type { RpcTransaction } from './typeGuards';

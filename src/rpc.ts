@@ -1,5 +1,6 @@
 import { rpc } from '@stellar/stellar-sdk';
 import type { SoroWillRpcServer } from './SoroWillClient';
+import { computeBackoffDelay } from './requestQueue';
 
 export const DEFAULT_RPC_TIMEOUT_MS = 30_000;
 export const DEFAULT_RPC_TIMEOUT_MAX_ATTEMPTS = 3;
@@ -524,7 +525,9 @@ export class RpcEndpointPool {
         if (!isRpcTimeoutError(error) || isLastAttempt) {
           throw error;
         }
-        await sleep(this.timeoutRetryBaseDelayMs * 2 ** attempt);
+        await sleep(
+          computeBackoffDelay(attempt, this.timeoutRetryBaseDelayMs, this.endpointBackoffMaxMs),
+        );
       }
     }
 
@@ -582,8 +585,9 @@ export class RpcEndpointPool {
   async withFailover<T>(operation: (server: SoroWillRpcServer, rpcUrl: string) => Promise<T>): Promise<T> {
     this.maybeRepromotePrimaryEndpoint();
     let lastError: unknown;
+    const maxAttempts = Math.max(this.servers.length, this.timeoutMaxAttempts);
 
-    for (let attempt = 0; attempt < this.servers.length; attempt += 1) {
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       // Route to the latency-weighted best available endpoint.
       const index = this.selectEndpointIndex();
       const rpcUrl = this.rpcUrls[index];
@@ -603,6 +607,21 @@ export class RpcEndpointPool {
         continue;
       }
 
+      // If every endpoint is under backoff (or only a single endpoint exists),
+      // wait out the exponential backoff window instead of hammering the endpoint.
+      if (this.isEndpointUnderBackoff(index)) {
+        const remainingMs = Math.max(0, (this.backoffUntil[index] ?? 0) - Date.now());
+        const delayMs =
+          remainingMs > 0
+            ? Math.min(remainingMs, this.endpointBackoffMaxMs)
+            : computeBackoffDelay(
+                Math.max(0, attempt - 1),
+                this.endpointBackoffBaseMs,
+                this.endpointBackoffMaxMs,
+              );
+        await sleep(delayMs);
+      }
+
       const startTime = Date.now();
       try {
         const result = await this.runWithTimeoutRetry(operation, server, rpcUrl);
@@ -616,7 +635,7 @@ export class RpcEndpointPool {
         lastError = error;
         this.recordEndpointFailure(index);
         this.recordEndpointBackoff(index);
-        if (!isRetryableRpcConnectionError(error) || attempt === this.servers.length - 1) {
+        if (!isRetryableRpcConnectionError(error) || attempt === maxAttempts - 1) {
           throw error;
         }
         // Only advance if no concurrent call has already failed over away from this endpoint.

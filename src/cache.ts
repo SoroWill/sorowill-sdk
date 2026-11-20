@@ -391,6 +391,19 @@ export class ReadCache {
     };
 
     this.touchedKeys.add(key);
+    // Clean up any stale willId -> key mappings if this key is being overwritten.
+    const previousEntry = this.entries.get(key);
+    if (previousEntry) {
+      for (const oldWillId of previousEntry.willIds) {
+        if (!entry.willIds.has(oldWillId)) {
+          const oldKeys = this.willIdToKeys.get(oldWillId);
+          oldKeys?.delete(key);
+          if (oldKeys?.size === 0) {
+            this.willIdToKeys.delete(oldWillId);
+          }
+        }
+      }
+    }
     // Index the key under each will ID so invalidation by will ID can find it.
     for (const willId of entry.willIds) {
       let keys = this.willIdToKeys.get(willId);
@@ -404,14 +417,21 @@ export class ReadCache {
     this.entries.delete(key);
     this.entries.set(key, entry);
     if (this.persistence) {
+      const persistedEntry: PersistedCacheEntry = {
+        key: entry.key,
+        value: serialized,
+        expiresAt: entry.expiresAt,
+        willIds: Array.from(entry.willIds),
+      };
       void withPersistenceLock(this.persistence, async () => {
         try {
-          await this.persistence!.write(this.toPersistedEntry(entry));
+          await this.persistence!.write(persistedEntry);
         } catch (err) {
           // Report persistence failure via callback if provided
           this.onPersistenceFailure?.(key, err);
-          // Optionally roll back the in-memory entry so memory and persistence stay in sync
-          if (this.rollbackOnPersistenceFailure) {
+          // Optionally roll back the in-memory entry only if it hasn't been
+          // superseded by a newer concurrent write.
+          if (this.rollbackOnPersistenceFailure && this.entries.get(key) === entry) {
             this.entries.delete(key);
             this.touchedKeys.delete(key);
           }
@@ -541,10 +561,14 @@ export class ReadCache {
   private invalidateExpired(key: string): void {
     this.touchedKeys.add(key);
     this.entries.delete(key);
-    void this.persistence?.delete(key).catch(() => {
-      // Silently ignore persistence failures to prevent unhandled rejections
-      // The entry is already gone in-memory and hydration skips expired entries
-    });
+    if (this.persistence) {
+      void withPersistenceLock(this.persistence, async () => {
+        await this.persistence!.delete(key).catch(() => {
+          // Silently ignore persistence failures to prevent unhandled rejections
+          // The entry is already gone in-memory and hydration skips expired entries
+        });
+      });
+    }
   }
 
   private async delete(key: string): Promise<void> {
@@ -695,9 +719,19 @@ export class MemoryCachePersistenceAdapter implements CachePersistenceAdapter {
  */
 export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdapter {
   private readonly namespace: string;
+  private lock: Promise<void> = Promise.resolve();
 
   constructor(namespace: string = 'sorowill-cache') {
     this.namespace = namespace;
+  }
+
+  private withLock<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.lock.then(operation);
+    this.lock = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   async readAll(): Promise<PersistedCacheEntry[]> {
@@ -710,36 +744,42 @@ export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdap
   }
 
   async write(entry: PersistedCacheEntry): Promise<void> {
-    try {
-      const entries = await this.readAll();
-      const index = entries.findIndex((e) => e.key === entry.key);
-      if (index >= 0) {
-        entries[index] = entry;
-      } else {
-        entries.push(entry);
+    return this.withLock(async () => {
+      try {
+        const entries = await this.readAll();
+        const index = entries.findIndex((e) => e.key === entry.key);
+        if (index >= 0) {
+          entries[index] = entry;
+        } else {
+          entries.push(entry);
+        }
+        localStorage.setItem(this.namespace, JSON.stringify(entries));
+      } catch {
+        // Silently fail if localStorage is unavailable or quota exceeded
       }
-      localStorage.setItem(this.namespace, JSON.stringify(entries));
-    } catch {
-      // Silently fail if localStorage is unavailable or quota exceeded
-    }
+    });
   }
 
   async delete(key: string): Promise<void> {
-    try {
-      const entries = await this.readAll();
-      const filtered = entries.filter((e) => e.key !== key);
-      localStorage.setItem(this.namespace, JSON.stringify(filtered));
-    } catch {
-      // Silently fail if localStorage is unavailable
-    }
+    return this.withLock(async () => {
+      try {
+        const entries = await this.readAll();
+        const filtered = entries.filter((e) => e.key !== key);
+        localStorage.setItem(this.namespace, JSON.stringify(filtered));
+      } catch {
+        // Silently fail if localStorage is unavailable
+      }
+    });
   }
 
   async clear(): Promise<void> {
-    try {
-      localStorage.removeItem(this.namespace);
-    } catch {
-      // Silently fail if localStorage is unavailable
-    }
+    return this.withLock(async () => {
+      try {
+        localStorage.removeItem(this.namespace);
+      } catch {
+        // Silently fail if localStorage is unavailable
+      }
+    });
   }
 }
 
