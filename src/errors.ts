@@ -559,6 +559,29 @@ export class WalletNetworkMismatchError extends SoroWillError {
   }
 }
 
+/**
+ * Raised when a built or prepared transaction envelope's network passphrase
+ * does not match the client's configured network passphrase before signing.
+ */
+export class TransactionNetworkMismatchError extends SoroWillError {
+  readonly expectedNetworkPassphrase: string;
+  readonly actualNetworkPassphrase: string;
+
+  constructor(
+    expectedNetworkPassphrase: string,
+    actualNetworkPassphrase: string,
+    options?: ErrorOptions,
+  ) {
+    super(
+      `Transaction envelope targets network ${describeNetworkPassphrase(actualNetworkPassphrase)}, but this client is configured for ${describeNetworkPassphrase(expectedNetworkPassphrase)}. Refusing to sign to prevent cross-network signature attacks.`,
+      options,
+    );
+    this.name = new.target.name;
+    this.expectedNetworkPassphrase = expectedNetworkPassphrase;
+    this.actualNetworkPassphrase = actualNetworkPassphrase;
+  }
+}
+
 /** Well-known Stellar network passphrases, mapped to a readable name. */
 const KNOWN_NETWORK_NAMES: Record<string, string> = {
   'Public Global Stellar Network ; September 2015': 'mainnet',

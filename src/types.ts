@@ -600,6 +600,16 @@ export interface EventSubscriptionOptions {
   pollIntervalMs?: number;
   pageSize?: number;
   cursor?: string;
+  /**
+   * Whether to deduplicate incoming event notifications across WebSocket
+   * reconnects and polling retries (#657). Defaults to `true`.
+   */
+  deduplicate?: boolean;
+  /**
+   * Maximum number of recently seen event keys retained for deduplication.
+   * Defaults to `10000`.
+   */
+  deduplicationWindowSize?: number;
   onError?: (error: Error) => void;
 }
 
