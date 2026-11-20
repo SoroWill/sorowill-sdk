@@ -1,8 +1,89 @@
+/** Machine-readable error codes for all SoroWill SDK error scenarios (#704). */
+export enum ErrorCode {
+  // Contract errors (1-37 + unknown)
+  WILL_NOT_FOUND = 'WILL_NOT_FOUND',
+  NOT_OWNER = 'NOT_OWNER',
+  WILL_NOT_ACTIVE = 'WILL_NOT_ACTIVE',
+  WILL_NOT_TRIGGERED = 'WILL_NOT_TRIGGERED',
+  GRACE_PERIOD_NOT_EXPIRED = 'GRACE_PERIOD_NOT_EXPIRED',
+  GRACE_PERIOD_EXPIRED = 'GRACE_PERIOD_EXPIRED',
+  INVALID_PERCENTAGES = 'INVALID_PERCENTAGES',
+  ALREADY_VOTED = 'ALREADY_VOTED',
+  NOT_GUARDIAN = 'NOT_GUARDIAN',
+  CHECKIN_NOT_DUE = 'CHECKIN_NOT_DUE',
+  ZERO_AMOUNT = 'ZERO_AMOUNT',
+  TOO_MANY_BENEFICIARIES = 'TOO_MANY_BENEFICIARIES',
+  WILL_NOT_SETTLED = 'WILL_NOT_SETTLED',
+  WILL_NOT_BOTH_ACTIVE = 'WILL_NOT_BOTH_ACTIVE',
+  SAME_WILL_ID = 'SAME_WILL_ID',
+  MERGE_WOULD_EXCEED_LIMITS = 'MERGE_WOULD_EXCEED_LIMITS',
+  OWNER_CANNOT_BE_GUARDIAN = 'OWNER_CANNOT_BE_GUARDIAN',
+  BENEFICIARY_NOT_FOUND = 'BENEFICIARY_NOT_FOUND',
+  KEEPER_BOUNTY_EXCEEDS_MAX = 'KEEPER_BOUNTY_EXCEEDS_MAX',
+  INVALID_GUARDIAN_THRESHOLD = 'INVALID_GUARDIAN_THRESHOLD',
+  FIXED_AMOUNT_EXCEEDS_BALANCE = 'FIXED_AMOUNT_EXCEEDS_BALANCE',
+  INVALID_PERCENTAGE = 'INVALID_PERCENTAGE',
+  WILL_NOT_RELEASED = 'WILL_NOT_RELEASED',
+  NOT_SAME_OWNER = 'NOT_SAME_OWNER',
+  INVALID_PERIOD = 'INVALID_PERIOD',
+  DUPLICATE_GUARDIAN = 'DUPLICATE_GUARDIAN',
+  GUARDIAN_COOLDOWN_ACTIVE = 'GUARDIAN_COOLDOWN_ACTIVE',
+  INVALID_TOKEN = 'INVALID_TOKEN',
+  DUPLICATE_BENEFICIARY = 'DUPLICATE_BENEFICIARY',
+  WILL_NOT_CONFIRMED = 'WILL_NOT_CONFIRMED',
+  CONFIRMATION_WINDOW_EXPIRED = 'CONFIRMATION_WINDOW_EXPIRED',
+  TOO_MANY_IDS = 'TOO_MANY_IDS',
+  INSUFFICIENT_BALANCE = 'INSUFFICIENT_BALANCE',
+  INVALID_SPLIT = 'INVALID_SPLIT',
+  INVALID_PREIMAGE = 'INVALID_PREIMAGE',
+  ALREADY_CLAIMED = 'ALREADY_CLAIMED',
+  TOO_MANY_WILLS = 'TOO_MANY_WILLS',
+  UNKNOWN_CONTRACT_ERROR = 'UNKNOWN_CONTRACT_ERROR',
+
+  // RPC, simulation & transaction errors
+  CONTRACT_STATE_ERROR = 'CONTRACT_STATE_ERROR',
+  SIMULATION_FAILED = 'SIMULATION_FAILED',
+  TRANSACTION_FAILED = 'TRANSACTION_FAILED',
+  RPC_UNAVAILABLE = 'RPC_UNAVAILABLE',
+  RPC_TIMEOUT = 'RPC_TIMEOUT',
+  RATE_LIMITED = 'RATE_LIMITED',
+  ACCOUNT_NOT_FUNDED = 'ACCOUNT_NOT_FUNDED',
+  RESTORE_REQUIRED = 'RESTORE_REQUIRED',
+
+  // Wallet & validation errors
+  WALLET_ERROR = 'WALLET_ERROR',
+  WALLET_TIMEOUT = 'WALLET_TIMEOUT',
+  WALLET_NETWORK_MISMATCH = 'WALLET_NETWORK_MISMATCH',
+  VALIDATION_ERROR = 'VALIDATION_ERROR',
+  UNKNOWN_ERROR = 'UNKNOWN_ERROR',
+}
+
+/** Structured user-facing error representation with recovery guidance. */
+export interface UserFriendlyErrorInfo {
+  errorCode: ErrorCode;
+  message: string;
+  recoverySteps: string;
+}
+
 /** Base class for errors raised by the SoroWill SDK. */
 export class SoroWillError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  /** Machine-readable error code for programmatic handling, when available. */
+  readonly errorCode?: ErrorCode;
+  /** Actionable recovery steps the user can take to resolve the error. */
+  readonly recoverySteps?: string;
+
+  constructor(
+    message: string,
+    options?: ErrorOptions & { errorCode?: ErrorCode; recoverySteps?: string },
+  ) {
     super(message, options);
     this.name = new.target.name;
+    if (options?.errorCode !== undefined) {
+      this.errorCode = options.errorCode;
+    }
+    if (options?.recoverySteps !== undefined) {
+      this.recoverySteps = options.recoverySteps;
+    }
   }
 }
 
@@ -575,6 +656,46 @@ function describeNetworkPassphrase(passphrase: string): string {
   return name ? `${name} ("${passphrase}")` : `"${passphrase}"`;
 }
 
+const CONTRACT_ERROR_METADATA: Readonly<Record<number, { errorCode: ErrorCode; recoverySteps: string }>> = {
+  1: { errorCode: ErrorCode.WILL_NOT_FOUND, recoverySteps: 'Verify the will ID and ensure you are connected to the right network.' },
+  2: { errorCode: ErrorCode.NOT_OWNER, recoverySteps: 'Connect with the wallet that owns this will and try again.' },
+  3: { errorCode: ErrorCode.WILL_NOT_ACTIVE, recoverySteps: 'Check the will status; only active wills support this operation.' },
+  4: { errorCode: ErrorCode.WILL_NOT_TRIGGERED, recoverySteps: 'Wait until the check-in deadline passes and trigger the will first.' },
+  5: { errorCode: ErrorCode.GRACE_PERIOD_NOT_EXPIRED, recoverySteps: 'Wait for the grace period to finish before claiming or releasing funds.' },
+  6: { errorCode: ErrorCode.GRACE_PERIOD_EXPIRED, recoverySteps: 'The grace period has ended; check the will status for next available actions.' },
+  7: { errorCode: ErrorCode.INVALID_PERCENTAGES, recoverySteps: 'Adjust beneficiary percentages so they add up to exactly 100%.' },
+  8: { errorCode: ErrorCode.ALREADY_VOTED, recoverySteps: 'This guardian has already cast their vote; wait for other guardians.' },
+  9: { errorCode: ErrorCode.NOT_GUARDIAN, recoverySteps: 'Connect with an authorized guardian wallet for this will.' },
+  10: { errorCode: ErrorCode.CHECKIN_NOT_DUE, recoverySteps: 'No action needed yet; check in closer to your next deadline.' },
+  11: { errorCode: ErrorCode.ZERO_AMOUNT, recoverySteps: 'Enter a positive amount greater than zero and try again.' },
+  12: { errorCode: ErrorCode.TOO_MANY_BENEFICIARIES, recoverySteps: 'Reduce the number of beneficiaries to within the allowed limit.' },
+  13: { errorCode: ErrorCode.WILL_NOT_SETTLED, recoverySteps: 'Wait until all claims or settlements complete before retrying.' },
+  14: { errorCode: ErrorCode.WILL_NOT_BOTH_ACTIVE, recoverySteps: 'Ensure both wills are in an active state before merging.' },
+  15: { errorCode: ErrorCode.SAME_WILL_ID, recoverySteps: 'Select two different will IDs and try again.' },
+  16: { errorCode: ErrorCode.MERGE_WOULD_EXCEED_LIMITS, recoverySteps: 'Remove excess beneficiaries or guardians before merging.' },
+  17: { errorCode: ErrorCode.OWNER_CANNOT_BE_GUARDIAN, recoverySteps: 'Choose a different Stellar address for the guardian.' },
+  18: { errorCode: ErrorCode.BENEFICIARY_NOT_FOUND, recoverySteps: 'Verify the beneficiary address is listed on this will.' },
+  19: { errorCode: ErrorCode.KEEPER_BOUNTY_EXCEEDS_MAX, recoverySteps: 'Lower the keeper bounty percentage and try again.' },
+  20: { errorCode: ErrorCode.INVALID_GUARDIAN_THRESHOLD, recoverySteps: 'Set a threshold between 1 and the total number of guardians.' },
+  21: { errorCode: ErrorCode.FIXED_AMOUNT_EXCEEDS_BALANCE, recoverySteps: 'Top up the will balance or reduce the fixed payout amount.' },
+  22: { errorCode: ErrorCode.INVALID_PERCENTAGE, recoverySteps: 'Use a valid percentage between 1 and 100.' },
+  23: { errorCode: ErrorCode.WILL_NOT_RELEASED, recoverySteps: 'Trigger the will and wait for the grace period before claiming.' },
+  24: { errorCode: ErrorCode.NOT_SAME_OWNER, recoverySteps: 'Select wills that belong to the same owner address.' },
+  25: { errorCode: ErrorCode.INVALID_PERIOD, recoverySteps: 'Enter a valid check-in or grace period within allowed bounds.' },
+  26: { errorCode: ErrorCode.DUPLICATE_GUARDIAN, recoverySteps: 'Remove duplicate guardian addresses and try again.' },
+  27: { errorCode: ErrorCode.GUARDIAN_COOLDOWN_ACTIVE, recoverySteps: 'Wait for the guardian cooldown period to elapse before retrying.' },
+  28: { errorCode: ErrorCode.INVALID_TOKEN, recoverySteps: 'Select a supported Stellar token contract address.' },
+  29: { errorCode: ErrorCode.DUPLICATE_BENEFICIARY, recoverySteps: 'Remove duplicate beneficiary addresses and try again.' },
+  30: { errorCode: ErrorCode.WILL_NOT_CONFIRMED, recoverySteps: 'Confirm the will before performing this operation.' },
+  31: { errorCode: ErrorCode.CONFIRMATION_WINDOW_EXPIRED, recoverySteps: 'Create a new will or request a new confirmation window.' },
+  32: { errorCode: ErrorCode.TOO_MANY_IDS, recoverySteps: 'Reduce the number of will IDs in a single request.' },
+  33: { errorCode: ErrorCode.INSUFFICIENT_BALANCE, recoverySteps: 'Ensure your wallet has enough token balance and XLM for fees.' },
+  34: { errorCode: ErrorCode.INVALID_SPLIT, recoverySteps: 'Review the beneficiary split configuration and try again.' },
+  35: { errorCode: ErrorCode.INVALID_PREIMAGE, recoverySteps: 'Verify the claim secret/preimage and try again.' },
+  36: { errorCode: ErrorCode.ALREADY_CLAIMED, recoverySteps: 'This share has already been claimed; no further action is needed.' },
+  37: { errorCode: ErrorCode.TOO_MANY_WILLS, recoverySteps: 'Close or settle an existing will before creating a new one.' },
+};
+
 /** Base class for typed errors returned by the SoroWill contract. */
 export class WillContractError extends SoroWillError {
   constructor(
@@ -583,7 +704,13 @@ export class WillContractError extends SoroWillError {
     message: string,
     options?: ErrorOptions,
   ) {
-    super(message, options);
+    const meta = CONTRACT_ERROR_METADATA[code];
+    const recoverySteps = meta?.recoverySteps;
+    const fullMessage = recoverySteps ? `${message}. ${recoverySteps}` : message;
+    super(fullMessage, {
+      ...options,
+      ...(meta ? { errorCode: meta.errorCode, recoverySteps } : {}),
+    });
   }
 }
 
@@ -1109,11 +1236,103 @@ export class UnknownContractErrorCodeError extends SoroWillError {
   readonly rawMessage: string;
 
   constructor(code: number, rawMessage: string, options?: ErrorOptions) {
-    super(`Contract error: ${code}`, options);
+    const recoverySteps =
+      'Please update the SoroWill SDK or refresh the page and try again. If the issue persists, contact support.';
+    super(
+      `An unexpected contract error occurred (code ${code}). ${recoverySteps}`,
+      {
+        ...options,
+        errorCode: ErrorCode.UNKNOWN_CONTRACT_ERROR,
+        recoverySteps,
+      },
+    );
     this.code = code;
     this.rawMessage = rawMessage;
   }
 }
+
+const INTERNAL_CONTRACT_ERROR_PATTERNS: ReadonlyArray<{
+  pattern: RegExp;
+  errorCode: ErrorCode;
+  message: string;
+  recoverySteps: string;
+}> = [
+  {
+    pattern: /contract state mismatch|offset \d+|storage|MissingValue|ledger entry/i,
+    errorCode: ErrorCode.CONTRACT_STATE_ERROR,
+    message: 'The will state could not be verified on the network.',
+    recoverySteps: 'Refresh the will details and try your transaction again.',
+  },
+  {
+    pattern: /HostError|wasm|trap|UnreachableCodeReached|ExceededLimit|Budget|ScVal|XDR|diagnostic/i,
+    errorCode: ErrorCode.SIMULATION_FAILED,
+    message: 'The transaction could not be prepared by the network.',
+    recoverySteps: 'Verify your inputs and wallet balance, then try again.',
+  },
+  {
+    pattern: /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|fetch failed|network error|502|503|504/i,
+    errorCode: ErrorCode.RPC_UNAVAILABLE,
+    message: 'Unable to reach the Stellar network right now.',
+    recoverySteps: 'Check your internet connection and try again in a few moments.',
+  },
+  {
+    pattern: /429|too many requests|rate limit/i,
+    errorCode: ErrorCode.RATE_LIMITED,
+    message: 'Too many requests were sent to the Stellar network.',
+    recoverySteps: 'Wait a few seconds before trying again.',
+  },
+];
+
+/**
+ * Sanitizes an arbitrary RPC or contract error so internal implementation
+ * details (e.g., byte offsets, WASM traps, HostError, XDR) are never shown
+ * directly to end users.
+ */
+export function sanitizeRpcError(error: unknown): SoroWillError {
+  if (error instanceof SoroWillError) {
+    return error;
+  }
+  const text = errorText(error);
+  for (const entry of INTERNAL_CONTRACT_ERROR_PATTERNS) {
+    if (entry.pattern.test(text)) {
+      return new SoroWillError(`${entry.message} ${entry.recoverySteps}`, {
+        cause: error,
+        errorCode: entry.errorCode,
+        recoverySteps: entry.recoverySteps,
+      });
+    }
+  }
+  const recoverySteps = 'Please check your connection and wallet, then try again.';
+  return new SoroWillError(`An unexpected error occurred. ${recoverySteps}`, {
+    cause: error,
+    errorCode: ErrorCode.UNKNOWN_ERROR,
+    recoverySteps,
+  });
+}
+
+/**
+ * Formats any error into a user-friendly {@link UserFriendlyErrorInfo} object
+ * with an {@link ErrorCode}, safe message, and actionable recovery steps.
+ */
+export function formatUserFriendlyError(error: unknown): UserFriendlyErrorInfo {
+  const mapped = mapContractError(error);
+  if (mapped instanceof SoroWillError && mapped.errorCode !== undefined) {
+    return {
+      errorCode: mapped.errorCode,
+      message: mapped.message,
+      recoverySteps:
+        mapped.recoverySteps ?? 'Please verify your inputs and try again.',
+    };
+  }
+  const sanitized = sanitizeRpcError(mapped);
+  return {
+    errorCode: sanitized.errorCode ?? ErrorCode.UNKNOWN_ERROR,
+    message: sanitized.message,
+    recoverySteps:
+      sanitized.recoverySteps ?? 'Please verify your inputs and try again.',
+  };
+}
+
 /** Converts a Soroban contract error code embedded in an RPC error into its typed SDK error. */
 export function mapContractError(error: unknown): Error {
   if (error instanceof WillContractError || error instanceof RequestTimeoutError) {
@@ -1145,7 +1364,17 @@ export function mapContractError(error: unknown): Error {
   const codeText = match?.[1];
 
   if (codeText === undefined) {
-    // No numeric error code found — return the original error or wrap in SoroWillError.
+    // Sanitize internal contract/VM/RPC errors so raw internals are never exposed to users.
+    for (const entry of INTERNAL_CONTRACT_ERROR_PATTERNS) {
+      if (entry.pattern.test(text)) {
+        return new SoroWillError(`${entry.message} ${entry.recoverySteps}`, {
+          cause: error,
+          errorCode: entry.errorCode,
+          recoverySteps: entry.recoverySteps,
+        });
+      }
+    }
+    // No numeric error code or internal pattern found — return the original error or wrap in SoroWillError.
     return error instanceof Error ? error : new SoroWillError(text);
   }
 

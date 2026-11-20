@@ -129,6 +129,7 @@ export {
   LocalStorageWalletConnectSessionStore,
   MemoryWalletConnectSessionStore,
   WalletConnectAdapter,
+  WalletConnectQrExpiredError,
   WalletConnectTimeoutError,
   WalletConnectUnsupportedMethodError,
 } from './walletConnect';
@@ -248,7 +249,10 @@ export {
   WillNotSettledError,
   WillNotTriggeredError,
   ZeroAmountError,
+  ErrorCode,
   mapContractError,
+  sanitizeRpcError,
+  formatUserFriendlyError,
   registerContractError,
   registerContractErrors,
   setContractErrorMap,
@@ -256,7 +260,7 @@ export {
   UnsupportedBatchSizeError,
   UnknownContractErrorCodeError,
 } from './errors';
-export type { ContractErrorFactory, InvalidStellarAddressReason } from './errors';
+export type { ContractErrorFactory, InvalidStellarAddressReason, UserFriendlyErrorInfo } from './errors';
 
 export {
   DEFAULT_MAX_QUEUE_SIZE,
@@ -270,7 +274,7 @@ export {
   MAX_BACKOFF_MS,
   ErrorTransience,
 } from './requestQueue';
-export type { RequestQueueOptions } from './requestQueue';
+export type { RequestQueueMetrics, RequestQueueOptions } from './requestQueue';
 
 export { DebugLogger, DEFAULT_REDACTED_KEYS, REDACTED } from './debugLogger';
 export type { DebugLoggerOptions } from './debugLogger';
