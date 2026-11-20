@@ -1,4 +1,4 @@
-import { SignTransactionTimeoutError, WalletConnectChainIdMismatchError } from './errors';
+import { SignTransactionTimeoutError, toWalletCancelledError, WalletConnectChainIdMismatchError } from './errors';
 export { WalletConnectChainIdMismatchError } from './errors';
 import type { WalletAdapter, WalletConnection, SignTransactionOptions } from './wallet';
 
@@ -388,6 +388,10 @@ export class WalletConnectAdapter implements WalletAdapter {
     let session: WalletConnectSession;
     try {
       session = await Promise.race([connection.approval(), timeoutPromise]);
+    } catch (err) {
+      const cancelled = toWalletCancelledError(err, 'connect');
+      if (cancelled) throw cancelled;
+      throw err;
     } finally {
       clearTimeout(timeoutHandle!);
     }
@@ -495,16 +499,23 @@ export class WalletConnectAdapter implements WalletAdapter {
     const network = this.resolveNetwork(session);
     const params = this.options.getSignTransactionParams?.(xdr, network.networkPassphrase) ?? { xdr };
 
-    const response = await this.withTimeout(
-      this.client.request<unknown>({
-        topic: session.topic,
-        chainId,
-        request: {
-          method,
-          params,
-        },
-      }),
-    );
+    let response: unknown;
+    try {
+      response = await this.withTimeout(
+        this.client.request<unknown>({
+          topic: session.topic,
+          chainId,
+          request: {
+            method,
+            params,
+          },
+        }),
+      );
+    } catch (err) {
+      const cancelled = toWalletCancelledError(err, 'signTransaction');
+      if (cancelled) throw cancelled;
+      throw err;
+    }
 
     const extractor = this.options.getSignedTransactionXdr ?? getDefaultSignedTransactionXdr;
     return extractor(response);

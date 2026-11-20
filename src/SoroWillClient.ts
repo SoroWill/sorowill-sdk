@@ -41,6 +41,7 @@ import type {
   EventSubscriptionOptions,
   PaginatedWillsResult,
   PaginationOptions,
+  RequestCostEstimate,
   RequestOptions,
   SoroWillEvent,
   SorobanEventType,
@@ -62,6 +63,7 @@ import {
   GuardianValidationError,
   CheckinPeriodExceedsTtlError,
   CheckInDuringGracePeriodError,
+  ExorbitantFeeError,
   InvalidDayCountError,
   InvalidContractIdError,
   InvalidCursorError,
@@ -2768,6 +2770,35 @@ export class SoroWillClient {
   }
 
   /**
+   * Estimates the fee and RPC call cost of invoking a contract method before
+   * signing or submitting any transaction.
+   *
+   * **Operation Type:** Read-only (Simulation)
+   *
+   * @param method - The contract method name to simulate (e.g. `'check_in'`, `'create_will'`).
+   * @param args - Native arguments to pass to the contract method.
+   * @param options - Optional request options.
+   * @returns Estimated resource fee, total fee (in stroops), and expected RPC call count.
+   */
+  async estimateCost(
+    method: string,
+    args: Record<string, unknown>,
+    options?: RequestOptions,
+  ): Promise<RequestCostEstimate> {
+    const specFetchCalls = this.specPromise === undefined ? 1 : 0;
+    const { resourceFee, totalFee } = await this.previewFee(method, args, options);
+    // Execution performs: getAccount (1) + prepareTransaction (1) + sendTransaction (1) + waitForTransaction poll (>=1),
+    // plus getSpec (1) if the contract spec has not yet been cached.
+    const estimatedRpcCalls = 4 + specFetchCalls;
+    return {
+      resourceFee,
+      totalFee,
+      estimatedRpcCalls,
+      method,
+    };
+  }
+
+  /**
    * Subscribes to SoroWill contract events, delivering each decoded event to
    * `listener` as it arrives. Prefers a WebSocket stream (via
    * `webSocketFactory` and `eventStreamUrl`) when both are configured,
@@ -3558,6 +3589,13 @@ export class SoroWillClient {
         `${label}:prepareTransaction`,
       );
       this.debugLogger.logSimulation(label, undefined, prepared.fee);
+
+      if (options?.maxFee !== undefined) {
+        const maxFeeBigInt = BigInt(options.maxFee);
+        if (BigInt(prepared.fee) > maxFeeBigInt) {
+          throw new ExorbitantFeeError(String(prepared.fee), maxFeeBigInt.toString());
+        }
+      }
 
       // #573: Prevent duplicate signing of the same transaction. The
       // prepared transaction's XDR encodes its full contents (source account,
