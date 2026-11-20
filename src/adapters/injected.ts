@@ -1,3 +1,4 @@
+import { toWalletCancelledError } from '../errors';
 import type { SignTransactionOptions, WalletAdapter, WalletConnection } from './types';
 
 /** Minimal API implemented by injected Stellar wallet providers. */
@@ -95,8 +96,14 @@ export abstract class InjectedWalletAdapter implements WalletAdapter {
   protected constructor(private readonly provider: InjectedWalletProvider) {}
 
   async connect(): Promise<WalletConnection> {
-    this.connection = await this.provider.connect();
-    return this.connection;
+    try {
+      this.connection = await this.provider.connect();
+      return this.connection;
+    } catch (err) {
+      const cancelled = toWalletCancelledError(err, 'connect');
+      if (cancelled) throw cancelled;
+      throw err;
+    }
   }
 
   /**
@@ -155,9 +162,15 @@ export abstract class InjectedWalletAdapter implements WalletAdapter {
     if (!this.connection) {
       throw new Error(`${this.name} is not connected. Call connect() first.`);
     }
-    const result = await this.provider.signTransaction(transactionXdr, options);
-    const signedTxXdr = typeof result === 'string' ? result : result.signedTxXdr;
-    return normalizeSignature(signedTxXdr);
+    try {
+      const result = await this.provider.signTransaction(transactionXdr, options);
+      const signedTxXdr = typeof result === 'string' ? result : result.signedTxXdr;
+      return normalizeSignature(signedTxXdr);
+    } catch (err) {
+      const cancelled = toWalletCancelledError(err, 'signTransaction');
+      if (cancelled) throw cancelled;
+      throw err;
+    }
   }
 
   async getNetwork?(): Promise<{ network: string; networkPassphrase: string }> {

@@ -1,3 +1,4 @@
+import { toWalletCancelledError } from '../errors';
 import type { SignTransactionOptions, WalletAdapter, WalletConnection } from './types';
 
 /** Session bridge used to pair a web application with LOBSTR mobile. */
@@ -78,12 +79,18 @@ export class LobstrWalletAdapter implements WalletAdapter {
         this.options.openDeepLink(deepLink);
       }
     }
-    return Promise.race([
-      pairing.approval(),
-      new Promise<WalletConnection>((_, reject) => {
-        setTimeout(() => reject(new Error('LOBSTR pairing approval timed out')), this.approvalTimeoutMs);
-      }),
-    ]);
+    try {
+      return await Promise.race([
+        pairing.approval(),
+        new Promise<WalletConnection>((_, reject) => {
+          setTimeout(() => reject(new Error('LOBSTR pairing approval timed out')), this.approvalTimeoutMs);
+        }),
+      ]);
+    } catch (err) {
+      const cancelled = toWalletCancelledError(err, 'connect');
+      if (cancelled) throw cancelled;
+      throw err;
+    }
   }
 
   /**
@@ -114,11 +121,17 @@ export class LobstrWalletAdapter implements WalletAdapter {
     return this.options.client.getPublicKey();
   }
 
-  signTransaction(
+  async signTransaction(
     transactionXdr: string,
     options: SignTransactionOptions,
   ): Promise<string> {
-    return this.options.client.signTransaction(transactionXdr, options);
+    try {
+      return await this.options.client.signTransaction(transactionXdr, options);
+    } catch (err) {
+      const cancelled = toWalletCancelledError(err, 'signTransaction');
+      if (cancelled) throw cancelled;
+      throw err;
+    }
   }
 
   async getNetwork(): Promise<{ network: string; networkPassphrase: string }> {

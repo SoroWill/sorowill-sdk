@@ -1,7 +1,7 @@
 import type Str from '@ledgerhq/hw-app-str';
 import { StrKey, TransactionBuilder } from '@stellar/stellar-sdk';
 
-import { SignTransactionTimeoutError, WalletNetworkMismatchError } from '../errors';
+import { SignTransactionTimeoutError, toWalletCancelledError, WalletNetworkMismatchError } from '../errors';
 
 import type { SignTransactionOptions, WalletAdapter, WalletConnection } from './types';
 
@@ -168,6 +168,10 @@ export class LedgerWalletAdapter implements WalletAdapter {
       ]);
       transaction.addSignature(publicKey, signature.toString('base64'));
       return transaction.toXDR();
+    } catch (err) {
+      const cancelled = toWalletCancelledError(err, 'signTransaction');
+      if (cancelled) throw cancelled;
+      throw err;
     } finally {
       clearTimeout(timeoutHandle!);
     }

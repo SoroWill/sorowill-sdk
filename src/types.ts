@@ -485,6 +485,12 @@ export interface RequestOptions {
   timeout?: number;
   timeoutMs?: number;
   /**
+   * Maximum acceptable transaction fee in stroops. When set, `SoroWillClient`
+   * compares the simulated/prepared fee against `maxFee` before signing and
+   * throws {@link ExorbitantFeeError} if it exceeds this limit.
+   */
+  maxFee?: string | bigint;
+  /**
    * When `true`, skips the client-side will-existence pre-check (e.g.
    * `getWill()`) before submitting a state-changing transaction. Use only when
    * the caller has already confirmed the will exists, to avoid an extra RPC
@@ -494,6 +500,21 @@ export interface RequestOptions {
    * @default false
    */
   skipExistenceCheck?: boolean;
+}
+
+/**
+ * Estimated resource, fee, and RPC call cost for a contract invocation,
+ * returned by {@link SoroWillClient.estimateCost}.
+ */
+export interface RequestCostEstimate {
+  /** Simulated Soroban resource fee in stroops (base-10 string). */
+  resourceFee: string;
+  /** Total estimated transaction fee in stroops (`BASE_FEE + resourceFee`). */
+  totalFee: string;
+  /** Estimated number of RPC calls required to execute the operation. */
+  estimatedRpcCalls: number;
+  /** Contract method name that was simulated. */
+  method: string;
 }
 
 /** Options for emergency check-in, optionally providing guardian signatures. */

@@ -6,12 +6,14 @@ import {
   InvalidSignedXdrEncodingError,
   SignTransactionTimeoutError,
   SoroWillError,
+  toWalletCancelledError,
+  WalletCancelledError,
   WalletNetworkMismatchError,
   WalletSessionError,
   WalletSessionExpiredError,
 } from './errors';
 
-export { WalletSessionError, WalletSessionExpiredError };
+export { WalletCancelledError, WalletSessionError, WalletSessionExpiredError };
 
 /**
  * Union of the typed errors a {@link WalletAdapter} implementation — or the
@@ -28,6 +30,8 @@ export { WalletSessionError, WalletSessionExpiredError };
  * documented on the respective adapter classes.
  */
 export type WalletAdapterError =
+  /** The user explicitly cancelled or rejected the wallet prompt. */
+  | WalletCancelledError
   /** Session token could not be read, refreshed, or is still invalid. */
   | WalletSessionError
   /** The wallet's `signTransaction` did not resolve within the allowed time. */
@@ -36,6 +40,11 @@ export type WalletAdapterError =
   | WalletNetworkMismatchError
   /** Freighter's presence could not be determined due to an internal error. */
   | FreighterInstallCheckError;
+
+/** Type guard for {@link WalletCancelledError}. */
+export function isWalletCancelledError(error: unknown): error is WalletCancelledError {
+  return error instanceof WalletCancelledError;
+}
 
 /** Type guard for {@link WalletSessionError}. */
 export function isWalletSessionError(error: unknown): error is WalletSessionError {
@@ -529,10 +538,11 @@ export interface WalletAdapter {
   /**
    * Prompts the user (if required) and establishes a connection.
    *
+   * @throws {WalletCancelledError} When the user explicitly cancels or rejects
+   *   the connection prompt.
    * @throws {WalletNetworkMismatchError} When the wallet is connected to a
    *   network that differs from the client's expected network passphrase.
-   * @throws {Error} When the user rejects the connection or the wallet reports
-   *   an internal failure.
+   * @throws {Error} When the wallet reports an internal failure.
    */
   connect(): Promise<WalletConnection>;
   /**
@@ -562,12 +572,14 @@ export interface WalletAdapter {
    * Signs a transaction envelope, returning either the signed XDR string or a
    * {@link SignatureResponse} object carrying `envelope_xdr`.
    *
+   * @throws {WalletCancelledError} When the user explicitly cancels or rejects
+   *   the signing prompt.
    * @throws {SignTransactionTimeoutError} When the wallet does not respond
    *   within `opts.timeoutMs` (e.g. a dismissed or hung approval popup).
    * @throws {WalletSessionError} When the adapter issues session tokens and
    *   the current token is expired and cannot be refreshed.
-   * @throws {Error} When the wallet rejects the request (e.g. the user
-   *   declined to sign) or returns a malformed response.
+   * @throws {Error} When the wallet returns a malformed response or reports an
+   *   internal/network failure.
    */
   signTransaction(
     transactionXdr: string,
@@ -854,9 +866,18 @@ export class FreighterWalletAdapter implements WalletAdapter {
   async connect(): Promise<WalletConnection> {
     await this.assertFreighterVersion();
     const freighterApi = await loadFreighterApi();
-    const access = await freighterApi.requestAccess();
+    let access: Awaited<ReturnType<typeof freighterApi.requestAccess>>;
+    try {
+      access = await freighterApi.requestAccess();
+    } catch (err) {
+      const cancelled = toWalletCancelledError(err, 'connect');
+      if (cancelled) throw cancelled;
+      throw err;
+    }
     if (access.error) {
       this.handlePossibleContextInvalidation(access.error);
+      const cancelled = toWalletCancelledError(access.error, 'connect');
+      if (cancelled) throw cancelled;
       throw new Error(access.error.message);
     }
 
@@ -1030,20 +1051,29 @@ export class FreighterWalletAdapter implements WalletAdapter {
 
     // Race the Freighter call against a timer so that a hung or dismissed
     // popup never leaves the caller's promise pending
-    const result = await Promise.race<unknown>([
-      freighterApiPromise.then((freighterApi) =>
-        freighterApi.signTransaction(transactionXdr, {
-          networkPassphrase: opts.networkPassphrase,
+    let result: unknown;
+    try {
+      result = await Promise.race<unknown>([
+        freighterApiPromise.then((freighterApi) =>
+          freighterApi.signTransaction(transactionXdr, {
+            networkPassphrase: opts.networkPassphrase,
+          }),
+        ),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new SignTransactionTimeoutError(timeoutMs)), timeoutMs);
         }),
-      ),
-      new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new SignTransactionTimeoutError(timeoutMs)), timeoutMs);
-      }),
-    ]);
+      ]);
+    } catch (err) {
+      const cancelled = toWalletCancelledError(err, 'signTransaction');
+      if (cancelled) throw cancelled;
+      throw err;
+    }
 
     if (result && typeof result === 'object' && 'error' in result && result.error) {
       const err = result.error as Record<string, unknown>;
       this.handlePossibleContextInvalidation(err as { code?: number; message?: string });
+      const cancelled = toWalletCancelledError(err, 'signTransaction');
+      if (cancelled) throw cancelled;
       const errorMessage = typeof err === 'object' && err !== null && 'message' in err
         ? String(err.message)
         : String(result.error);
@@ -1091,8 +1121,14 @@ export class WalletConnectWalletAdapter implements WalletAdapter {
     return this.connector.isConnected();
   }
 
-  connect(): Promise<WalletConnection> {
-    return this.connector.connect();
+  async connect(): Promise<WalletConnection> {
+    try {
+      return await this.connector.connect();
+    } catch (err) {
+      const cancelled = toWalletCancelledError(err, 'connect');
+      if (cancelled) throw cancelled;
+      throw err;
+    }
   }
 
   reconnect(): Promise<WalletConnection> {
@@ -1111,7 +1147,13 @@ export class WalletConnectWalletAdapter implements WalletAdapter {
     transactionXdr: string,
     options: SignTransactionOptions,
   ): Promise<string | SignatureResponse> {
-    return this.connector.signTransaction(transactionXdr, options);
+    try {
+      return await this.connector.signTransaction(transactionXdr, options);
+    } catch (err) {
+      const cancelled = toWalletCancelledError(err, 'signTransaction');
+      if (cancelled) throw cancelled;
+      throw err;
+    }
   }
 }
 

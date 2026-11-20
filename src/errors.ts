@@ -1362,4 +1362,99 @@ export class HookReturnValueError extends SoroWillError {
   }
 }
 
+/**
+ * Raised when a user explicitly cancels or rejects a wallet prompt (e.g.
+ * connection approval or transaction signing), distinguishing user intent from
+ * network, RPC, or internal wallet failures.
+ */
+export class WalletCancelledError extends SoroWillError {
+  readonly operation: string | undefined;
+
+  constructor(
+    message = 'Wallet request was cancelled by the user.',
+    options?: ErrorOptions & { operation?: string },
+  ) {
+    super(message, options);
+    this.operation = options?.operation;
+  }
+}
+
+const USER_CANCELLATION_MESSAGE_PATTERNS: readonly RegExp[] = [
+  /user\s*(declined|rejected|cancel+ed|denied)/i,
+  /declined\s*by\s*(the\s*)?user/i,
+  /rejected\s*by\s*(the\s*)?user/i,
+  /denied\s*by\s*(the\s*)?user/i,
+  /action\s*request\s*was\s*rejected/i,
+  /transaction\s*(was\s*)?(rejected|cancelled|canceled|declined)/i,
+  /request\s*(was\s*)?(rejected|cancelled|canceled|declined)\s*(by\s*(the\s*)?user)?/i,
+];
+
+/**
+ * Returns `true` when `error` represents an explicit user cancellation or
+ * rejection in a wallet UI/device (rather than a network, timeout, or internal
+ * wallet failure).
+ */
+export function isUserCancellationError(error: unknown): boolean {
+  if (error instanceof WalletCancelledError) {
+    return true;
+  }
+  if (!error || (typeof error !== 'object' && typeof error !== 'string')) {
+    return false;
+  }
+
+  if (typeof error === 'object') {
+    const record = error as Record<string, unknown>;
+    // Freighter / Albedo (-4), EIP-1193 (4001), WalletConnect v2 (5000)
+    if (record.code === -4 || record.code === 4001 || record.code === 5000) {
+      return true;
+    }
+    // Ledger APDU status 0x6985 (Condition of use not satisfied / User rejected)
+    if (record.statusCode === 0x6985) {
+      return true;
+    }
+  }
+
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : typeof (error as Record<string, unknown>).message === 'string'
+          ? String((error as Record<string, unknown>).message)
+          : '';
+
+  if (!message) {
+    return false;
+  }
+  if (message.includes('0x6985')) {
+    return true;
+  }
+  return USER_CANCELLATION_MESSAGE_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+/**
+ * Converts a user-cancellation error into a {@link WalletCancelledError},
+ * preserving the original error as `cause`. Returns `null` when `error` is
+ * not a user cancellation so callers can rethrow non-cancellation errors as-is.
+ */
+export function toWalletCancelledError(
+  error: unknown,
+  operation?: string,
+): WalletCancelledError | null {
+  if (error instanceof WalletCancelledError) {
+    return error;
+  }
+  if (!isUserCancellationError(error)) {
+    return null;
+  }
+  const message =
+    operation !== undefined
+      ? `Wallet ${operation} was cancelled by the user.`
+      : 'Wallet request was cancelled by the user.';
+  return new WalletCancelledError(message, {
+    cause: error,
+    ...(operation !== undefined ? { operation } : {}),
+  });
+}
+
 export type ContractErrorFactory = (details: unknown) => Error;
