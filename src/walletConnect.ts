@@ -79,10 +79,27 @@ export interface WalletConnectAdapterOptions {
   timeoutMs?: number;
   /**
    * Milliseconds to wait for the wallet to approve the pairing in {@link WalletConnectAdapter.connect}
-   * before rejecting. Defaults to 300000.
+   * before rejecting. Defaults to 300000 (5 minutes).
    */
   connectTimeoutMs?: number;
   onPairingUri?(uri: string): void | Promise<void>;
+  /**
+   * Invoked when the WalletConnect pairing QR code expires before the wallet
+   * approves the session. Allows the UI to notify the user and offer a fresh
+   * QR code instead of failing silently.
+   */
+  onQrExpired?(info: { uri?: string; timeoutMs: number }): void | Promise<void>;
+  /**
+   * Optional warning callback fired shortly before the WalletConnect QR code
+   * expires (controlled by {@link qrExpiryWarningMs}).
+   */
+  onQrExpiringSoon?(info: { uri?: string; remainingMs: number }): void | Promise<void>;
+  /**
+   * Milliseconds before QR expiration at which {@link onQrExpiringSoon} is
+   * invoked. Defaults to `60000` (1 minute) when `connectTimeoutMs > 60000`,
+   * or 20% of `connectTimeoutMs` for shorter timeouts.
+   */
+  qrExpiryWarningMs?: number;
   getPublicKeyFromSession?(session: WalletConnectSession): string;
   getNetworkFromSession?(session: WalletConnectSession): { network: string; networkPassphrase: string };
   getSignedTransactionXdr?(response: unknown): string;
@@ -130,6 +147,31 @@ export class WalletConnectTimeoutError extends Error {
     );
     this.name = 'WalletConnectTimeoutError';
     this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
+ * Raised when a WalletConnect pairing QR code expires before the user scans
+ * and approves the connection in their wallet (default 5 minutes).
+ */
+export class WalletConnectQrExpiredError extends WalletConnectTimeoutError {
+  /** The expired WalletConnect pairing URI, if one was generated. */
+  readonly uri?: string;
+
+  constructor(timeoutMs: number, uri?: string, options?: ErrorOptions) {
+    super(timeoutMs, options);
+    const minutes = Math.round(timeoutMs / 60_000);
+    const durationLabel =
+      timeoutMs >= 60_000 && timeoutMs % 60_000 === 0
+        ? `${minutes} minute${minutes === 1 ? '' : 's'}`
+        : `${timeoutMs}ms`;
+    this.message =
+      `WalletConnect QR code expired after ${durationLabel}. ` +
+      'Please generate a new QR code and try connecting again.';
+    this.name = 'WalletConnectQrExpiredError';
+    if (uri !== undefined) {
+      this.uri = uri;
+    }
   }
 }
 
@@ -376,20 +418,51 @@ export class WalletConnectAdapter implements WalletAdapter {
       await this.options.onPairingUri?.(connection.uri);
     }
 
-    const connectTimeoutMs = this.options.connectTimeoutMs ?? _DEFAULT_CONNECT_TIMEOUT_MS;
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(
-        () => reject(new Error(`WalletConnect pairing approval timed out after ${connectTimeoutMs}ms`)),
-        connectTimeoutMs,
-      );
-    });
+    const connectTimeoutMs =
+      this.options.connectTimeoutMs ?? this.options.connectionTimeoutMs ?? _DEFAULT_CONNECT_TIMEOUT_MS;
 
     let session: WalletConnectSession;
-    try {
-      session = await Promise.race([connection.approval(), timeoutPromise]);
-    } finally {
-      clearTimeout(timeoutHandle!);
+    if (connectTimeoutMs <= 0) {
+      session = await connection.approval();
+    } else {
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      let warningHandle: ReturnType<typeof setTimeout> | undefined;
+
+      if (this.options.onQrExpiringSoon) {
+        const warningLeadMs =
+          this.options.qrExpiryWarningMs ??
+          (connectTimeoutMs > 60_000 ? 60_000 : Math.floor(connectTimeoutMs * 0.2));
+        if (warningLeadMs > 0 && warningLeadMs < connectTimeoutMs) {
+          const delayMs = connectTimeoutMs - warningLeadMs;
+          warningHandle = setTimeout(() => {
+            void Promise.resolve(
+              this.options.onQrExpiringSoon?.({
+                ...(connection.uri !== undefined ? { uri: connection.uri } : {}),
+                remainingMs: warningLeadMs,
+              }),
+            ).catch(() => {});
+          }, delayMs);
+        }
+      }
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          void Promise.resolve(
+            this.options.onQrExpired?.({
+              ...(connection.uri !== undefined ? { uri: connection.uri } : {}),
+              timeoutMs: connectTimeoutMs,
+            }),
+          ).catch(() => {});
+          reject(new WalletConnectQrExpiredError(connectTimeoutMs, connection.uri));
+        }, connectTimeoutMs);
+      });
+
+      try {
+        session = await Promise.race([connection.approval(), timeoutPromise]);
+      } finally {
+        if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+        if (warningHandle !== undefined) clearTimeout(warningHandle);
+      }
     }
     return this.useSession(session);
   }
