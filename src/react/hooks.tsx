@@ -13,6 +13,10 @@ export interface UseWalletResult {
   network: { network: string; networkPassphrase: string } | null;
   loading: boolean;
   error: Error | null;
+  /** Initiates a wallet connection attempt. */
+  connect: () => Promise<void>;
+  /** Retries the wallet connection attempt. */
+  retry: () => void;
 }
 
 /**
@@ -69,13 +73,42 @@ const CLIENT_OPTION_KEYS = [
  * ```
  */
 export function useWallet(wallet: WalletAdapter): UseWalletResult {
-  const [state, setState] = getReact().useState<UseWalletResult>({
+  const [state, setState] = getReact().useState<Omit<UseWalletResult, 'connect' | 'retry'>>({
     connected: false,
     publicKey: null,
     network: null,
     loading: true,
     error: null,
   });
+
+  const connect = getReact().useCallback(async () => {
+    setState((prev) => ({ ...prev, loading: true, error: null }));
+    try {
+      const connection = await wallet.connect();
+      setState({
+        connected: true,
+        publicKey: connection.publicKey,
+        network: {
+          network: connection.network,
+          networkPassphrase: connection.networkPassphrase,
+        },
+        loading: false,
+        error: null,
+      });
+    } catch (err) {
+      setState({
+        connected: false,
+        publicKey: null,
+        network: null,
+        loading: false,
+        error: err instanceof Error ? err : new Error(String(err)),
+      });
+    }
+  }, [wallet]);
+
+  const retry = getReact().useCallback(() => {
+    void connect();
+  }, [connect]);
 
   getReact().useEffect(() => {
     let cancelled = false;
@@ -112,7 +145,66 @@ export function useWallet(wallet: WalletAdapter): UseWalletResult {
     return () => { cancelled = true; };
   }, [wallet]);
 
-  return state;
+  return { ...state, connect, retry };
+}
+
+/** Props for {@link WalletConnectionDialog}. */
+export interface WalletConnectionDialogProps {
+  open: boolean;
+  loading?: boolean;
+  error?: Error | null;
+  onRetry: () => void;
+  onConnect?: () => void;
+  onClose?: () => void;
+}
+
+/**
+ * Accessible wallet connection dialog displaying connection status, timeout
+ * recovery guidance, and a Retry button when connection fails.
+ */
+export function WalletConnectionDialog({
+  open,
+  loading = false,
+  error = null,
+  onRetry,
+  onConnect,
+  onClose,
+}: WalletConnectionDialogProps): ReactNamespace.ReactElement | null {
+  if (!open) {
+    return null;
+  }
+
+  return getReact().createElement(
+    'div',
+    { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Connect Wallet' },
+    getReact().createElement('h2', null, 'Connect Wallet'),
+    loading && getReact().createElement('p', null, 'Connecting to wallet...'),
+    error &&
+      getReact().createElement(
+        'div',
+        { role: 'alert' },
+        getReact().createElement('p', null, error.message),
+        getReact().createElement(
+          'button',
+          { type: 'button', onClick: onRetry, disabled: loading },
+          'Retry',
+        ),
+      ),
+    !loading &&
+      !error &&
+      onConnect &&
+      getReact().createElement(
+        'button',
+        { type: 'button', onClick: onConnect },
+        'Connect',
+      ),
+    onClose &&
+      getReact().createElement(
+        'button',
+        { type: 'button', onClick: onClose },
+        'Close',
+      ),
+  );
 }
 
 /**
