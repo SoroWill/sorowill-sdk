@@ -10,6 +10,8 @@
 export { SoroWillClient, parseWillId, SoroWillInvalidIdError } from './SoroWillClient';
 export { MAX_CHECKIN_PERIOD_DAYS } from './SoroWillClient';
 export type {
+  ContractStorageDurability,
+  ContractStorageLedgerKeyOptions,
   EventSubscription,
   EventSubscriptionOptions,
   EventSubscriptionTransport,

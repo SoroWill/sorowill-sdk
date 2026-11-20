@@ -1,5 +1,6 @@
 import {
   Account,
+  Address,
   BASE_FEE,
   Contract,
   Networks,
@@ -70,6 +71,7 @@ import {
   InvalidPublicKeyError,
   InvalidWebSocketUrlError,
   InvokeFailedError,
+  NotOwnerError,
   ReadOnlyModeError,
   RequestTimeoutError,
   mapContractError,
@@ -194,6 +196,15 @@ export interface SoroWillReadCacheOptions {
   ttlMs?: number;
   /** Maximum cached entries before least-recently-used eviction. Defaults to 1000. */
   maxEntries?: number;
+}
+
+/** Soroban contract storage durability tier. */
+export type ContractStorageDurability = 'persistent' | 'temporary' | 'instance';
+
+/** Options for building a contract storage ledger entry key. */
+export interface ContractStorageLedgerKeyOptions {
+  /** Storage durability tier. Defaults to `'persistent'`. */
+  durability?: ContractStorageDurability;
 }
 
 export type {
@@ -1741,6 +1752,13 @@ export class SoroWillClient {
       }
     }
 
+    // #655: Validate ownership before submitting the release transaction so
+    // non-owners fail fast with NotOwnerError instead of hitting the network.
+    const caller = await this.getWalletPublicKey();
+    if (caller !== will.owner) {
+      throw new NotOwnerError();
+    }
+
     await this.validateBeneficiariesFunded(will.beneficiaries);
 
     const { txHash } = await this.invoke(
@@ -2009,6 +2027,86 @@ export class SoroWillClient {
    */
   getActiveRpcUrl(): string {
     return this.rpcPool.getActiveRpcUrl();
+  }
+
+  /**
+   * Builds the Soroban `xdr.LedgerKey` for a contract storage entry on this
+   * client's contract, enabling advanced users to query contract state directly
+   * via `getLedgerEntries` or inspect ledger footprints for debugging.
+   *
+   * @param key - Storage key as an `xdr.ScVal` or symbol string (ignored when
+   *   `durability` is `'instance'`).
+   * @param options - Optional durability tier (`'persistent'`, `'temporary'`,
+   *   or `'instance'`). Defaults to `'persistent'`.
+   * @returns The constructed `xdr.LedgerKey` for the contract data entry.
+   * @throws {SoroWillError} If `durability` is invalid or `key` is missing/empty
+   *   for non-instance storage.
+   *
+   * @example
+   * ```ts
+   * const ledgerKey = client.getContractStorageLedgerKey('admin');
+   * const base64Key = ledgerKey.toXDR('base64');
+   * ```
+   */
+  getContractStorageLedgerKey(
+    key: xdr.ScVal | string,
+    options?: ContractStorageLedgerKeyOptions,
+  ): xdr.LedgerKey {
+    const durability = options?.durability ?? 'persistent';
+    const contractAddress = Address.fromString(this.contract.contractId()).toScAddress();
+
+    if (durability === 'instance') {
+      return xdr.LedgerKey.contractData(
+        new xdr.LedgerKeyContractData({
+          contract: contractAddress,
+          key: xdr.ScVal.scvLedgerKeyContractInstance(),
+          durability: xdr.ContractDataDurability.persistent(),
+        }),
+      );
+    }
+
+    if (durability !== 'persistent' && durability !== 'temporary') {
+      throw new SoroWillError(
+        `Invalid contract storage durability "${String(durability)}": expected "persistent", "temporary", or "instance"`,
+      );
+    }
+
+    let scKey: xdr.ScVal;
+    if (typeof key === 'string') {
+      if (key.length === 0) {
+        throw new SoroWillError('Contract storage key string must not be empty');
+      }
+      scKey = xdr.ScVal.scvSymbol(key);
+    } else if (key instanceof xdr.ScVal) {
+      scKey = key;
+    } else {
+      throw new SoroWillError('Contract storage key must be a non-empty string or an xdr.ScVal');
+    }
+
+    const xdrDurability =
+      durability === 'temporary'
+        ? xdr.ContractDataDurability.temporary()
+        : xdr.ContractDataDurability.persistent();
+
+    return xdr.LedgerKey.contractData(
+      new xdr.LedgerKeyContractData({
+        contract: contractAddress,
+        key: scKey,
+        durability: xdrDurability,
+      }),
+    );
+  }
+
+  /**
+   * Builds the Soroban `xdr.LedgerKey` for this contract's instance storage
+   * entry (`ScvLedgerKeyContractInstance`).
+   *
+   * @returns The constructed `xdr.LedgerKey` for the contract instance entry.
+   */
+  getContractInstanceLedgerKey(): xdr.LedgerKey {
+    return this.getContractStorageLedgerKey(xdr.ScVal.scvLedgerKeyContractInstance(), {
+      durability: 'instance',
+    });
   }
 
   /**
