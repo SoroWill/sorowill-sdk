@@ -101,6 +101,7 @@ export type {
 export { SOROBAN_EVENT_TYPES, WillStatus, WillErrorCode } from './types';
 
 export {
+  DEFAULT_FREIGHTER_CONNECT_TIMEOUT_MS,
   FreighterWalletAdapter,
   WalletSessionError,
   assertWalletSessionActive,
@@ -108,6 +109,7 @@ export {
   freighterAdapter,
   getDefaultWalletAdapter,
   getPublicKey,
+  isFreighterConnectionTimeoutError,
   isFreighterInstalled,
   isFreighterInstallCheckError,
   isSignTransactionTimeoutError,
@@ -150,7 +152,12 @@ export {
   escapeCacheKeyComponent,
   escapeKeyComponent,
 } from './cache';
-export type { CachePersistenceAdapter, PersistedCacheEntry, ReadCacheOptions } from './cache';
+export type {
+  CacheGetResult,
+  CachePersistenceAdapter,
+  PersistedCacheEntry,
+  ReadCacheOptions,
+} from './cache';
 
 export {
   addEventListener,
@@ -181,6 +188,7 @@ export {
   DuplicateOperationError,
   ExorbitantFeeError,
   FixedAmountExceedsBalanceError,
+  FreighterConnectionTimeoutError,
   FreighterInstallCheckError,
   FreighterNotAvailableError,
   GracePeriodActiveError,

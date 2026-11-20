@@ -45,9 +45,20 @@ function withPersistenceLock(
   return result;
 }
 
+export interface CacheGetResult<T> {
+  value: T;
+  stale: boolean;
+  indicator?: 'offline';
+}
+
 export interface ReadCacheOptions {
   ttlMs?: number;
   now?: () => number;
+  /**
+   * Optional network connectivity check. Defaults to `navigator.onLine` when
+   * available in browser environments, or `true` otherwise.
+   */
+  isOnline?: () => boolean;
   persistence?: CachePersistenceAdapter;
   /**
    * Maximum number of entries to keep in the cache. When the number of entries
@@ -257,6 +268,10 @@ export class ReadCache {
   private readonly entries = new Map<string, CacheEntry>();
   private readonly ttlMs: number;
   private readonly now: () => number;
+  private readonly isOnlineFn: (() => boolean) | undefined;
+  private offlineSince: number | null = null;
+  private readonly onOnlineHandler: (() => void) | undefined;
+  private readonly onOfflineHandler: (() => void) | undefined;
   private readonly persistence: CachePersistenceAdapter | undefined;
   private readonly maxEntries: number;
   private readonly onPersistenceFailure: ((key: string, error: unknown) => void) | undefined;
@@ -312,11 +327,86 @@ export class ReadCache {
     }
 
     this.now = options.now ?? Date.now;
+    this.isOnlineFn = options.isOnline;
     this.persistence = options.persistence;
     this.maxEntries = options.maxEntries ?? DEFAULT_MAX_CACHE_ENTRIES;
     this.onPersistenceFailure = options.onPersistenceFailure;
     this.rollbackOnPersistenceFailure = options.rollbackOnPersistenceFailure ?? false;
+
+    if (!this.checkOnline()) {
+      this.offlineSince = this.now();
+    }
+
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      this.onOfflineHandler = () => {
+        if (this.offlineSince === null) {
+          this.offlineSince = this.now();
+        }
+      };
+      this.onOnlineHandler = () => {
+        this.restoreOnlineTtl();
+      };
+      window.addEventListener('offline', this.onOfflineHandler);
+      window.addEventListener('online', this.onOnlineHandler);
+    }
+
     this.readyPromise = this.hydrate();
+  }
+
+  /** Removes browser online/offline event listeners registered by this cache. */
+  destroy(): void {
+    if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+      if (this.onOfflineHandler) {
+        window.removeEventListener('offline', this.onOfflineHandler);
+      }
+      if (this.onOnlineHandler) {
+        window.removeEventListener('online', this.onOnlineHandler);
+      }
+    }
+  }
+
+  /** Whether the network is currently detected as offline. */
+  get isOffline(): boolean {
+    return !this.checkOnline();
+  }
+
+  private readOnlineState(): boolean {
+    if (this.isOnlineFn) {
+      return this.isOnlineFn();
+    }
+    if (typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean') {
+      return navigator.onLine;
+    }
+    return true;
+  }
+
+  private restoreOnlineTtl(): void {
+    if (this.offlineSince === null) {
+      return;
+    }
+    const offlineDuration = Math.max(0, this.now() - this.offlineSince);
+    this.offlineSince = null;
+    if (offlineDuration > 0) {
+      for (const entry of this.entries.values()) {
+        if (entry.expiresAt !== null) {
+          entry.expiresAt += offlineDuration;
+        }
+      }
+    }
+  }
+
+  private checkOnline(): boolean {
+    const online = this.readOnlineState();
+    if (!online) {
+      if (this.offlineSince === null) {
+        this.offlineSince = this.now();
+      }
+      return false;
+    }
+    if (this.offlineSince !== null) {
+      this.restoreOnlineTtl();
+    }
+    return true;
   }
 
   /** Number of entries currently held in memory (expired entries included until pruned). */
@@ -348,13 +438,21 @@ export class ReadCache {
    * @param key - The cache key to look up
    * @returns The cached value if found and not expired, or undefined
    */
-  get<T>(key: string): T | undefined {
+  /**
+   * Retrieves a cached value along with staleness and offline status metadata.
+   * When offline, expired entries are retained and returned with `stale: true`
+   * and `indicator: 'offline'` instead of being evicted.
+   */
+  getWithStatus<T>(key: string): CacheGetResult<T> | undefined {
     const entry = this.entries.get(key);
     if (!entry) {
       return undefined;
     }
 
-    if (isExpired(entry.expiresAt, this.now())) {
+    const online = this.checkOnline();
+    const expired = isExpired(entry.expiresAt, this.now());
+
+    if (expired && online) {
       this.invalidateExpired(key);
       return undefined;
     }
@@ -363,7 +461,23 @@ export class ReadCache {
     this.entries.delete(key);
     this.entries.set(key, entry);
 
-    return entry.value as T;
+    if (expired && !online) {
+      return {
+        value: entry.value as T,
+        stale: true,
+        indicator: 'offline',
+      };
+    }
+
+    return {
+      value: entry.value as T,
+      stale: false,
+      ...(online ? {} : { indicator: 'offline' as const }),
+    };
+  }
+
+  get<T>(key: string): T | undefined {
+    return this.getWithStatus<T>(key)?.value;
   }
 
   set(key: string, value: unknown, willIds: Iterable<string> = []): void {
@@ -501,18 +615,22 @@ export class ReadCache {
       return;
     }
 
-    // Drop expired entries first so live data is not evicted in their place.
-    const now = this.now();
-    for (const [key, entry] of this.entries) {
-      if (entry.expiresAt !== null && entry.expiresAt <= now) {
-        this.entries.delete(key);
-        this.touchedKeys.add(key);
-        if (this.persistence) {
-          void withPersistenceLock(this.persistence, async () => {
-            await this.persistence!.delete(key).catch((err) =>
-              this.onPersistenceFailure?.(key, err),
-            );
-          });
+    // Drop expired entries first when online so live data is not evicted in their place.
+    // While offline, expired entries are preserved so stale data remains available.
+    const online = this.checkOnline();
+    if (online) {
+      const now = this.now();
+      for (const [key, entry] of this.entries) {
+        if (entry.expiresAt !== null && entry.expiresAt <= now) {
+          this.entries.delete(key);
+          this.touchedKeys.add(key);
+          if (this.persistence) {
+            void withPersistenceLock(this.persistence, async () => {
+              await this.persistence!.delete(key).catch((err) =>
+                this.onPersistenceFailure?.(key, err),
+              );
+            });
+          }
         }
       }
     }
@@ -585,6 +703,7 @@ export class ReadCache {
     }
 
     const now = this.now();
+    const online = this.checkOnline();
     // Entries written while hydration was in flight are more recent than
     // anything persisted, so they are moved behind the hydrated entries below
     // to keep LRU order correct.
@@ -596,7 +715,7 @@ export class ReadCache {
       if (this.touchedKeys.has(persistedEntry.key)) {
         continue;
       }
-      if (persistedEntry.expiresAt !== null && persistedEntry.expiresAt <= now) {
+      if (online && persistedEntry.expiresAt !== null && persistedEntry.expiresAt <= now) {
         await this.persist((adapter) => adapter.delete(persistedEntry.key));
         continue;
       }

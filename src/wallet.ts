@@ -1,6 +1,7 @@
 import type FreighterApi from '@stellar/freighter-api';
 
 import {
+  FreighterConnectionTimeoutError,
   FreighterInstallCheckError,
   FreighterNotAvailableError,
   InvalidSignedXdrEncodingError,
@@ -62,6 +63,16 @@ export function isFreighterInstallCheckError(
 ): error is FreighterInstallCheckError {
   return error instanceof FreighterInstallCheckError;
 }
+
+/** Type guard for {@link FreighterConnectionTimeoutError}. */
+export function isFreighterConnectionTimeoutError(
+  error: unknown,
+): error is FreighterConnectionTimeoutError {
+  return error instanceof FreighterConnectionTimeoutError;
+}
+
+/** Default timeout (ms) for Freighter wallet connection requests. */
+export const DEFAULT_FREIGHTER_CONNECT_TIMEOUT_MS = 30_000;
 
 /**
  * Represents a wallet session token used for transaction signing.
@@ -693,6 +704,12 @@ export interface FreighterWalletAdapterOptions extends WalletSessionOptions {
    * {@link DEFAULT_FREIGHTER_INJECTION_RETRY_DELAY_MS}.
    */
   injectionRetryDelayMs?: number;
+  /**
+   * Maximum time in milliseconds to wait for Freighter to respond during
+   * `connect()` / `reconnect()`. Defaults to
+   * {@link DEFAULT_FREIGHTER_CONNECT_TIMEOUT_MS} (30s).
+   */
+  connectTimeoutMs?: number;
 }
 
 /**
@@ -713,6 +730,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
   private readonly sessionTtlMs: number;
   private readonly injectionRetries: number;
   private readonly injectionRetryDelayMs: number;
+  private readonly connectTimeoutMs: number;
   private session?: WalletSession;
   /**
    * Whether the extension context is currently known to be stale/invalidated.
@@ -728,12 +746,16 @@ export class FreighterWalletAdapter implements WalletAdapter {
     this.sessionTtlMs = options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
     this.injectionRetries = options.injectionRetries ?? DEFAULT_FREIGHTER_INJECTION_RETRIES;
     this.injectionRetryDelayMs = options.injectionRetryDelayMs ?? DEFAULT_FREIGHTER_INJECTION_RETRY_DELAY_MS;
+    this.connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_FREIGHTER_CONNECT_TIMEOUT_MS;
 
     if (this.injectionRetries <= 0) {
       throw new RangeError('injectionRetries must be greater than 0');
     }
     if (this.injectionRetryDelayMs < 0) {
       throw new RangeError('injectionRetryDelayMs must be non-negative');
+    }
+    if (!Number.isFinite(this.connectTimeoutMs) || this.connectTimeoutMs <= 0) {
+      throw new RangeError('connectTimeoutMs must be a positive finite number');
     }
   }
 
@@ -851,32 +873,57 @@ export class FreighterWalletAdapter implements WalletAdapter {
     return isConnected;
   }
 
+  /**
+   * Races a Freighter connection operation against {@link connectTimeoutMs}
+   * so a hung or unresponsive extension fails with a clear recovery message.
+   */
+  private async withConnectTimeout<T>(operation: () => Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race<T>([
+        operation(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new FreighterConnectionTimeoutError(this.connectTimeoutMs)),
+            this.connectTimeoutMs,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+    }
+  }
+
   async connect(): Promise<WalletConnection> {
-    await this.assertFreighterVersion();
-    const freighterApi = await loadFreighterApi();
-    const access = await freighterApi.requestAccess();
-    if (access.error) {
-      this.handlePossibleContextInvalidation(access.error);
-      throw new Error(access.error.message);
-    }
+    return this.withConnectTimeout(async () => {
+      await this.assertFreighterVersion();
+      const freighterApi = await loadFreighterApi();
+      const access = await freighterApi.requestAccess();
+      if (access.error) {
+        this.handlePossibleContextInvalidation(access.error);
+        throw new Error(access.error.message);
+      }
 
-    const networkDetails = await freighterApi.getNetworkDetails();
-    if (networkDetails?.error) {
-      this.handlePossibleContextInvalidation(networkDetails.error);
-      throw new Error(networkDetails.error.message);
-    }
+      const networkDetails = await freighterApi.getNetworkDetails();
+      if (networkDetails?.error) {
+        this.handlePossibleContextInvalidation(networkDetails.error);
+        throw new Error(networkDetails.error.message);
+      }
 
-    const networkPassphrase = networkDetails?.networkPassphrase ?? '';
-    this.assertNetworkMatches(networkPassphrase);
+      const networkPassphrase = networkDetails?.networkPassphrase ?? '';
+      this.assertNetworkMatches(networkPassphrase);
 
-    // Successful connect — extension is live, clear any stale flag.
-    this._extensionContextStale = false;
+      // Successful connect — extension is live, clear any stale flag.
+      this._extensionContextStale = false;
 
-    return {
-      publicKey: access.address,
-      network: networkDetails?.network ?? '',
-      networkPassphrase,
-    };
+      return {
+        publicKey: access.address,
+        network: networkDetails?.network ?? '',
+        networkPassphrase,
+      };
+    });
   }
 
   async reconnect(): Promise<WalletConnection> {
@@ -885,37 +932,39 @@ export class FreighterWalletAdapter implements WalletAdapter {
       return this.connect();
     }
 
-    let publicKey: string;
-    try {
-      publicKey = await this.getPublicKey();
-    } catch (error) {
-      // If getPublicKey failed due to context error, fall through to connect
-      if (this._extensionContextStale) {
-        return this.connect();
+    return this.withConnectTimeout(async () => {
+      let publicKey: string;
+      try {
+        publicKey = await this.getPublicKey();
+      } catch (error) {
+        // If getPublicKey failed due to context error, fall through to connect
+        if (this._extensionContextStale) {
+          return this.connect();
+        }
+        throw error;
       }
-      throw error;
-    }
 
-    const freighterApi = await this.loadInjectedFreighterApi();
-    const networkDetails = await freighterApi.getNetworkDetails();
-    if (networkDetails?.error) {
-      this.handlePossibleContextInvalidation(networkDetails.error);
-      if (this._extensionContextStale) {
-        return this.connect();
+      const freighterApi = await this.loadInjectedFreighterApi();
+      const networkDetails = await freighterApi.getNetworkDetails();
+      if (networkDetails?.error) {
+        this.handlePossibleContextInvalidation(networkDetails.error);
+        if (this._extensionContextStale) {
+          return this.connect();
+        }
+        throw new Error(networkDetails.error.message);
       }
-      throw new Error(networkDetails.error.message);
-    }
 
-    const networkPassphrase = networkDetails?.networkPassphrase ?? '';
-    this.assertNetworkMatches(networkPassphrase);
+      const networkPassphrase = networkDetails?.networkPassphrase ?? '';
+      this.assertNetworkMatches(networkPassphrase);
 
-    this._extensionContextStale = false;
+      this._extensionContextStale = false;
 
-    return {
-      publicKey,
-      network: networkDetails?.network ?? '',
-      networkPassphrase,
-    };
+      return {
+        publicKey,
+        network: networkDetails?.network ?? '',
+        networkPassphrase,
+      };
+    });
   }
 
   async disconnect(): Promise<void> {

@@ -2030,7 +2030,7 @@ export class SoroWillClient {
   async getWill(willId: string, options?: RequestOptions): Promise<Will> {
     const canonicalWillId = parseWillId(willId).toString();
     const cacheKey = createReadCacheKey('get_will', { willId: canonicalWillId });
-    if (this.readCache) {
+    if (this.readCache && !options?.skipCache) {
       await this.readCache.ready();
       const cached = this.readCache.get<Will>(cacheKey);
       if (cached !== undefined) {
@@ -2065,7 +2065,7 @@ export class SoroWillClient {
     const uniqueIds = Array.from(new Set(canonicalIds));
     const cacheKey = createReadCacheKey('get_wills', { will_ids: uniqueIds.join(',') });
 
-    if (this.readCache) {
+    if (this.readCache && !options?.skipCache) {
       await this.readCache.ready();
       const cached = this.readCache.get<Will[]>(cacheKey);
       if (cached !== undefined) {
@@ -2139,7 +2139,7 @@ export class SoroWillClient {
       normalizePositiveInteger(paginationOptions.pageSize, 'pageSize');
     }
     const cacheKey = createReadCacheKey('get_wills_by_owner', { owner });
-    if (this.readCache) {
+    if (this.readCache && !options?.skipCache) {
       await this.readCache.ready();
       const cached = this.readCache.get<Will[]>(cacheKey);
       if (cached !== undefined) {
@@ -2216,7 +2216,7 @@ export class SoroWillClient {
       normalizePositiveInteger(paginationOptions.pageSize, 'pageSize');
     }
     const cacheKey = createReadCacheKey('get_wills_by_beneficiary', { beneficiary });
-    if (this.readCache) {
+    if (this.readCache && !options?.skipCache) {
       await this.readCache.ready();
       const cached = this.readCache.get<Will[]>(cacheKey);
       if (cached !== undefined) {
@@ -2434,6 +2434,24 @@ export class SoroWillClient {
     if (operations.length > 1) {
       throw new UnsupportedBatchSizeError(operations.length);
     }
+    if (operations[0].condition) {
+      const shouldRun = await operations[0].condition([]);
+      if (!shouldRun) {
+        return {
+          success: true,
+          txHash: '',
+          createdAt: 0,
+          results: [
+            {
+              index: 0,
+              method: operations[0].method,
+              status: 'skipped',
+              attempts: 0,
+            },
+          ] as unknown as BatchOperationResults<TOperations>,
+        };
+      }
+    }
     await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const hookContexts = operations.map(({ method, args }) => ({
       before: {
@@ -2561,7 +2579,7 @@ export class SoroWillClient {
     const results: BatchOperationResult[] = [];
     let halted: Error | undefined;
 
-    for (const [index, { method, args }] of operations.entries()) {
+    for (const [index, { method, args, condition }] of operations.entries()) {
       if (!halted && requestOptions.signal?.aborted) {
         halted = new SoroWillError('Batch aborted before this operation was submitted', {
           cause: requestOptions.signal.reason,
@@ -2570,6 +2588,27 @@ export class SoroWillClient {
       if (halted) {
         results.push({ index, method, status: 'skipped', error: halted, attempts: 0 });
         continue;
+      }
+
+      if (condition) {
+        let shouldRun: boolean;
+        try {
+          shouldRun = await condition(results);
+        } catch (err) {
+          const conditionError = err instanceof Error ? err : new Error(String(err));
+          results.push({ index, method, status: 'failed', error: conditionError, attempts: 0 });
+          if (onFailure === 'stop') {
+            halted = new SoroWillError(
+              `Skipped because operation ${index} (${method}) condition failed: ${conditionError.message}`,
+              { cause: conditionError },
+            );
+          }
+          continue;
+        }
+        if (!shouldRun) {
+          results.push({ index, method, status: 'skipped', attempts: 0 });
+          continue;
+        }
       }
 
       let attempts = 0;
@@ -3218,13 +3257,32 @@ export class SoroWillClient {
    * signature. Identical concurrent calls (same method, arguments and
    * request options) are coalesced into a single RPC simulation (#619).
    */
-  private read<T>(
+  private async read<T>(
     method: string,
     args: Record<string, unknown>,
     options?: RequestOptions,
   ): Promise<T> {
+    const rawCacheKey = this.readCache ? createReadCacheKey(`raw:${method}`, args) : undefined;
+    if (this.readCache && rawCacheKey && !options?.skipCache) {
+      await this.readCache.ready();
+      const cached = this.readCache.get<T>(rawCacheKey);
+      if (cached !== undefined) {
+        return cached;
+      }
+    }
+
+    const executeAndCache = async (): Promise<T> => {
+      const value = await this.executeRead<T>(method, args, options);
+      if (this.readCache && rawCacheKey) {
+        const willIds =
+          args.will_id !== undefined && args.will_id !== null ? [String(args.will_id)] : [];
+        this.readCache.set(rawCacheKey, value, willIds);
+      }
+      return value;
+    };
+
     if (!this.deduplicateReads || options?.signal) {
-      return this.executeRead<T>(method, args, options);
+      return executeAndCache();
     }
 
     const key = createReadCacheKey(method, {
@@ -3238,7 +3296,7 @@ export class SoroWillClient {
       return existing as Promise<T>;
     }
 
-    const pending = this.executeRead<T>(method, args, options).finally(() => {
+    const pending = executeAndCache().finally(() => {
       if (this.inFlightReads.get(key) === pending) {
         this.inFlightReads.delete(key);
       }

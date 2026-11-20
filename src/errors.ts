@@ -415,6 +415,22 @@ export class SignTransactionTimeoutError extends SoroWillError {
 }
 
 /**
+ * Raised when connecting to Freighter does not complete within the configured
+ * timeout (30 seconds by default). Carries actionable recovery steps for users.
+ */
+export class FreighterConnectionTimeoutError extends SoroWillError {
+  /** The timeout value (in milliseconds) that was exceeded. */
+  readonly timeoutMs: number;
+  /** Ordered recovery steps suggested to the user. */
+  readonly recoverySteps: readonly string[] = ['Refresh', 'Check extension', 'Retry'];
+
+  constructor(timeoutMs: number = 30_000, options?: ErrorOptions) {
+    super('Freighter not responding. Try: 1) Refresh 2) Check extension 3) Retry', options);
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
  * Raised when a beneficiary list fails client-side validation before a
  * transaction is built or sent. Thrown by {@link SoroWillClient.createWill}
  * and {@link SoroWillClient.updateBeneficiaries} when
