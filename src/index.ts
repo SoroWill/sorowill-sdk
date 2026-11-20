@@ -111,9 +111,11 @@ export {
   isFreighterInstalled,
   isFreighterInstallCheckError,
   isSignTransactionTimeoutError,
+  isValidWalletSessionToken,
   isWalletNetworkMismatchError,
   isWalletSessionError,
   signTransaction,
+  validateWalletSessionToken,
 } from './wallet';
 export type {
   WalletAdapter,

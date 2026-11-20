@@ -405,6 +405,14 @@ export interface BatchOperation {
    * configured network.
    */
   network?: 'testnet' | 'mainnet';
+  /**
+   * Optional predicate evaluated immediately before this operation is
+   * submitted. Receives the results of all prior operations in the batch.
+   *
+   * Return `false` to skip this operation (its status will be `'skipped'`
+   * with `attempts: 0`). When omitted, the operation executes unconditionally.
+   */
+  when?: (priorResults: readonly BatchOperationResult[]) => boolean | Promise<boolean>;
 }
 
 /** Maps a tuple of operations to a tuple of their typed results, preserving order and length. */

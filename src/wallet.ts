@@ -64,7 +64,48 @@ export function isFreighterInstallCheckError(
 }
 
 /**
+ * Maximum allowed length for a {@link WalletSession} token string.
+ */
+const MAX_WALLET_SESSION_TOKEN_LENGTH = 4096;
+
+/**
+ * Allowed character set for {@link WalletSession} tokens: printable URL-safe /
+ * base64 / JWT / Stellar StrKey characters with no whitespace or control chars.
+ */
+const WALLET_SESSION_TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]+$/;
+
+/**
+ * Returns `true` when `token` is a non-empty string with a valid session token
+ * format (no whitespace, control characters, or arbitrary punctuation, and
+ * within {@link MAX_WALLET_SESSION_TOKEN_LENGTH}).
+ */
+export function isValidWalletSessionToken(token: unknown): token is string {
+  return (
+    typeof token === 'string' &&
+    token.length > 0 &&
+    token.length <= MAX_WALLET_SESSION_TOKEN_LENGTH &&
+    WALLET_SESSION_TOKEN_PATTERN.test(token)
+  );
+}
+
+/**
+ * Validates that `token` conforms to the expected {@link WalletSession} token
+ * format and returns it, throwing {@link WalletSessionError} otherwise.
+ */
+export function validateWalletSessionToken(token: unknown): string {
+  if (!isValidWalletSessionToken(token)) {
+    throw new WalletSessionError(
+      'The wallet session token has an invalid format. Reconnect the wallet and try again.',
+    );
+  }
+  return token;
+}
+
+/**
  * Represents a wallet session token used for transaction signing.
+ *
+ * `token` must be a non-empty string matching `/^[A-Za-z0-9._~+/=-]+$/`
+ * (up to 4096 characters, with no whitespace or control characters).
  */
 export interface WalletSession {
   token: string;
@@ -630,7 +671,13 @@ export async function ensureValidSession(
     );
   }
 
-  if (session && session.token && session.expiresAt !== undefined && session.expiresAt > now) {
+  if (session && typeof session.token === 'string' && session.token.length > 0 && !isValidWalletSessionToken(session.token)) {
+    throw new WalletSessionError(
+      'The wallet session token has an invalid format. Reconnect the wallet and try again.',
+    );
+  }
+
+  if (session && isValidWalletSessionToken(session.token) && session.expiresAt !== undefined && session.expiresAt > now) {
     return session.token;
   }
 
@@ -650,7 +697,7 @@ export async function ensureValidSession(
     );
   }
 
-  if (!refreshed || !refreshed.token || refreshed.expiresAt === undefined || refreshed.expiresAt <= now) {
+  if (!refreshed || !isValidWalletSessionToken(refreshed.token) || refreshed.expiresAt === undefined || refreshed.expiresAt <= now) {
     throw new WalletSessionError(
       'The wallet session token is still invalid after refreshing. Reconnect the wallet and try again.',
     );
@@ -1006,8 +1053,9 @@ export class FreighterWalletAdapter implements WalletAdapter {
    */
   async refreshSession(): Promise<WalletSession> {
     const publicKey = await this.getPublicKey();
+    const token = validateWalletSessionToken(publicKey);
     this.session = {
-      token: publicKey,
+      token,
       expiresAt: Date.now() + this.sessionTtlMs,
     };
     return this.session;
@@ -1177,7 +1225,13 @@ export async function assertWalletSessionActive(
     return;
   }
 
-  if (!session || !session.expiresAt) {
+  if (!session) {
+    return;
+  }
+
+  validateWalletSessionToken(session.token);
+
+  if (!session.expiresAt) {
     return;
   }
 
@@ -1196,7 +1250,13 @@ export async function assertWalletSessionActive(
     throw new WalletSessionExpiredError(session.expiresAt, { cause: err });
   }
 
-  if (!refreshed || !refreshed.expiresAt || refreshed.expiresAt <= now) {
+  if (!refreshed || !isValidWalletSessionToken(refreshed.token)) {
+    throw new WalletSessionError(
+      'The refreshed wallet session token has an invalid format. Reconnect the wallet and try again.',
+    );
+  }
+
+  if (!refreshed.expiresAt || refreshed.expiresAt <= now) {
     throw new WalletSessionExpiredError(refreshed?.expiresAt);
   }
 }
