@@ -227,7 +227,42 @@ export enum RequestPriority {
   High = 2,
 }
 
+/** Maximum number of completed request traces kept for debugging. */
+export const MAX_REQUEST_TRACES = 100;
+
+/**
+ * Lifecycle record for one executed request, returned by
+ * {@link RequestQueue.getTraces}.
+ */
+export interface RequestTrace {
+  /** Unique ID generated for the request when it was enqueued. */
+  id: string;
+  /** Operation type passed to `enqueue`, if any. */
+  method: string | undefined;
+  priority: RequestPriority;
+  /** Epoch ms when the request entered the queue. */
+  enqueuedAt: number;
+  /** Epoch ms when the request was sent (execution started). */
+  sentAt: number;
+  /** Epoch ms when the response, error or timeout was received. */
+  respondedAt: number;
+  /** Time spent waiting in the queue before being sent. */
+  queuedMs: number;
+  /** Time from being sent until the response was received. */
+  roundTripMs: number;
+  status: 'success' | 'error';
+}
+
+let requestSequence = 0;
+
+/** Generates a request ID that is unique within this process. */
+function nextRequestId(): string {
+  requestSequence += 1;
+  return `req-${Date.now().toString(36)}-${requestSequence.toString(36)}`;
+}
+
 interface PendingRequest<T> {
+  id: string;
   run: () => Promise<T>;
   resolve: (value: T) => void;
   reject: (reason: unknown) => void;
@@ -253,6 +288,8 @@ class QueueCore {
   readonly maxBackoffMs: number;
   readonly pending: Array<PendingRequest<unknown>> = [];
   readonly starts: number[] = [];
+  /** Most recent completed request traces, oldest first. */
+  readonly traces: RequestTrace[] = [];
   active = 0;
   wakeTimer: ReturnType<typeof setTimeout> | undefined;
   refCount = 0;
@@ -359,6 +396,7 @@ export class RequestQueue {
         signal,
         abortListener: undefined,
         priority,
+        id: nextRequestId(),
         enqueuedAt: Date.now(),
         method,
       };
@@ -411,6 +449,40 @@ export class RequestQueue {
     core.refCount -= 1;
     if (core.refCount <= 0) {
       sharedCores.delete(this.account);
+    }
+  }
+
+  /**
+   * Returns the lifecycle traces of the most recently executed requests on
+   * this queue's account (oldest first, at most {@link MAX_REQUEST_TRACES}).
+   * Each trace gives the request ID, operation type, and queued / round-trip
+   * timings. Intended for debugging; returned objects are copies.
+   */
+  getTraces(): RequestTrace[] {
+    return this.core.traces.map((trace) => ({ ...trace }));
+  }
+
+  /** Returns the trace for a request ID, or `undefined` if it has been dropped or never ran. */
+  getTrace(id: string): RequestTrace | undefined {
+    const trace = this.core.traces.find((candidate) => candidate.id === id);
+    return trace ? { ...trace } : undefined;
+  }
+
+  private recordTrace<T>(request: PendingRequest<T>, sentAt: number, succeeded: boolean): void {
+    const respondedAt = Date.now();
+    this.core.traces.push({
+      id: request.id,
+      method: request.method,
+      priority: request.priority,
+      enqueuedAt: request.enqueuedAt,
+      sentAt,
+      respondedAt,
+      queuedMs: sentAt - request.enqueuedAt,
+      roundTripMs: respondedAt - sentAt,
+      status: succeeded ? 'success' : 'error',
+    });
+    if (this.core.traces.length > MAX_REQUEST_TRACES) {
+      this.core.traces.shift();
     }
   }
 
@@ -503,12 +575,16 @@ export class RequestQueue {
       }
     };
 
+    const sentAt = Date.now();
+    let succeeded = false;
     try {
       const result = await executeWithRetry(0);
+      succeeded = true;
       request.resolve(result);
     } catch (error) {
       request.reject(error);
     } finally {
+      this.recordTrace(request, sentAt, succeeded);
       this.removeAbortListener(request);
       this.core.active -= 1;
       this.drain();

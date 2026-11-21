@@ -18,6 +18,12 @@ export const DEFAULT_RPC_ENDPOINT_BACKOFF_BASE_MS = 1_000;
 export const DEFAULT_RPC_ENDPOINT_BACKOFF_MAX_MS = 30_000;
 
 /**
+ * How often endpoint health is re-checked once monitoring has started. Each
+ * tick also acts as the recovery attempt for endpoints marked unhealthy.
+ */
+export const DEFAULT_RPC_HEALTH_CHECK_INTERVAL_MS = 30_000;
+
+/**
  * Validates an RPC endpoint URL at the moment it enters an
  * {@link RpcEndpointPool} (construction or {@link RpcEndpointPool.add}), so
  * that malformed URLs are rejected immediately instead of surfacing as
@@ -276,6 +282,9 @@ export class RpcEndpointPool {
   private readonly backoffUntil: number[] = [];
   private readonly consecutiveFailures: number[] = [];
   private readonly latencyHistory: number[][] = [];
+  /** Last health-check result per endpoint; `undefined` until first checked. */
+  private healthy: Array<boolean | undefined> = [];
+  private healthTimer: ReturnType<typeof setInterval> | undefined;
 
   /**
    * @param serverOverride - When provided (e.g. `SoroWillClientOptions.rpcServer`
@@ -339,6 +348,7 @@ export class RpcEndpointPool {
     this.backoffUntil = uniqueRpcUrls.map(() => 0);
     this.consecutiveFailures = uniqueRpcUrls.map(() => 0);
     this.latencyHistory = uniqueRpcUrls.map(() => []);
+    this.healthy = uniqueRpcUrls.map(() => undefined);
     this.servers = serverOverride
       ? uniqueRpcUrls.map(() => serverOverride)
       : uniqueRpcUrls.map(
@@ -480,7 +490,8 @@ export class RpcEndpointPool {
 
     // Check if the active endpoint is available (not backed off or quarantined)
     const activeIsAvailable = !this.isEndpointUnderBackoff(this.activeIndex) &&
-                              !this.isEndpointQuarantined(this.activeIndex);
+                              !this.isEndpointQuarantined(this.activeIndex) &&
+                              !this.isEndpointUnhealthy(this.activeIndex);
     if (activeIsAvailable) {
       // Prefer the active endpoint when it's available, to maintain sticky
       // routing and to retry endpoints after their backoff expires.
@@ -491,6 +502,7 @@ export class RpcEndpointPool {
       const index = (this.activeIndex + offset) % this.servers.length;
       if (this.isEndpointUnderBackoff(index)) continue;
       if (this.isEndpointQuarantined(index)) continue;
+      if (this.isEndpointUnhealthy(index)) continue;
       const avg = this.getAverageLatency(index);
       if (avg < bestLatency) {
         bestLatency = avg;
@@ -628,6 +640,83 @@ export class RpcEndpointPool {
     }
 
     throw lastError ?? new Error('RPC failover exhausted every configured endpoint');
+  }
+
+  /** `true` when the last health check reported the endpoint at `index` as unhealthy. */
+  private isEndpointUnhealthy(index: number): boolean {
+    return this.healthy[index] === false;
+  }
+
+  /**
+   * Returns the last health-check result for the endpoint at `index`, or
+   * `undefined` when it has not been checked yet.
+   */
+  getEndpointHealth(index: number): boolean | undefined {
+    return this.healthy[index];
+  }
+
+  /**
+   * Probes one endpoint with `getHealth()`. An endpoint is healthy only when
+   * the call succeeds within the request timeout and reports `healthy`. A
+   * server without `getHealth` is treated as unhealthy.
+   */
+  async checkEndpointHealth(index: number): Promise<boolean> {
+    const server = this.servers[index];
+    let isHealthy = false;
+    if (server && typeof server.getHealth === 'function') {
+      try {
+        const response = await withTimeout(server.getHealth(), this.timeoutMs);
+        isHealthy = (response as { status?: unknown }).status === 'healthy';
+      } catch {
+        isHealthy = false;
+      }
+    }
+    this.healthy[index] = isHealthy;
+    return isHealthy;
+  }
+
+  /**
+   * Checks every endpoint. If the active endpoint is unhealthy, routing moves
+   * to the first endpoint that is healthy, so the SDK fails over without
+   * waiting for a request to fail first.
+   */
+  async runHealthChecks(): Promise<void> {
+    await Promise.all(this.servers.map((_, index) => this.checkEndpointHealth(index)));
+    if (this.healthy[this.activeIndex] !== false) {
+      return;
+    }
+    const nextHealthy = this.healthy.findIndex((state) => state === true);
+    if (nextHealthy !== -1 && nextHealthy !== this.activeIndex) {
+      this.activeIndex = nextHealthy;
+      this.lastFailoverAt = Date.now();
+    }
+  }
+
+  /**
+   * Starts health monitoring: runs a check immediately (startup check) and
+   * then re-checks every `intervalMs`, which also retries endpoints that were
+   * previously marked unhealthy. The timer is unref'd so it never keeps a
+   * Node process alive. Calling this again restarts the timer.
+   *
+   * @returns A promise that settles once the startup check has finished.
+   */
+  startHealthMonitoring(intervalMs: number = DEFAULT_RPC_HEALTH_CHECK_INTERVAL_MS): Promise<void> {
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+      throw new RangeError(`intervalMs must be a positive number, received ${intervalMs}`);
+    }
+    this.stopHealthMonitoring();
+    const tick = (): Promise<void> => this.runHealthChecks().catch(() => {});
+    this.healthTimer = setInterval(() => void tick(), intervalMs);
+    (this.healthTimer as { unref?: () => void }).unref?.();
+    return tick();
+  }
+
+  /** Stops periodic health checks started by {@link RpcEndpointPool.startHealthMonitoring}. */
+  stopHealthMonitoring(): void {
+    if (this.healthTimer !== undefined) {
+      clearInterval(this.healthTimer);
+      this.healthTimer = undefined;
+    }
   }
 
   getActiveRpcUrl(): string {
