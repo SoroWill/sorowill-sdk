@@ -150,7 +150,7 @@ export {
   escapeCacheKeyComponent,
   escapeKeyComponent,
 } from './cache';
-export type { CachePersistenceAdapter, PersistedCacheEntry, ReadCacheOptions } from './cache';
+export type { CacheStats, CachePersistenceAdapter, PersistedCacheEntry, ReadCacheOptions } from './cache';
 
 export {
   addEventListener,

@@ -72,6 +72,18 @@ export interface ReadCacheOptions {
   rollbackOnPersistenceFailure?: boolean;
 }
 
+/** Performance metrics returned by {@link ReadCache.getCacheStats}. */
+export interface CacheStats {
+  hits: number;
+  misses: number;
+  /** Percentage (0–100) of lookups served from the cache. */
+  hitRate: number;
+  evictions: number;
+  size: number;
+  /** Estimated in-memory footprint in bytes. */
+  memoryUsageBytes: number;
+}
+
 interface CacheEntry {
   key: string;
   value: unknown;
@@ -285,6 +297,10 @@ export class ReadCache {
    * cache (see {@link ReadCache.setNetwork}).
    */
   private networkPassphrase: string | undefined;
+  /** Lookup counters backing {@link ReadCache.getCacheStats}. */
+  private hits = 0;
+  private misses = 0;
+  private evictions = 0;
 
   constructor(options: ReadCacheOptions = {}) {
     const ttlMs = options.ttlMs ?? 60_000;
@@ -351,19 +367,49 @@ export class ReadCache {
   get<T>(key: string): T | undefined {
     const entry = this.entries.get(key);
     if (!entry) {
+      this.misses += 1;
       return undefined;
     }
 
     if (isExpired(entry.expiresAt, this.now())) {
+      this.misses += 1;
       this.invalidateExpired(key);
       return undefined;
     }
 
+    this.hits += 1;
     // Refresh recency for LRU ordering: re-inserting moves the key to the end.
     this.entries.delete(key);
     this.entries.set(key, entry);
 
     return entry.value as T;
+  }
+
+  /**
+   * Returns a snapshot of cache performance metrics for debugging.
+   *
+   * - `hits` / `misses`: counts of {@link ReadCache.get} lookups.
+   * - `hitRate`: percentage of lookups served from the cache (0 when no
+   *   lookups have happened yet).
+   * - `evictions`: entries removed for being expired or over `maxEntries`.
+   * - `size`: number of entries currently held in memory.
+   * - `memoryUsageBytes`: estimated in-memory footprint of the cached keys
+   *   and serialized values, assuming 2 bytes per UTF-16 code unit.
+   */
+  getCacheStats(): CacheStats {
+    const lookups = this.hits + this.misses;
+    let memoryUsageBytes = 0;
+    for (const entry of this.entries.values()) {
+      memoryUsageBytes += (entry.key.length + serializeCacheValue(entry.value).length) * 2;
+    }
+    return {
+      hits: this.hits,
+      misses: this.misses,
+      hitRate: lookups === 0 ? 0 : (this.hits / lookups) * 100,
+      evictions: this.evictions,
+      size: this.entries.size,
+      memoryUsageBytes,
+    };
   }
 
   set(key: string, value: unknown, willIds: Iterable<string> = []): void {
@@ -506,6 +552,7 @@ export class ReadCache {
     for (const [key, entry] of this.entries) {
       if (entry.expiresAt !== null && entry.expiresAt <= now) {
         this.entries.delete(key);
+        this.evictions += 1;
         this.touchedKeys.add(key);
         if (this.persistence) {
           void withPersistenceLock(this.persistence, async () => {
@@ -526,6 +573,7 @@ export class ReadCache {
       }
 
       this.entries.delete(oldestKey);
+      this.evictions += 1;
       this.touchedKeys.add(oldestKey);
       if (this.persistence) {
         void withPersistenceLock(this.persistence, async () => {
