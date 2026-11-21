@@ -9,6 +9,7 @@
  */
 
 import { StrKey } from '@stellar/stellar-sdk';
+import { MAX_BENEFICIARIES } from './utils';
 
 /**
  * Validates that a will ID is a non-empty string.
@@ -244,6 +245,24 @@ export function validateMemo(memo: string): void {
   if (byteLength > MAX_MEMO_BYTES) {
     throw new RangeError(
       `Memo is too long: ${byteLength} bytes (UTF-8), maximum is ${MAX_MEMO_BYTES} bytes`,
+    );
+  }
+}
+
+/**
+ * Validates a beneficiary count against the contract maximum (#736).
+ *
+ * @param count - Number of beneficiaries being set.
+ * @param max - Contract maximum; defaults to {@link MAX_BENEFICIARIES} (10).
+ * @throws {RangeError} when the count is not a positive integer or exceeds `max`.
+ */
+export function validateBeneficiaryCount(count: unknown, max: number = MAX_BENEFICIARIES): asserts count is number {
+  if (!Number.isInteger(count) || (count as number) < 1) {
+    throw new RangeError(`Invalid beneficiary count: expected a positive integer, got ${String(count)}`);
+  }
+  if ((count as number) > max) {
+    throw new RangeError(
+      `Too many beneficiaries: ${count} provided, contract maximum is ${max}`,
     );
   }
 }
