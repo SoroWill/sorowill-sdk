@@ -968,6 +968,28 @@ function validateContractIdFormat(contractId: unknown): asserts contractId is st
 /** How long {@link SoroWillClient.willStatus} may serve a cached status (#726). */
 const WILL_STATUS_CACHE_TTL_MS = 30_000;
 
+/** Maximum number of items accepted by the batch helpers (#727). */
+const MAX_BATCH_OPERATIONS = 25;
+
+/**
+ * Per-item outcome of {@link SoroWillClient.batchCreateWill} and
+ * {@link SoroWillClient.batchCheckIn}. `index` is the item's position in the input.
+ */
+export type BatchItemResult<T> =
+  | { readonly index: number; readonly status: 'success'; readonly value: T }
+  | { readonly index: number; readonly status: 'error'; readonly error: Error };
+
+function assertBatchSize(length: number, method: string): void {
+  if (length === 0) {
+    throw new SoroWillError(`${method} requires at least one item.`);
+  }
+  if (length > MAX_BATCH_OPERATIONS) {
+    throw new SoroWillError(
+      `${method} accepts at most ${MAX_BATCH_OPERATIONS} items but received ${length}.`,
+    );
+  }
+}
+
 export class SoroWillClient {
   private readonly server: SoroWillRpcServer;
   private readonly rpcPool: RpcEndpointPool;
@@ -1911,6 +1933,68 @@ export class SoroWillClient {
     await this.readCache?.invalidateByWillId(canonicalWillId);
     const will = await this.getWill(canonicalWillId, options);
     return { txHash, remainingBalance: will.balance };
+  }
+
+  /**
+   * Creates several wills, one transaction per entry, submitted sequentially.
+   *
+   * This is not atomic: each will is created by its own transaction. Failures
+   * do not stop the batch. Each entry's outcome is returned in input order, so
+   * a failed entry can be retried without repeating the ones that succeeded (#727).
+   *
+   * @param paramsList - 1 to 25 will definitions.
+   * @param options - Optional request options applied to every transaction.
+   * @returns One {@link BatchItemResult} per input entry, in input order.
+   * @throws {SoroWillError} If the list is empty or has more than 25 entries.
+   */
+  async batchCreateWill(
+    paramsList: readonly CreateWillParams[],
+    options?: RequestOptions,
+  ): Promise<BatchItemResult<{ willId: string; txHash: string }>[]> {
+    assertBatchSize(paramsList.length, 'batchCreateWill');
+    return this.runBatchSequentially(paramsList, (params) => this.createWill(params, options));
+  }
+
+  /**
+   * Resets the check-in countdown for several wills, one transaction per will,
+   * submitted sequentially.
+   *
+   * Not atomic: failures do not stop the batch, and each will's outcome is
+   * returned in input order. Every will ID is validated before any transaction
+   * is submitted (#727).
+   *
+   * @param willIds - 1 to 25 will IDs.
+   * @param options - Optional request options applied to every transaction.
+   * @returns One {@link BatchItemResult} per input ID, in input order.
+   * @throws {SoroWillError} If the list is empty or has more than 25 entries.
+   * @throws {Error} If any will ID is malformed.
+   */
+  async batchCheckIn(
+    willIds: readonly string[],
+    options?: RequestOptions,
+  ): Promise<BatchItemResult<{ txHash: string; nextDeadline: Date }>[]> {
+    assertBatchSize(willIds.length, 'batchCheckIn');
+    const canonicalIds = willIds.map((willId) => parseWillId(willId).toString());
+    return this.runBatchSequentially(canonicalIds, (willId) => this.checkIn(willId, options));
+  }
+
+  private async runBatchSequentially<I, T>(
+    items: readonly I[],
+    run: (item: I) => Promise<T>,
+  ): Promise<BatchItemResult<T>[]> {
+    const results: BatchItemResult<T>[] = [];
+    for (const [index, item] of items.entries()) {
+      try {
+        results.push({ index, status: 'success', value: await run(item) });
+      } catch (error) {
+        results.push({
+          index,
+          status: 'error',
+          error: error instanceof Error ? error : new SoroWillError(String(error)),
+        });
+      }
+    }
+    return results;
   }
 
   // -----------------------------------------------------------------------
