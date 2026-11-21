@@ -229,3 +229,21 @@ export function validatePercentage(percentage: unknown, label = 'percentage'): a
     throw new RangeError(`Invalid ${label}: expected a number between 0 and 100, got ${String(percentage)}`);
   }
 }
+
+/** Maximum memo size in bytes accepted by the Soroban contract (#735). */
+export const MAX_MEMO_BYTES = 28;
+
+/**
+ * Validates that a memo fits the 28-byte Soroban limit, measured as UTF-8 bytes (#735).
+ *
+ * @param memo - The memo text to validate.
+ * @throws {RangeError} when the memo is longer than {@link MAX_MEMO_BYTES} bytes.
+ */
+export function validateMemo(memo: string): void {
+  const byteLength = new TextEncoder().encode(memo).length;
+  if (byteLength > MAX_MEMO_BYTES) {
+    throw new RangeError(
+      `Memo is too long: ${byteLength} bytes (UTF-8), maximum is ${MAX_MEMO_BYTES} bytes`,
+    );
+  }
+}
