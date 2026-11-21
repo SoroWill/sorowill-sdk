@@ -1,6 +1,7 @@
 import type Albedo from '@albedo-link/intent';
 import { Networks } from '@stellar/stellar-sdk';
 
+import { WalletNetworkMismatchError } from '../errors';
 import type { WalletAdapter, WalletConnection } from '../wallet';
 
 /**
@@ -58,11 +59,13 @@ export interface AlbedoAdapterOptions {
  *   `networkPassphrase`; do not reuse one instance across networks, or the
  *   reported network will not match the network the client is configured for
  *   and {@link SoroWillClient.assertWalletNetwork} will surface a mismatch.
- * - Albedo signs transactions for whichever network is passed to `albedo.tx()`;
- *   the SDK forwards `opts.networkPassphrase` on every `signTransaction` call,
- *   so a caller could technically sign for a different network than the one
- *   reported — avoid that, as it produces signatures valid on the wrong
- *   network.
+ * - Albedo signs transactions for whichever network is passed to `albedo.tx()`.
+ *   `signTransaction` rejects with {@link WalletNetworkMismatchError} when
+ *   `opts.networkPassphrase` differs from the adapter's network, so a
+ *   signature valid only on another network is never produced.
+ * - Albedo exposes no network-change event, so a switch made inside the
+ *   Albedo UI is not detected automatically. The mismatch check above is what
+ *   catches it: create a new adapter for the new network and reconnect.
  *
  * ## Known issues
  *
@@ -141,6 +144,12 @@ export function createAlbedoAdapter(options: AlbedoAdapterOptions = {}): WalletA
       transactionXdr: string,
       opts: { networkPassphrase: string },
     ): Promise<string> {
+      // Albedo signs for whatever network is passed to `albedo.tx()`, so a
+      // request for a different network would silently produce a signature
+      // valid only on that network. Reject it before reaching Albedo.
+      if (opts.networkPassphrase !== networkPassphrase) {
+        throw new WalletNetworkMismatchError(networkPassphrase, opts.networkPassphrase);
+      }
       const albedo = await loadAlbedo();
       const { signed_envelope_xdr: signedTxXdr } = await albedo.tx({
         xdr: transactionXdr,

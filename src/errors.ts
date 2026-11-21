@@ -1020,6 +1020,28 @@ export class InvalidDayCountError extends SoroWillError {
 }
 
 /**
+ * Thrown by `createWill` when `gracePeriodDays` is larger than
+ * `checkinPeriodDays`. The contract invariant requires the grace period to be
+ * no longer than the check-in period; a larger grace period breaks will logic.
+ */
+export class GracePeriodExceedsCheckinPeriodError extends SoroWillError {
+  readonly gracePeriodDays: number;
+  readonly checkinPeriodDays: number;
+
+  constructor(gracePeriodDays: number, checkinPeriodDays: number, options?: ErrorOptions) {
+    super(
+      `Invalid gracePeriodDays ${gracePeriodDays}: the grace period must be less than or equal to ` +
+        `checkinPeriodDays (${checkinPeriodDays}). Reduce gracePeriodDays to at most ${checkinPeriodDays} ` +
+        'or increase checkinPeriodDays.',
+      options,
+    );
+    this.name = new.target.name;
+    this.gracePeriodDays = gracePeriodDays;
+    this.checkinPeriodDays = checkinPeriodDays;
+  }
+}
+
+/**
  * Raised when `checkinPeriodDays` passed to {@link SoroWillClient.createWill}
  * exceeds the contract storage TTL window the will entry can survive without
  * a check-in extending it. A will whose check-in deadline outlives the
@@ -1285,17 +1307,52 @@ export class InvalidWebSocketUrlError extends SoroWillError {
  * }
  * ```
  */
+export interface CheckInDuringGracePeriodDetails {
+  /** When the grace period ends (`triggerTime` + `gracePeriodDays`). */
+  graceEndsAt?: Date | undefined;
+  /** Next check-in deadline for the will, if known. */
+  nextDeadline?: Date | undefined;
+  /** Clock used to compute time remaining. Defaults to `Date.now()`. */
+  now?: number | undefined;
+}
+
 export class CheckInDuringGracePeriodError extends SoroWillError {
   /** The will ID that is currently in its grace period. */
   readonly willId: string;
+  /** When the grace period ends, if known. */
+  readonly graceEndsAt: Date | undefined;
+  /** Next check-in deadline for the will, if known. */
+  readonly nextDeadline: Date | undefined;
+  /** Milliseconds left in the grace period (0 if already ended), if known. */
+  readonly timeRemainingMs: number | undefined;
 
-  constructor(willId: string, options?: ErrorOptions) {
-    super(
-      `Cannot check in on will "${willId}": the will is currently in its grace period (Triggered state). ` +
-        'Use emergencyCheckIn() to cancel the grace period and reset the check-in countdown.',
-      options,
-    );
+  constructor(willId: string, details: CheckInDuringGracePeriodDetails = {}, options?: ErrorOptions) {
+    const now = details.now ?? Date.now();
+    const graceEndsAt = details.graceEndsAt;
+    const nextDeadline = details.nextDeadline;
+    const timeRemainingMs =
+      graceEndsAt === undefined ? undefined : Math.max(0, graceEndsAt.getTime() - now);
+
+    let message =
+      `Cannot check in during grace period: will "${willId}" is in its grace period (Triggered state). `;
+    if (graceEndsAt !== undefined && timeRemainingMs !== undefined) {
+      const hours = Math.ceil(timeRemainingMs / 3_600_000);
+      message +=
+        `The grace period ends at ${graceEndsAt.toISOString()} (${hours} hour${hours === 1 ? '' : 's'} remaining). ` +
+        'Check in after the grace period ends';
+    } else {
+      message += 'Check in after the grace period ends';
+    }
+    if (nextDeadline !== undefined) {
+      message += `; the next check-in deadline is ${nextDeadline.toISOString()}`;
+    }
+    message += '. To cancel the grace period and reset the countdown now, use emergencyCheckIn().';
+
+    super(message, options);
     this.willId = willId;
+    this.graceEndsAt = graceEndsAt;
+    this.nextDeadline = nextDeadline;
+    this.timeRemainingMs = timeRemainingMs;
   }
 }
 

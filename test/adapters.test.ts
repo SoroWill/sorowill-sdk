@@ -71,7 +71,7 @@ describe('createAlbedoAdapter', () => {
 
   it('signs a transaction and returns the signed envelope XDR', async () => {
     txMock.mockResolvedValue({ signed_envelope_xdr: 'VFNfWERSLQo=' });
-    const adapter = createAlbedoAdapter();
+    const adapter = createAlbedoAdapter({ networkPassphrase: Networks.TESTNET });
 
     const signed = await adapter.signTransaction('UNSIGNED_XDR', {
       networkPassphrase: Networks.TESTNET,
@@ -96,7 +96,7 @@ describe('createAlbedoAdapter', () => {
 
   it('passes unknown passphrases through unchanged', async () => {
     txMock.mockResolvedValue({ signed_envelope_xdr: 'VFNfWERSLQo=' });
-    const adapter = createAlbedoAdapter();
+    const adapter = createAlbedoAdapter({ networkPassphrase: 'Standalone Network ; February 2017' });
 
     await adapter.signTransaction('UNSIGNED_XDR', {
       networkPassphrase: 'Standalone Network ; February 2017',
@@ -110,7 +110,7 @@ describe('createAlbedoAdapter', () => {
   it('pins signatures to the previously selected public key', async () => {
     publicKeyMock.mockResolvedValue({ pubkey: 'GSELECTED' });
     txMock.mockResolvedValue({ signed_envelope_xdr: 'VFNfWERSLQo=' });
-    const adapter = createAlbedoAdapter();
+    const adapter = createAlbedoAdapter({ networkPassphrase: Networks.TESTNET });
 
     await adapter.getPublicKey();
     await adapter.signTransaction('UNSIGNED_XDR', {
@@ -122,7 +122,7 @@ describe('createAlbedoAdapter', () => {
 
   it('omits pubkey before any account has been selected', async () => {
     txMock.mockResolvedValue({ signed_envelope_xdr: 'VFNfWERSLQo=' });
-    const adapter = createAlbedoAdapter();
+    const adapter = createAlbedoAdapter({ networkPassphrase: Networks.TESTNET });
 
     await adapter.signTransaction('UNSIGNED_XDR', {
       networkPassphrase: Networks.TESTNET,
