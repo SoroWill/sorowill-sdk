@@ -791,23 +791,74 @@ export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdap
   }
 }
 
+/** Default total size budget for IndexedDB-persisted cache entries (1 MB). */
+export const DEFAULT_INDEXEDDB_CACHE_MAX_BYTES = 1_048_576;
+
+/** Options for {@link IndexedDbCachePersistenceAdapter}. */
+export interface IndexedDbCachePersistenceOptions {
+  /**
+   * Maximum total size, in estimated bytes, of all persisted entries. When a
+   * write pushes the store over this limit the entries closest to expiry are
+   * removed first. A single entry larger than the limit is rejected.
+   * Defaults to {@link DEFAULT_INDEXEDDB_CACHE_MAX_BYTES} (1 MB).
+   */
+  maxBytes?: number;
+}
+
+/**
+ * Returns `true` when the IndexedDB API exists in the current runtime (e.g. a
+ * browser). Server-side runtimes and some privacy modes return `false`.
+ */
+export function isIndexedDbAvailable(): boolean {
+  try {
+    return typeof indexedDB !== 'undefined' && indexedDB !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** Estimated stored size of an entry: 2 bytes per UTF-16 code unit. */
+function estimateEntryBytes(entry: PersistedCacheEntry): number {
+  return (entry.key.length + entry.value.length) * 2;
+}
+
 /**
  * IndexedDB-based cache persistence adapter. Stores entries in IndexedDB
  * for more reliable and larger-capacity persistence.
+ *
+ * - Gracefully degrades: when IndexedDB is unavailable, reads return no
+ *   entries and writes are no-ops, so the in-memory cache keeps working.
+ * - Enforces a total size budget (default 1 MB), evicting the entries that
+ *   expire soonest when a write exceeds it.
+ * - Expired entries are removed automatically when the store is read.
  */
 export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter {
   private readonly dbName: string;
   private readonly storeName: string;
+  private readonly maxBytes: number;
   private db: IDBDatabase | null = null;
 
-  constructor(dbName: string = 'sorowill-cache', storeName: string = 'entries') {
+  constructor(
+    dbName: string = 'sorowill-cache',
+    storeName: string = 'entries',
+    options: IndexedDbCachePersistenceOptions = {},
+  ) {
     this.dbName = dbName;
     this.storeName = storeName;
+    this.maxBytes = options.maxBytes ?? DEFAULT_INDEXEDDB_CACHE_MAX_BYTES;
+  }
+
+  /** `true` when this runtime exposes IndexedDB, so persistence can work. */
+  isAvailable(): boolean {
+    return isIndexedDbAvailable();
   }
 
   private async ensureDb(): Promise<IDBDatabase> {
     if (this.db) {
       return this.db;
+    }
+    if (!isIndexedDbAvailable()) {
+      throw new Error('IndexedDB is not available in this environment');
     }
 
     return new Promise((resolve, reject) => {
@@ -828,49 +879,81 @@ export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter
     });
   }
 
+  /** Runs one request against the store and resolves with its result. */
+  private async request<R>(
+    mode: IDBTransactionMode,
+    build: (store: IDBObjectStore) => IDBRequest<R>,
+  ): Promise<R> {
+    const db = await this.ensureDb();
+    return new Promise<R>((resolve, reject) => {
+      const transaction = db.transaction(this.storeName, mode);
+      const request = build(transaction.objectStore(this.storeName));
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+  }
+
   async readAll(): Promise<PersistedCacheEntry[]> {
     try {
-      const db = await this.ensureDb();
-      return new Promise((resolve, reject) => {
-        const transaction = db.transaction(this.storeName, 'readonly');
-        const store = transaction.objectStore(this.storeName);
-        const request = store.getAll();
-
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve(request.result || []);
-      });
+      const all = (await this.request<PersistedCacheEntry[]>('readonly', (store) =>
+        store.getAll(),
+      )) || [];
+      // Automatic cleanup: expired entries are removed and not returned.
+      const now = Date.now();
+      const live: PersistedCacheEntry[] = [];
+      for (const entry of all) {
+        if (entry.expiresAt !== null && entry.expiresAt <= now) {
+          void this.delete(entry.key);
+        } else {
+          live.push(entry);
+        }
+      }
+      return live;
     } catch {
       return [];
     }
   }
 
   async write(entry: PersistedCacheEntry): Promise<void> {
+    const size = estimateEntryBytes(entry);
+    if (size > this.maxBytes) {
+      throw new Error(
+        `Cache entry "${entry.key}" (~${size} bytes) exceeds the ${this.maxBytes} byte IndexedDB limit`,
+      );
+    }
     try {
-      const db = await this.ensureDb();
-      return new Promise((resolve, reject) => {
-        const transaction = db.transaction(this.storeName, 'readwrite');
-        const store = transaction.objectStore(this.storeName);
-        const request = store.put(entry);
-
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve();
-      });
+      await this.request('readwrite', (store) => store.put(entry));
+      await this.enforceSizeLimit();
     } catch {
       // Silently fail if IndexedDB is unavailable
     }
   }
 
+  /** Removes the soonest-to-expire entries until the store fits the budget. */
+  private async enforceSizeLimit(): Promise<void> {
+    const all = (await this.request<PersistedCacheEntry[]>('readonly', (store) =>
+      store.getAll(),
+    )) || [];
+    let total = all.reduce((sum, entry) => sum + estimateEntryBytes(entry), 0);
+    if (total <= this.maxBytes) {
+      return;
+    }
+    // Entries without an expiry are kept longest; expiring ones go first.
+    const victims = [...all].sort(
+      (a, b) => (a.expiresAt ?? Infinity) - (b.expiresAt ?? Infinity),
+    );
+    for (const victim of victims) {
+      if (total <= this.maxBytes) {
+        break;
+      }
+      await this.delete(victim.key);
+      total -= estimateEntryBytes(victim);
+    }
+  }
+
   async delete(key: string): Promise<void> {
     try {
-      const db = await this.ensureDb();
-      return new Promise((resolve, reject) => {
-        const transaction = db.transaction(this.storeName, 'readwrite');
-        const store = transaction.objectStore(this.storeName);
-        const request = store.delete(key);
-
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve();
-      });
+      await this.request('readwrite', (store) => store.delete(key));
     } catch {
       // Silently fail if IndexedDB is unavailable
     }
@@ -878,15 +961,7 @@ export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter
 
   async clear(): Promise<void> {
     try {
-      const db = await this.ensureDb();
-      return new Promise((resolve, reject) => {
-        const transaction = db.transaction(this.storeName, 'readwrite');
-        const store = transaction.objectStore(this.storeName);
-        const request = store.clear();
-
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve();
-      });
+      await this.request('readwrite', (store) => store.clear());
     } catch {
       // Silently fail if IndexedDB is unavailable
     }
