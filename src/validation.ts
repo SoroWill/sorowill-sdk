@@ -177,3 +177,55 @@ export function validateSignatureCollectionOptions(
     maxSignatures,
   };
 }
+
+/**
+ * Validates a token amount (in base units) against an optional on-chain maximum (#734).
+ *
+ * @param amount - Amount in base units; must be a non-negative bigint.
+ * @param max - Optional inclusive upper bound taken from the contract.
+ * @param label - Field name used in error messages.
+ * @throws {RangeError} when the amount is negative or exceeds `max`.
+ */
+export function validateAmountAgainstLimit(
+  amount: unknown,
+  max?: bigint,
+  label = 'amount',
+): asserts amount is bigint {
+  if (typeof amount !== 'bigint' || amount < 0n) {
+    throw new RangeError(`Invalid ${label}: expected a non-negative integer amount in base units`);
+  }
+  if (max !== undefined && amount > max) {
+    throw new RangeError(`Invalid ${label}: ${amount} exceeds the contract maximum of ${max}`);
+  }
+}
+
+/**
+ * Validates a period (e.g. a number of ledgers, seconds, or intervals) against
+ * an optional contract maximum (#734). Periods must be positive integers.
+ *
+ * @param period - The period value to validate.
+ * @param max - Optional inclusive upper bound taken from the contract.
+ * @param label - Field name used in error messages.
+ * @throws {RangeError} when the period is not a positive integer or exceeds `max`.
+ */
+export function validatePeriodAgainstLimit(period: unknown, max?: number, label = 'period'): asserts period is number {
+  if (!Number.isInteger(period) || (period as number) < 1) {
+    throw new RangeError(`Invalid ${label}: expected a positive integer, got ${String(period)}`);
+  }
+  if (max !== undefined && (period as number) > max) {
+    throw new RangeError(`Invalid ${label}: ${period} exceeds the contract maximum of ${max}`);
+  }
+}
+
+/**
+ * Validates a percentage on the SDK's 0-100 scale (#734).
+ *
+ * @param percentage - The percentage to validate.
+ * @param label - Field name used in error messages.
+ * @throws {RangeError} when the value is not a finite number between 0 and 100 inclusive.
+ */
+export function validatePercentage(percentage: unknown, label = 'percentage'): asserts percentage is number {
+  if (typeof percentage !== 'number' || !Number.isFinite(percentage) || percentage < 0 || percentage > 100) {
+    throw new RangeError(`Invalid ${label}: expected a number between 0 and 100, got ${String(percentage)}`);
+  }
+}
