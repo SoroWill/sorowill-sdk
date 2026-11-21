@@ -965,6 +965,31 @@ function validateContractIdFormat(contractId: unknown): asserts contractId is st
   }
 }
 
+/** How long {@link SoroWillClient.willStatus} may serve a cached status (#726). */
+const WILL_STATUS_CACHE_TTL_MS = 30_000;
+
+/** Maximum number of items accepted by the batch helpers (#727). */
+const MAX_BATCH_OPERATIONS = 25;
+
+/**
+ * Per-item outcome of {@link SoroWillClient.batchCreateWill} and
+ * {@link SoroWillClient.batchCheckIn}. `index` is the item's position in the input.
+ */
+export type BatchItemResult<T> =
+  | { readonly index: number; readonly status: 'success'; readonly value: T }
+  | { readonly index: number; readonly status: 'error'; readonly error: Error };
+
+function assertBatchSize(length: number, method: string): void {
+  if (length === 0) {
+    throw new SoroWillError(`${method} requires at least one item.`);
+  }
+  if (length > MAX_BATCH_OPERATIONS) {
+    throw new SoroWillError(
+      `${method} accepts at most ${MAX_BATCH_OPERATIONS} items but received ${length}.`,
+    );
+  }
+}
+
 export class SoroWillClient {
   private readonly server: SoroWillRpcServer;
   private readonly rpcPool: RpcEndpointPool;
@@ -989,6 +1014,8 @@ export class SoroWillClient {
   private readonly timeoutMs: number;
   private readonly readCache: ReadCache | undefined;
   private readonly deduplicateReads: boolean;
+  /** Per-will status cache backing {@link SoroWillClient.willStatus} (#726). */
+  private readonly statusCache = new Map<string, { status: WillStatus; expiresAt: number }>();
   /**
    * Read simulations currently in flight, keyed by method + arguments +
    * request options, so identical concurrent reads share one RPC call (#619).
@@ -1779,24 +1806,47 @@ export class SoroWillClient {
   async cancelWill(
     willId: string,
     options?: RequestOptions,
-  ): Promise<{ txHash: string; refundAmount: string }> {
-    parseWillId(willId);
+  ): Promise<{
+    txHash: string;
+    refundAmount: string;
+    confirmedAt: Date;
+    willClosed: boolean;
+    message: string;
+  }> {
+    const canonicalWillId = parseWillId(willId).toString();
     await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const owner = await this.getWalletPublicKey();
-    const { txHash, returnValue } = await this.invoke('cancel_will', {
-      will_id: parseWillId(willId),
+    const { txHash, createdAt, returnValue } = await this.invoke('cancel_will', {
+      will_id: BigInt(canonicalWillId),
       owner,
     }, options);
+    // The will's cached state is stale now that it has been cancelled.
+    this.statusCache.delete(canonicalWillId);
+    await this.readCache?.invalidateByWillId(canonicalWillId);
+
     // cancel_will returns the refunded balance on success. Decode it from the
     // transaction return value to avoid an extra getWill() round-trip.
+    let refundAmount: string;
     if (returnValue) {
       const spec = await this.getSpec(options);
-      const refundAmount = spec.funcResToNative('cancel_will', returnValue) as bigint;
-      return { txHash, refundAmount: refundAmount.toString() };
+      refundAmount = (spec.funcResToNative('cancel_will', returnValue) as bigint).toString();
+    } else {
+      // Fallback for older contract versions that don't return the balance.
+      const will = await this.getWill(canonicalWillId, options);
+      refundAmount = will.balance;
     }
-    // Fallback for older contract versions that don't return the balance.
-    const will = await this.getWill(willId, options);
-    return { txHash, refundAmount: will.balance };
+
+    // Cancellation closes the will, so a successful cancel always reports closed.
+    const confirmedAt = new Date(createdAt * 1000);
+    return {
+      txHash,
+      refundAmount,
+      confirmedAt,
+      willClosed: true,
+      message:
+        `Will ${canonicalWillId} cancelled. Refunded ${refundAmount} in transaction ${txHash}, ` +
+        `confirmed at ${confirmedAt.toISOString()}.`,
+    };
   }
 
   /**
@@ -1881,6 +1931,93 @@ export class SoroWillClient {
       amount: parsedAmount,
     }, options);
     return { txHash };
+  }
+
+  /**
+   * Adds `amount` base units to the balance of `willId` and reports the
+   * resulting balance. Unlike a full refill, any positive amount is accepted.
+   *
+   * The amount is validated before any wallet or RPC interaction. The will's
+   * cached read is invalidated after submission so `remainingBalance` reflects
+   * the confirmed top-up (#725).
+   *
+   * @param willId - The will to fund.
+   * @param amount - Positive integer amount in base units, as a decimal string.
+   * @returns The transaction hash and the will's balance after the top-up.
+   * @throws {SoroWillInvalidAmountError} If `amount` is zero, negative, or malformed.
+   */
+  async fundWill(
+    willId: string,
+    amount: string,
+    options?: RequestOptions,
+  ): Promise<{ txHash: string; remainingBalance: string }> {
+    const canonicalWillId = parseWillId(willId).toString();
+    const { txHash } = await this.topUp(canonicalWillId, amount, options);
+    await this.readCache?.invalidateByWillId(canonicalWillId);
+    const will = await this.getWill(canonicalWillId, options);
+    return { txHash, remainingBalance: will.balance };
+  }
+
+  /**
+   * Creates several wills, one transaction per entry, submitted sequentially.
+   *
+   * This is not atomic: each will is created by its own transaction. Failures
+   * do not stop the batch. Each entry's outcome is returned in input order, so
+   * a failed entry can be retried without repeating the ones that succeeded (#727).
+   *
+   * @param paramsList - 1 to 25 will definitions.
+   * @param options - Optional request options applied to every transaction.
+   * @returns One {@link BatchItemResult} per input entry, in input order.
+   * @throws {SoroWillError} If the list is empty or has more than 25 entries.
+   */
+  async batchCreateWill(
+    paramsList: readonly CreateWillParams[],
+    options?: RequestOptions,
+  ): Promise<BatchItemResult<{ willId: string; txHash: string }>[]> {
+    assertBatchSize(paramsList.length, 'batchCreateWill');
+    return this.runBatchSequentially(paramsList, (params) => this.createWill(params, options));
+  }
+
+  /**
+   * Resets the check-in countdown for several wills, one transaction per will,
+   * submitted sequentially.
+   *
+   * Not atomic: failures do not stop the batch, and each will's outcome is
+   * returned in input order. Every will ID is validated before any transaction
+   * is submitted (#727).
+   *
+   * @param willIds - 1 to 25 will IDs.
+   * @param options - Optional request options applied to every transaction.
+   * @returns One {@link BatchItemResult} per input ID, in input order.
+   * @throws {SoroWillError} If the list is empty or has more than 25 entries.
+   * @throws {Error} If any will ID is malformed.
+   */
+  async batchCheckIn(
+    willIds: readonly string[],
+    options?: RequestOptions,
+  ): Promise<BatchItemResult<{ txHash: string; nextDeadline: Date }>[]> {
+    assertBatchSize(willIds.length, 'batchCheckIn');
+    const canonicalIds = willIds.map((willId) => parseWillId(willId).toString());
+    return this.runBatchSequentially(canonicalIds, (willId) => this.checkIn(willId, options));
+  }
+
+  private async runBatchSequentially<I, T>(
+    items: readonly I[],
+    run: (item: I) => Promise<T>,
+  ): Promise<BatchItemResult<T>[]> {
+    const results: BatchItemResult<T>[] = [];
+    for (const [index, item] of items.entries()) {
+      try {
+        results.push({ index, status: 'success', value: await run(item) });
+      } catch (error) {
+        results.push({
+          index,
+          status: 'error',
+          error: error instanceof Error ? error : new SoroWillError(String(error)),
+        });
+      }
+    }
+    return results;
   }
 
   // -----------------------------------------------------------------------
@@ -2042,6 +2179,33 @@ export class SoroWillClient {
     const will = mapWill(raw);
     this.readCache?.set(cacheKey, cloneWill(will), [canonicalWillId]);
     return this.deepFreeze ? deepFreezeObject(will) : will;
+  }
+
+  /**
+   * Returns only the status of `willId`, without exposing the rest of the
+   * will record. Results are cached for 30 seconds per will, so repeated status
+   * checks are served from memory instead of RPC (#726).
+   *
+   * The cache is cleared for a will by {@link SoroWillClient.cancelWill}. Other
+   * status transitions (e.g. triggering or releasing) made outside this client
+   * become visible after the TTL expires.
+   *
+   * @param willId - The will to check.
+   * @param options - Optional request options.
+   * @returns The will's current {@link WillStatus}.
+   * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout.
+   */
+  async willStatus(willId: string, options?: RequestOptions): Promise<WillStatus> {
+    const canonicalWillId = parseWillId(willId).toString();
+    const now = Date.now();
+    const cached = this.statusCache.get(canonicalWillId);
+    if (cached && cached.expiresAt > now) {
+      return cached.status;
+    }
+    const raw = await this.read<unknown>('get_will', { will_id: BigInt(canonicalWillId) }, options);
+    const { status } = mapWill(raw);
+    this.statusCache.set(canonicalWillId, { status, expiresAt: now + WILL_STATUS_CACHE_TTL_MS });
+    return status;
   }
 
   /**
