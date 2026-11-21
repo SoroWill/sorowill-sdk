@@ -1806,24 +1806,47 @@ export class SoroWillClient {
   async cancelWill(
     willId: string,
     options?: RequestOptions,
-  ): Promise<{ txHash: string; refundAmount: string }> {
-    parseWillId(willId);
+  ): Promise<{
+    txHash: string;
+    refundAmount: string;
+    confirmedAt: Date;
+    willClosed: boolean;
+    message: string;
+  }> {
+    const canonicalWillId = parseWillId(willId).toString();
     await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const owner = await this.getWalletPublicKey();
-    const { txHash, returnValue } = await this.invoke('cancel_will', {
-      will_id: parseWillId(willId),
+    const { txHash, createdAt, returnValue } = await this.invoke('cancel_will', {
+      will_id: BigInt(canonicalWillId),
       owner,
     }, options);
+    // The will's cached state is stale now that it has been cancelled.
+    this.statusCache.delete(canonicalWillId);
+    await this.readCache?.invalidateByWillId(canonicalWillId);
+
     // cancel_will returns the refunded balance on success. Decode it from the
     // transaction return value to avoid an extra getWill() round-trip.
+    let refundAmount: string;
     if (returnValue) {
       const spec = await this.getSpec(options);
-      const refundAmount = spec.funcResToNative('cancel_will', returnValue) as bigint;
-      return { txHash, refundAmount: refundAmount.toString() };
+      refundAmount = (spec.funcResToNative('cancel_will', returnValue) as bigint).toString();
+    } else {
+      // Fallback for older contract versions that don't return the balance.
+      const will = await this.getWill(canonicalWillId, options);
+      refundAmount = will.balance;
     }
-    // Fallback for older contract versions that don't return the balance.
-    const will = await this.getWill(willId, options);
-    return { txHash, refundAmount: will.balance };
+
+    // Cancellation closes the will, so a successful cancel always reports closed.
+    const confirmedAt = new Date(createdAt * 1000);
+    return {
+      txHash,
+      refundAmount,
+      confirmedAt,
+      willClosed: true,
+      message:
+        `Will ${canonicalWillId} cancelled. Refunded ${refundAmount} in transaction ${txHash}, ` +
+        `confirmed at ${confirmedAt.toISOString()}.`,
+    };
   }
 
   /**
