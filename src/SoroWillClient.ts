@@ -965,6 +965,9 @@ function validateContractIdFormat(contractId: unknown): asserts contractId is st
   }
 }
 
+/** How long {@link SoroWillClient.willStatus} may serve a cached status (#726). */
+const WILL_STATUS_CACHE_TTL_MS = 30_000;
+
 export class SoroWillClient {
   private readonly server: SoroWillRpcServer;
   private readonly rpcPool: RpcEndpointPool;
@@ -989,6 +992,8 @@ export class SoroWillClient {
   private readonly timeoutMs: number;
   private readonly readCache: ReadCache | undefined;
   private readonly deduplicateReads: boolean;
+  /** Per-will status cache backing {@link SoroWillClient.willStatus} (#726). */
+  private readonly statusCache = new Map<string, { status: WillStatus; expiresAt: number }>();
   /**
    * Read simulations currently in flight, keyed by method + arguments +
    * request options, so identical concurrent reads share one RPC call (#619).
@@ -2067,6 +2072,33 @@ export class SoroWillClient {
     const will = mapWill(raw);
     this.readCache?.set(cacheKey, cloneWill(will), [canonicalWillId]);
     return this.deepFreeze ? deepFreezeObject(will) : will;
+  }
+
+  /**
+   * Returns only the status of `willId`, without exposing the rest of the
+   * will record. Results are cached for 30 seconds per will, so repeated status
+   * checks are served from memory instead of RPC (#726).
+   *
+   * The cache is cleared for a will by {@link SoroWillClient.cancelWill}. Other
+   * status transitions (e.g. triggering or releasing) made outside this client
+   * become visible after the TTL expires.
+   *
+   * @param willId - The will to check.
+   * @param options - Optional request options.
+   * @returns The will's current {@link WillStatus}.
+   * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout.
+   */
+  async willStatus(willId: string, options?: RequestOptions): Promise<WillStatus> {
+    const canonicalWillId = parseWillId(willId).toString();
+    const now = Date.now();
+    const cached = this.statusCache.get(canonicalWillId);
+    if (cached && cached.expiresAt > now) {
+      return cached.status;
+    }
+    const raw = await this.read<unknown>('get_will', { will_id: BigInt(canonicalWillId) }, options);
+    const { status } = mapWill(raw);
+    this.statusCache.set(canonicalWillId, { status, expiresAt: now + WILL_STATUS_CACHE_TTL_MS });
+    return status;
   }
 
   /**
