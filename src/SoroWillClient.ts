@@ -62,6 +62,7 @@ import {
   GuardianValidationError,
   CheckinPeriodExceedsTtlError,
   CheckInDuringGracePeriodError,
+  GracePeriodExceedsCheckinPeriodError,
   InvalidDayCountError,
   InvalidContractIdError,
   InvalidCursorError,
@@ -1445,6 +1446,10 @@ export class SoroWillClient {
     // #537: fail fast when the check-in deadline would outlive the will
     // entry's storage TTL (archived before it can be triggered).
     validateCheckinPeriodDays(params.checkinPeriodDays);
+    // The grace period may not outlast the check-in period (contract invariant).
+    if (validateDays(params.gracePeriodDays, 'gracePeriodDays') > BigInt(params.checkinPeriodDays)) {
+      throw new GracePeriodExceedsCheckinPeriodError(params.gracePeriodDays, params.checkinPeriodDays);
+    }
     await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const owner = await this.getWalletPublicKey();
     const seenGuardians = new Set<string>();

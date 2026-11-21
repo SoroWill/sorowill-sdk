@@ -1020,6 +1020,28 @@ export class InvalidDayCountError extends SoroWillError {
 }
 
 /**
+ * Thrown by `createWill` when `gracePeriodDays` is larger than
+ * `checkinPeriodDays`. The contract invariant requires the grace period to be
+ * no longer than the check-in period; a larger grace period breaks will logic.
+ */
+export class GracePeriodExceedsCheckinPeriodError extends SoroWillError {
+  readonly gracePeriodDays: number;
+  readonly checkinPeriodDays: number;
+
+  constructor(gracePeriodDays: number, checkinPeriodDays: number, options?: ErrorOptions) {
+    super(
+      `Invalid gracePeriodDays ${gracePeriodDays}: the grace period must be less than or equal to ` +
+        `checkinPeriodDays (${checkinPeriodDays}). Reduce gracePeriodDays to at most ${checkinPeriodDays} ` +
+        'or increase checkinPeriodDays.',
+      options,
+    );
+    this.name = new.target.name;
+    this.gracePeriodDays = gracePeriodDays;
+    this.checkinPeriodDays = checkinPeriodDays;
+  }
+}
+
+/**
  * Raised when `checkinPeriodDays` passed to {@link SoroWillClient.createWill}
  * exceeds the contract storage TTL window the will entry can survive without
  * a check-in extending it. A will whose check-in deadline outlives the
