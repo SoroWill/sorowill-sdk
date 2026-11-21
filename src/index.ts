@@ -270,7 +270,7 @@ export {
   MAX_BACKOFF_MS,
   ErrorTransience,
 } from './requestQueue';
-export type { RequestQueueOptions } from './requestQueue';
+export type { RequestQueueOptions, RequestTrace } from './requestQueue';
 
 export { DebugLogger, DEFAULT_REDACTED_KEYS, REDACTED } from './debugLogger';
 export type { DebugLoggerOptions } from './debugLogger';
