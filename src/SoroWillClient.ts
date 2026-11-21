@@ -1883,6 +1883,31 @@ export class SoroWillClient {
     return { txHash };
   }
 
+  /**
+   * Adds `amount` base units to the balance of `willId` and reports the
+   * resulting balance. Unlike a full refill, any positive amount is accepted.
+   *
+   * The amount is validated before any wallet or RPC interaction. The will's
+   * cached read is invalidated after submission so `remainingBalance` reflects
+   * the confirmed top-up (#725).
+   *
+   * @param willId - The will to fund.
+   * @param amount - Positive integer amount in base units, as a decimal string.
+   * @returns The transaction hash and the will's balance after the top-up.
+   * @throws {SoroWillInvalidAmountError} If `amount` is zero, negative, or malformed.
+   */
+  async fundWill(
+    willId: string,
+    amount: string,
+    options?: RequestOptions,
+  ): Promise<{ txHash: string; remainingBalance: string }> {
+    const canonicalWillId = parseWillId(willId).toString();
+    const { txHash } = await this.topUp(canonicalWillId, amount, options);
+    await this.readCache?.invalidateByWillId(canonicalWillId);
+    const will = await this.getWill(canonicalWillId, options);
+    return { txHash, remainingBalance: will.balance };
+  }
+
   // -----------------------------------------------------------------------
   // Public: transaction polling
   // -----------------------------------------------------------------------
