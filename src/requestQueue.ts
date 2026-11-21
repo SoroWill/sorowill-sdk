@@ -218,6 +218,24 @@ export function classifyRpcError(error: unknown): ErrorTransience {
 }
 
 /** Priority level for requests in the queue. Higher priority requests are processed first within FIFO ordering constraints. */
+/**
+ * Raised by {@link RequestQueue.enqueueAfter} when a dependency of a queued
+ * request rejects, so the dependent request is never executed (#733).
+ */
+export class RequestDependencyError extends Error {
+  /** Zero-based index of the failing dependency in the supplied list. */
+  readonly dependencyIndex: number;
+
+  constructor(dependencyIndex: number, cause: unknown) {
+    super(
+      `Dependency at index ${dependencyIndex} failed; the dependent request was not executed.`,
+      { cause },
+    );
+    this.name = 'RequestDependencyError';
+    this.dependencyIndex = dependencyIndex;
+  }
+}
+
 export enum RequestPriority {
   /** Low priority for background operations (e.g., UI polling). */
   Low = 0,
@@ -375,6 +393,37 @@ export class RequestQueue {
       this.core.pending.push(request as PendingRequest<unknown>);
       this.drain();
     });
+  }
+
+  /**
+   * Enqueues a request that must not start until every dependency has
+   * resolved successfully (#733). Dependencies are awaited before the request
+   * joins the FIFO queue, so a dependent call can never overtake the call it
+   * depends on, even when both were submitted in quick succession.
+   *
+   * If any dependency rejects, the returned promise rejects with a
+   * {@link RequestDependencyError} that names the failing dependency index and
+   * carries the original error as `cause`; `run` is never invoked.
+   *
+   * @param dependencies - Promises (or values) that must resolve first.
+   * @param run - The request to execute once all dependencies have resolved.
+   */
+  enqueueAfter<T>(
+    dependencies: ReadonlyArray<unknown>,
+    run: () => Promise<T>,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+    priority: RequestPriority = RequestPriority.Normal,
+    method?: string,
+  ): Promise<T> {
+    const waits = dependencies.map((dep, index) =>
+      Promise.resolve(dep).catch((cause: unknown) => {
+        throw new RequestDependencyError(index, cause);
+      }),
+    );
+    return Promise.all(waits).then(() =>
+      this.enqueue(run, timeoutMs, signal, priority, method),
+    );
   }
 
   /**
