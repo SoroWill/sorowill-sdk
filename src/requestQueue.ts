@@ -53,6 +53,37 @@ export interface RequestQueueOptions {
   retryBaseDelayMs?: number;
   /** Upper bound in milliseconds for a single backoff delay. Defaults to 60 000 (60s). */
   maxBackoffMs?: number;
+  /**
+   * Default timeout in milliseconds for requests that do not specify an
+   * explicit `timeoutMs` in {@link RequestQueue.enqueue}. Prevents stuck
+   * requests from permanently holding concurrency slots. Defaults to 30 000 (30s).
+   * Set to `0` to disable the default timeout.
+   */
+  defaultTimeoutMs?: number;
+  /**
+   * Maximum number of queued requests started per drain tick when the queue is
+   * backed up (>= {@link backupThreshold}). Defaults to 10.
+   */
+  batchSize?: number;
+  /**
+   * Pending queue depth at which batch-draining and depth warnings activate.
+   * Defaults to 50.
+   */
+  backupThreshold?: number;
+  /**
+   * Optional callback invoked whenever the pending queue depth reaches or
+   * exceeds {@link backupThreshold}.
+   */
+  onQueueDepthWarning?: (depth: number, maxQueueSize: number) => void;
+}
+
+/** Snapshot of {@link RequestQueue} depth and active execution metrics. */
+export interface RequestQueueMetrics {
+  depth: number;
+  active: number;
+  maxQueueSize: number;
+  maxConcurrent: number;
+  isBackedUp: boolean;
 }
 
 /** Default cap applied to a single exponential backoff delay (60 seconds). */
@@ -61,14 +92,20 @@ export const MAX_BACKOFF_MS = 60_000;
 /**
  * Computes the exponential backoff delay for a retry: `2^attempt * baseDelayMs`,
  * capped at `maxBackoffMs`. `attempt` is zero-based (the first retry is attempt 0).
+ * When `jitter` is `true`, applies 50%–100% jitter to prevent retry storms.
  */
 export function computeBackoffDelay(
   attempt: number,
   baseDelayMs: number,
   maxBackoffMs: number = MAX_BACKOFF_MS,
+  jitter: boolean = false,
 ): number {
   const delay = 2 ** attempt * baseDelayMs;
-  return Number.isFinite(delay) ? Math.min(delay, maxBackoffMs) : maxBackoffMs;
+  const capped = Number.isFinite(delay) ? Math.min(delay, maxBackoffMs) : maxBackoffMs;
+  if (!jitter) {
+    return capped;
+  }
+  return Math.floor(capped * (0.5 + Math.random() * 0.5));
 }
 
 /**
@@ -218,6 +255,24 @@ export function classifyRpcError(error: unknown): ErrorTransience {
 }
 
 /** Priority level for requests in the queue. Higher priority requests are processed first within FIFO ordering constraints. */
+/**
+ * Raised by {@link RequestQueue.enqueueAfter} when a dependency of a queued
+ * request rejects, so the dependent request is never executed (#733).
+ */
+export class RequestDependencyError extends Error {
+  /** Zero-based index of the failing dependency in the supplied list. */
+  readonly dependencyIndex: number;
+
+  constructor(dependencyIndex: number, cause: unknown) {
+    super(
+      `Dependency at index ${dependencyIndex} failed; the dependent request was not executed.`,
+      { cause },
+    );
+    this.name = 'RequestDependencyError';
+    this.dependencyIndex = dependencyIndex;
+  }
+}
+
 export enum RequestPriority {
   /** Low priority for background operations (e.g., UI polling). */
   Low = 0,
@@ -227,7 +282,42 @@ export enum RequestPriority {
   High = 2,
 }
 
+/** Maximum number of completed request traces kept for debugging. */
+export const MAX_REQUEST_TRACES = 100;
+
+/**
+ * Lifecycle record for one executed request, returned by
+ * {@link RequestQueue.getTraces}.
+ */
+export interface RequestTrace {
+  /** Unique ID generated for the request when it was enqueued. */
+  id: string;
+  /** Operation type passed to `enqueue`, if any. */
+  method: string | undefined;
+  priority: RequestPriority;
+  /** Epoch ms when the request entered the queue. */
+  enqueuedAt: number;
+  /** Epoch ms when the request was sent (execution started). */
+  sentAt: number;
+  /** Epoch ms when the response, error or timeout was received. */
+  respondedAt: number;
+  /** Time spent waiting in the queue before being sent. */
+  queuedMs: number;
+  /** Time from being sent until the response was received. */
+  roundTripMs: number;
+  status: 'success' | 'error';
+}
+
+let requestSequence = 0;
+
+/** Generates a request ID that is unique within this process. */
+function nextRequestId(): string {
+  requestSequence += 1;
+  return `req-${Date.now().toString(36)}-${requestSequence.toString(36)}`;
+}
+
 interface PendingRequest<T> {
+  id: string;
   run: () => Promise<T>;
   resolve: (value: T) => void;
   reject: (reason: unknown) => void;
@@ -251,10 +341,17 @@ class QueueCore {
   readonly maxRateLimitRetries: number;
   readonly retryBaseDelayMs: number;
   readonly maxBackoffMs: number;
+  readonly defaultTimeoutMs: number;
+  readonly batchSize: number;
+  readonly backupThreshold: number;
+  readonly onQueueDepthWarning: ((depth: number, maxQueueSize: number) => void) | undefined;
   readonly pending: Array<PendingRequest<unknown>> = [];
   readonly starts: number[] = [];
+  /** Most recent completed request traces, oldest first. */
+  readonly traces: RequestTrace[] = [];
   active = 0;
   wakeTimer: ReturnType<typeof setTimeout> | undefined;
+  draining = false;
   refCount = 0;
 
   constructor(
@@ -264,6 +361,10 @@ class QueueCore {
     maxRateLimitRetries: number,
     retryBaseDelayMs: number,
     maxBackoffMs: number,
+    defaultTimeoutMs: number,
+    batchSize: number,
+    backupThreshold: number,
+    onQueueDepthWarning?: (depth: number, maxQueueSize: number) => void,
   ) {
     this.maxConcurrent = maxConcurrent;
     this.requestsPerSecond = requestsPerSecond;
@@ -271,6 +372,10 @@ class QueueCore {
     this.maxRateLimitRetries = maxRateLimitRetries;
     this.retryBaseDelayMs = retryBaseDelayMs;
     this.maxBackoffMs = maxBackoffMs;
+    this.defaultTimeoutMs = defaultTimeoutMs;
+    this.batchSize = batchSize;
+    this.backupThreshold = backupThreshold;
+    this.onQueueDepthWarning = onQueueDepthWarning;
   }
 }
 
@@ -317,17 +422,43 @@ export class RequestQueue {
     const maxRateLimitRetries = options.maxRateLimitRetries ?? 3;
     const retryBaseDelayMs = options.retryBaseDelayMs ?? 500;
     const maxBackoffMs = options.maxBackoffMs ?? MAX_BACKOFF_MS;
+    const defaultTimeoutMs = options.defaultTimeoutMs ?? 30_000;
+    const batchSize = options.batchSize ?? 10;
+    const backupThreshold = options.backupThreshold ?? 50;
+    const onQueueDepthWarning = options.onQueueDepthWarning;
     this.account = options.account;
     if (this.account !== undefined) {
       let core = sharedCores.get(this.account);
       if (core === undefined) {
-        core = new QueueCore(maxConcurrent, requestsPerSecond, maxQueueSize, maxRateLimitRetries, retryBaseDelayMs, maxBackoffMs);
+        core = new QueueCore(
+          maxConcurrent,
+          requestsPerSecond,
+          maxQueueSize,
+          maxRateLimitRetries,
+          retryBaseDelayMs,
+          maxBackoffMs,
+          defaultTimeoutMs,
+          batchSize,
+          backupThreshold,
+          onQueueDepthWarning,
+        );
         sharedCores.set(this.account, core);
       }
       core.refCount += 1;
       this.core = core;
     } else {
-      this.core = new QueueCore(maxConcurrent, requestsPerSecond, maxQueueSize, maxRateLimitRetries, retryBaseDelayMs, maxBackoffMs);
+      this.core = new QueueCore(
+        maxConcurrent,
+        requestsPerSecond,
+        maxQueueSize,
+        maxRateLimitRetries,
+        retryBaseDelayMs,
+        maxBackoffMs,
+        defaultTimeoutMs,
+        batchSize,
+        backupThreshold,
+        onQueueDepthWarning,
+      );
     }
   }
 
@@ -359,6 +490,7 @@ export class RequestQueue {
         signal,
         abortListener: undefined,
         priority,
+        id: nextRequestId(),
         enqueuedAt: Date.now(),
         method,
       };
@@ -373,8 +505,71 @@ export class RequestQueue {
         signal.addEventListener('abort', request.abortListener);
       }
       this.core.pending.push(request as PendingRequest<unknown>);
+      if (
+        this.core.onQueueDepthWarning &&
+        this.core.pending.length >= this.core.backupThreshold
+      ) {
+        try {
+          this.core.onQueueDepthWarning(this.core.pending.length, this.core.maxQueueSize);
+        } catch {
+          // Monitoring callbacks must not break enqueueing
+        }
+      }
       this.drain();
     });
+  }
+
+  /** Returns the current number of requests waiting in the queue. */
+  getDepth(): number {
+    return this.core.pending.length;
+  }
+
+  /** Returns the current number of active in-flight requests. */
+  getActiveCount(): number {
+    return this.core.active;
+  }
+
+  /** Returns a snapshot of queue depth, active count, and backup status. */
+  getMetrics(): RequestQueueMetrics {
+    const depth = this.core.pending.length;
+    return {
+      depth,
+      active: this.core.active,
+      maxQueueSize: this.core.maxQueueSize,
+      maxConcurrent: this.core.maxConcurrent,
+      isBackedUp: depth >= this.core.backupThreshold,
+    };
+  }
+
+  /**
+   * Enqueues a request that must not start until every dependency has
+   * resolved successfully (#733). Dependencies are awaited before the request
+   * joins the FIFO queue, so a dependent call can never overtake the call it
+   * depends on, even when both were submitted in quick succession.
+   *
+   * If any dependency rejects, the returned promise rejects with a
+   * {@link RequestDependencyError} that names the failing dependency index and
+   * carries the original error as `cause`; `run` is never invoked.
+   *
+   * @param dependencies - Promises (or values) that must resolve first.
+   * @param run - The request to execute once all dependencies have resolved.
+   */
+  enqueueAfter<T>(
+    dependencies: ReadonlyArray<unknown>,
+    run: () => Promise<T>,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+    priority: RequestPriority = RequestPriority.Normal,
+    method?: string,
+  ): Promise<T> {
+    const waits = dependencies.map((dep, index) =>
+      Promise.resolve(dep).catch((cause: unknown) => {
+        throw new RequestDependencyError(index, cause);
+      }),
+    );
+    return Promise.all(waits).then(() =>
+      this.enqueue(run, timeoutMs, signal, priority, method),
+    );
   }
 
   /**
@@ -414,6 +609,40 @@ export class RequestQueue {
     }
   }
 
+  /**
+   * Returns the lifecycle traces of the most recently executed requests on
+   * this queue's account (oldest first, at most {@link MAX_REQUEST_TRACES}).
+   * Each trace gives the request ID, operation type, and queued / round-trip
+   * timings. Intended for debugging; returned objects are copies.
+   */
+  getTraces(): RequestTrace[] {
+    return this.core.traces.map((trace) => ({ ...trace }));
+  }
+
+  /** Returns the trace for a request ID, or `undefined` if it has been dropped or never ran. */
+  getTrace(id: string): RequestTrace | undefined {
+    const trace = this.core.traces.find((candidate) => candidate.id === id);
+    return trace ? { ...trace } : undefined;
+  }
+
+  private recordTrace<T>(request: PendingRequest<T>, sentAt: number, succeeded: boolean): void {
+    const respondedAt = Date.now();
+    this.core.traces.push({
+      id: request.id,
+      method: request.method,
+      priority: request.priority,
+      enqueuedAt: request.enqueuedAt,
+      sentAt,
+      respondedAt,
+      queuedMs: sentAt - request.enqueuedAt,
+      roundTripMs: respondedAt - sentAt,
+      status: succeeded ? 'success' : 'error',
+    });
+    if (this.core.traces.length > MAX_REQUEST_TRACES) {
+      this.core.traces.shift();
+    }
+  }
+
   private removeAbortListener(request: { signal: AbortSignal | undefined; abortListener: (() => void) | undefined }): void {
     if (request.signal && request.abortListener) {
       request.signal.removeEventListener('abort', request.abortListener);
@@ -422,32 +651,49 @@ export class RequestQueue {
 
   private drain(): void {
     const core = this.core;
-    if (core.wakeTimer !== undefined) {
-      clearTimeout(core.wakeTimer);
-      core.wakeTimer = undefined;
+    if (core.draining) {
+      return;
     }
-    const now = Date.now();
-    while (core.starts[0] !== undefined && core.starts[0] <= now - 1_000) {
-      core.starts.shift();
-    }
-    while (
-      core.active < core.maxConcurrent &&
-      core.starts.length < core.requestsPerSecond
-    ) {
-      const request = this.dequeue();
-      if (request === undefined) break;
-      core.active += 1;
-      core.starts.push(Date.now());
-      this.removeAbortListener(request);
-      void this.execute(request);
-    }
-    if (
-      core.pending.length > 0 &&
-      core.active < core.maxConcurrent &&
-      core.starts[0] !== undefined
-    ) {
-      const delay = Math.max(1, core.starts[0] + 1_000 - Date.now());
-      core.wakeTimer = setTimeout(() => this.drain(), delay);
+    core.draining = true;
+    try {
+      if (core.wakeTimer !== undefined) {
+        clearTimeout(core.wakeTimer);
+        core.wakeTimer = undefined;
+      }
+      const now = Date.now();
+      while (core.starts[0] !== undefined && core.starts[0] <= now - 1_000) {
+        core.starts.shift();
+      }
+
+      const isBackedUp = core.pending.length >= core.backupThreshold;
+      const maxToStartThisTick = isBackedUp ? core.batchSize : Infinity;
+      let startedThisTick = 0;
+
+      while (
+        core.active < core.maxConcurrent &&
+        core.starts.length < core.requestsPerSecond &&
+        startedThisTick < maxToStartThisTick
+      ) {
+        const request = this.dequeue();
+        if (request === undefined) break;
+        core.active += 1;
+        startedThisTick += 1;
+        core.starts.push(Date.now());
+        this.removeAbortListener(request);
+        void this.execute(request);
+      }
+
+      if (core.pending.length > 0 && core.active < core.maxConcurrent) {
+        if (startedThisTick >= maxToStartThisTick && core.starts.length < core.requestsPerSecond) {
+          // Yield to the event loop between batches when backed up so pending requests keep draining
+          core.wakeTimer = setTimeout(() => this.drain(), 0);
+        } else if (core.starts[0] !== undefined) {
+          const delay = Math.max(1, core.starts[0] + 1_000 - Date.now());
+          core.wakeTimer = setTimeout(() => this.drain(), delay);
+        }
+      }
+    } finally {
+      core.draining = false;
     }
   }
 
@@ -470,25 +716,32 @@ export class RequestQueue {
   }
 
   private async execute<T>(request: PendingRequest<T>): Promise<void> {
+    const effectiveTimeoutMs =
+      request.timeoutMs !== undefined
+        ? request.timeoutMs
+        : this.core.defaultTimeoutMs > 0
+          ? this.core.defaultTimeoutMs
+          : undefined;
+
     const executeWithRetry = async (attemptNumber: number): Promise<T> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         const result =
-          request.timeoutMs === undefined
+          effectiveTimeoutMs === undefined
             ? await request.run()
             : await Promise.race([
                 request.run(),
                 new Promise<never>((_, reject) => {
-                  const timer: ReturnType<typeof setTimeout> = setTimeout(
+                  timer = setTimeout(
                     () =>
                       reject(
                         new RequestTimeoutError(
-                          request.timeoutMs as number,
+                          effectiveTimeoutMs,
                           request.method,
                         ),
                       ),
-                    request.timeoutMs,
+                    effectiveTimeoutMs,
                   );
-                  void timer; // referenced in the closure above
                 }),
               ]);
         return result;
@@ -500,15 +753,23 @@ export class RequestQueue {
           return executeWithRetry(attemptNumber + 1);
         }
         throw error;
+      } finally {
+        if (timer !== undefined) {
+          clearTimeout(timer);
+        }
       }
     };
 
+    const sentAt = Date.now();
+    let succeeded = false;
     try {
       const result = await executeWithRetry(0);
+      succeeded = true;
       request.resolve(result);
     } catch (error) {
       request.reject(error);
     } finally {
+      this.recordTrace(request, sentAt, succeeded);
       this.removeAbortListener(request);
       this.core.active -= 1;
       this.drain();

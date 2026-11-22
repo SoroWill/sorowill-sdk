@@ -1,7 +1,7 @@
 import type Albedo from '@albedo-link/intent';
 import { Networks } from '@stellar/stellar-sdk';
 
-import { WalletNetworkMismatchError } from '../errors';
+import { toWalletCancelledError } from '../errors';
 import type { WalletAdapter, WalletConnection } from '../wallet';
 
 /**
@@ -104,7 +104,14 @@ export function createAlbedoAdapter(options: AlbedoAdapterOptions = {}): WalletA
 
     async connect(): Promise<WalletConnection> {
       const albedo = await loadAlbedo();
-      const { pubkey } = await albedo.publicKey({});
+      let pubkey: string;
+      try {
+        ({ pubkey } = await albedo.publicKey({}));
+      } catch (err) {
+        const cancelled = toWalletCancelledError(err, 'connect');
+        if (cancelled) throw cancelled;
+        throw err;
+      }
       cachedPublicKey = pubkey;
       connected = true;
       return { publicKey: pubkey, ...networkInfo };
@@ -118,7 +125,14 @@ export function createAlbedoAdapter(options: AlbedoAdapterOptions = {}): WalletA
         };
       }
       const albedo = await loadAlbedo();
-      const { pubkey } = await albedo.publicKey({});
+      let pubkey: string;
+      try {
+        ({ pubkey } = await albedo.publicKey({}));
+      } catch (err) {
+        const cancelled = toWalletCancelledError(err, 'reconnect');
+        if (cancelled) throw cancelled;
+        throw err;
+      }
       cachedPublicKey = pubkey;
       connected = true;
       return { publicKey: pubkey, ...networkInfo };
@@ -134,7 +148,14 @@ export function createAlbedoAdapter(options: AlbedoAdapterOptions = {}): WalletA
         return cachedPublicKey;
       }
       const albedo = await loadAlbedo();
-      const { pubkey } = await albedo.publicKey({});
+      let pubkey: string;
+      try {
+        ({ pubkey } = await albedo.publicKey({}));
+      } catch (err) {
+        const cancelled = toWalletCancelledError(err, 'getPublicKey');
+        if (cancelled) throw cancelled;
+        throw err;
+      }
       cachedPublicKey = pubkey;
       connected = true;
       return pubkey;
@@ -151,16 +172,26 @@ export function createAlbedoAdapter(options: AlbedoAdapterOptions = {}): WalletA
         throw new WalletNetworkMismatchError(networkPassphrase, opts.networkPassphrase);
       }
       const albedo = await loadAlbedo();
-      const { signed_envelope_xdr: signedTxXdr } = await albedo.tx({
-        xdr: transactionXdr,
-        network: toAlbedoNetwork(opts.networkPassphrase),
-        ...(cachedPublicKey === undefined ? {} : { pubkey: cachedPublicKey }),
-      });
-      return signedTxXdr;
+      try {
+        const { signed_envelope_xdr: signedTxXdr } = await albedo.tx({
+          xdr: transactionXdr,
+          network: toAlbedoNetwork(opts.networkPassphrase),
+          ...(cachedPublicKey === undefined ? {} : { pubkey: cachedPublicKey }),
+        });
+        return signedTxXdr;
+      } catch (err) {
+        const cancelled = toWalletCancelledError(err, 'signTransaction');
+        if (cancelled) throw cancelled;
+        throw err;
+      }
     },
 
     async getNetwork(): Promise<{ network: string; networkPassphrase: string }> {
       return { ...networkInfo };
+    },
+
+    clearKeyCache(): void {
+      cachedPublicKey = undefined;
     },
   };
 }

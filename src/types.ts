@@ -405,6 +405,12 @@ export interface BatchOperation {
    * configured network.
    */
   network?: 'testnet' | 'mainnet';
+  /**
+   * Optional predicate evaluated before this operation executes. Receives the
+   * results of all prior operations in the batch queue. Return `false` (or a
+   * Promise resolving to `false`) to skip this operation.
+   */
+  condition?: (priorResults: readonly BatchOperationResult[]) => boolean | Promise<boolean>;
 }
 
 /** Maps a tuple of operations to a tuple of their typed results, preserving order and length. */
@@ -485,6 +491,12 @@ export interface RequestOptions {
   timeout?: number;
   timeoutMs?: number;
   /**
+   * Maximum acceptable transaction fee in stroops. When set, `SoroWillClient`
+   * compares the simulated/prepared fee against `maxFee` before signing and
+   * throws {@link ExorbitantFeeError} if it exceeds this limit.
+   */
+  maxFee?: string | bigint;
+  /**
    * When `true`, skips the client-side will-existence pre-check (e.g.
    * `getWill()`) before submitting a state-changing transaction. Use only when
    * the caller has already confirmed the will exists, to avoid an extra RPC
@@ -494,6 +506,28 @@ export interface RequestOptions {
    * @default false
    */
   skipExistenceCheck?: boolean;
+  /**
+   * When `true`, bypasses the read cache for this call and fetches fresh data
+   * from RPC (the fresh response still updates the cache unless caching is
+   * disabled).
+   * @default false
+   */
+  skipCache?: boolean;
+}
+
+/**
+ * Estimated resource, fee, and RPC call cost for a contract invocation,
+ * returned by {@link SoroWillClient.estimateCost}.
+ */
+export interface RequestCostEstimate {
+  /** Simulated Soroban resource fee in stroops (base-10 string). */
+  resourceFee: string;
+  /** Total estimated transaction fee in stroops (`BASE_FEE + resourceFee`). */
+  totalFee: string;
+  /** Estimated number of RPC calls required to execute the operation. */
+  estimatedRpcCalls: number;
+  /** Contract method name that was simulated. */
+  method: string;
 }
 
 /** Options for emergency check-in, optionally providing guardian signatures. */
@@ -600,6 +634,16 @@ export interface EventSubscriptionOptions {
   pollIntervalMs?: number;
   pageSize?: number;
   cursor?: string;
+  /**
+   * Whether to deduplicate incoming event notifications across WebSocket
+   * reconnects and polling retries (#657). Defaults to `true`.
+   */
+  deduplicate?: boolean;
+  /**
+   * Maximum number of recently seen event keys retained for deduplication.
+   * Defaults to `10000`.
+   */
+  deduplicationWindowSize?: number;
   onError?: (error: Error) => void;
 }
 
