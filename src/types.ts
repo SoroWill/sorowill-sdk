@@ -406,13 +406,11 @@ export interface BatchOperation {
    */
   network?: 'testnet' | 'mainnet';
   /**
-   * Optional predicate evaluated immediately before this operation is
-   * submitted. Receives the results of all prior operations in the batch.
-   *
-   * Return `false` to skip this operation (its status will be `'skipped'`
-   * with `attempts: 0`). When omitted, the operation executes unconditionally.
+   * Optional predicate evaluated before this operation executes. Receives the
+   * results of all prior operations in the batch queue. Return `false` (or a
+   * Promise resolving to `false`) to skip this operation.
    */
-  when?: (priorResults: readonly BatchOperationResult[]) => boolean | Promise<boolean>;
+  condition?: (priorResults: readonly BatchOperationResult[]) => boolean | Promise<boolean>;
 }
 
 /** Maps a tuple of operations to a tuple of their typed results, preserving order and length. */
@@ -502,6 +500,13 @@ export interface RequestOptions {
    * @default false
    */
   skipExistenceCheck?: boolean;
+  /**
+   * When `true`, bypasses the read cache for this call and fetches fresh data
+   * from RPC (the fresh response still updates the cache unless caching is
+   * disabled).
+   * @default false
+   */
+  skipCache?: boolean;
 }
 
 /** Options for emergency check-in, optionally providing guardian signatures. */

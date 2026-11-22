@@ -85,7 +85,7 @@ import {
   WebSocketNotConfiguredError,
   GracePeriodActiveError,
 } from './errors';
-import { assertValidBeneficiaryAddresses, assertValidStellarAddress, deepFreezeObject, hasDuplicateBeneficiaries, MAX_GUARDIANS, validateBeneficiaries, validateGuardianSignature } from './utils';
+import { assertValidBeneficiaryAddresses, assertValidStellarAddress, deepFreezeObject, hasDuplicateBeneficiaries, MAX_BENEFICIARIES, MAX_GUARDIANS, PERCENTAGE_SUM_EPSILON, validateBeneficiaries, validateGuardianSignature } from './utils';
 import { RequestQueue } from './requestQueue';
 import { InFlightTracker } from './inFlightTracker';
 import { RpcEndpointPool } from './rpc';
@@ -383,6 +383,13 @@ export interface SoroWillClientOptions {
   maxQueueSize?: number;
   /** Optional list of RPC endpoints to use with automatic failover. */
   rpcUrls?: string[];
+  /**
+   * Whether to probe configured RPC endpoints on startup to deprioritize
+   * unhealthy endpoints and fail over to a healthy secondary automatically.
+   * Defaults to `true` when using real RPC servers (skipped when `rpcServer`
+   * override is supplied).
+   */
+  checkHealthOnStartup?: boolean;
   /**
    * When `true`, query methods (`getWill`, `getWillsByOwner`,
    * `getWillsByBeneficiary`) return deeply frozen objects so callers cannot
@@ -909,6 +916,37 @@ function assertBeneficiaryBasisPointsTotal(beneficiaries: Beneficiary[], method:
   }
 }
 
+/**
+ * Validates beneficiary list length, per-beneficiary percentage bounds (0 < p <= 100),
+ * exact 100% sum, and basis-point scaling, throwing a descriptive
+ * {@link BeneficiaryValidationError} identifying which check failed.
+ */
+function assertValidBeneficiaryPercentages(beneficiaries: readonly Beneficiary[], method: string): void {
+  if (beneficiaries.length === 0 || beneficiaries.length > MAX_BENEFICIARIES) {
+    throw new BeneficiaryValidationError(
+      `Invalid beneficiaries for ${method}: received ${beneficiaries.length} entries, ` +
+        `must be between 1 and ${MAX_BENEFICIARIES}.`,
+    );
+  }
+  for (let i = 0; i < beneficiaries.length; i += 1) {
+    const b = beneficiaries[i]!;
+    if (typeof b.percentage !== 'number' || !Number.isFinite(b.percentage) || b.percentage <= 0 || b.percentage > 100) {
+      throw new BeneficiaryValidationError(
+        `Invalid beneficiaries for ${method}: beneficiary at index ${i} (${b.address}) has ` +
+          `invalid percentage ${String(b.percentage)}. Each percentage must be > 0 and <= 100.`,
+      );
+    }
+  }
+  const sum = beneficiaries.reduce((acc, b) => acc + b.percentage, 0);
+  if (Math.abs(sum - 100) >= PERCENTAGE_SUM_EPSILON) {
+    throw new BeneficiaryValidationError(
+      `Invalid beneficiaries for ${method}: beneficiary percentages sum to ${sum}, ` +
+        'but must sum to exactly 100.',
+    );
+  }
+  assertBeneficiaryBasisPointsTotal([...beneficiaries], method);
+}
+
 function getDefaultEnv(): EnvSource {
   if (typeof process !== 'undefined' && process.env) {
     return process.env as EnvSource;
@@ -971,6 +1009,7 @@ export class SoroWillClient {
   private readonly rpcPool: RpcEndpointPool;
   private readonly contract: Contract;
   private readonly networkPassphrase: string;
+  private lastWalletNetworkPassphrase: string;
   private readonly network: SoroWillNetwork;
   private readonly hooks: HookManager;
   private readonly wallet: WalletAdapter;
@@ -1065,6 +1104,7 @@ export class SoroWillClient {
       options.rpcServer ??
       new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') });
     this.networkPassphrase = options.networkPassphrase ?? config.networkPassphrase;
+    this.lastWalletNetworkPassphrase = this.networkPassphrase;
     this.network = options.network;
     this.hooks = options.hooks ?? new HookManager();
     this.readOnly = options.readOnly ?? false;
@@ -1101,7 +1141,12 @@ export class SoroWillClient {
     this.webSocketFactory = options.webSocketFactory;
     this.fetchImpl = options.fetch ?? fetch;
 
-    this.rpcPool = new RpcEndpointPool(options.rpcUrls ?? config.rpcUrls, options.rpcServer);
+    const poolRpcUrls =
+      options.rpcUrls ?? (options.rpcUrl ? [options.rpcUrl, ...config.rpcUrls] : config.rpcUrls);
+    this.rpcPool = new RpcEndpointPool(poolRpcUrls, options.rpcServer);
+    if (!options.rpcServer && options.checkHealthOnStartup !== false) {
+      void this.rpcPool.checkEndpointsHealth().catch(() => {});
+    }
     this.timeoutMs = options.timeoutMs ?? 30_000;
     if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) {
       throw new RangeError('timeoutMs must be greater than zero');
@@ -1433,12 +1478,7 @@ export class SoroWillClient {
     if (hasDuplicateBeneficiaries(beneficiaries)) {
       throw new BeneficiaryValidationError('Invalid beneficiaries: duplicate beneficiary addresses are not allowed.');
     }
-    if (!validateBeneficiaries(beneficiaries)) {
-      throw new BeneficiaryValidationError(
-        'Invalid beneficiaries: list must be 1–10 entries, every percentage must be a positive number, and percentages must sum to 100.',
-      );
-    }
-    assertBeneficiaryBasisPointsTotal(beneficiaries, 'createWill');
+    assertValidBeneficiaryPercentages(beneficiaries, 'createWill');
     // #156: Validate guardians count synchronously before any RPC round-trip.
     if (params.guardians.length > MAX_GUARDIANS) {
       throw new TooManyGuardiansError(params.guardians.length, MAX_GUARDIANS);
@@ -1449,6 +1489,8 @@ export class SoroWillClient {
     // #537: fail fast when the check-in deadline would outlive the will
     // entry's storage TTL (archived before it can be triggered).
     validateCheckinPeriodDays(params.checkinPeriodDays);
+    // #699: Validate balance/amount > 0 synchronously before wallet/RPC calls.
+    const amount = validateAmount(params.amount);
     await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
     const owner = await this.getWalletPublicKey();
     const seenGuardians = new Set<string>();
@@ -1469,7 +1511,7 @@ export class SoroWillClient {
       {
         owner,
         token: params.token,
-        amount: validateAmount(params.amount),
+        amount,
         beneficiaries: toContractBeneficiaries(beneficiaries),
         checkin_period_days: validateCheckinPeriodDays(params.checkinPeriodDays),
         grace_period_days: validateDays(params.gracePeriodDays, 'gracePeriodDays'),
@@ -1827,11 +1869,7 @@ export class SoroWillClient {
     if (hasDuplicateBeneficiaries(beneficiaries)) {
       throw new BeneficiaryValidationError('Invalid beneficiaries: duplicate beneficiary addresses are not allowed.');
     }
-    if (!validateBeneficiaries(beneficiaries)) {
-      throw new BeneficiaryValidationError(
-        'Invalid beneficiaries: list must be 1–10 entries, every percentage must be a positive number, and percentages must sum to 100.',
-      );
-    }
+    assertValidBeneficiaryPercentages(beneficiaries, 'updateBeneficiaries');
     // Validate will existence before submitting, to avoid wasting gas on a
     // non-existent will.
     if (!options?.skipExistenceCheck) {
@@ -1988,6 +2026,21 @@ export class SoroWillClient {
   }
 
   /**
+   * Probes all configured RPC endpoints for health, updating pool failover state
+   * and switching away from an unhealthy primary endpoint if a healthy secondary exists.
+   */
+  async checkRpcHealth(): Promise<Array<{ url: string; healthy: boolean; latencyMs?: number }>> {
+    return this.rpcPool.checkEndpointsHealth();
+  }
+
+  /**
+   * Rotates to the next configured RPC endpoint in the pool and returns its URL.
+   */
+  rotateRpcEndpoint(): string {
+    return this.rpcPool.rotate();
+  }
+
+  /**
    * Returns the currently active RPC endpoint URL.
    *
    * **Operation Type:** Read-only (Query)
@@ -2034,7 +2087,7 @@ export class SoroWillClient {
   async getWill(willId: string, options?: RequestOptions): Promise<Will> {
     const canonicalWillId = parseWillId(willId).toString();
     const cacheKey = createReadCacheKey('get_will', { willId: canonicalWillId });
-    if (this.readCache) {
+    if (this.readCache && !options?.skipCache) {
       await this.readCache.ready();
       const cached = this.readCache.get<Will>(cacheKey);
       if (cached !== undefined) {
@@ -2069,7 +2122,7 @@ export class SoroWillClient {
     const uniqueIds = Array.from(new Set(canonicalIds));
     const cacheKey = createReadCacheKey('get_wills', { will_ids: uniqueIds.join(',') });
 
-    if (this.readCache) {
+    if (this.readCache && !options?.skipCache) {
       await this.readCache.ready();
       const cached = this.readCache.get<Will[]>(cacheKey);
       if (cached !== undefined) {
@@ -2143,7 +2196,7 @@ export class SoroWillClient {
       normalizePositiveInteger(paginationOptions.pageSize, 'pageSize');
     }
     const cacheKey = createReadCacheKey('get_wills_by_owner', { owner });
-    if (this.readCache) {
+    if (this.readCache && !options?.skipCache) {
       await this.readCache.ready();
       const cached = this.readCache.get<Will[]>(cacheKey);
       if (cached !== undefined) {
@@ -2220,7 +2273,7 @@ export class SoroWillClient {
       normalizePositiveInteger(paginationOptions.pageSize, 'pageSize');
     }
     const cacheKey = createReadCacheKey('get_wills_by_beneficiary', { beneficiary });
-    if (this.readCache) {
+    if (this.readCache && !options?.skipCache) {
       await this.readCache.ready();
       const cached = this.readCache.get<Will[]>(cacheKey);
       if (cached !== undefined) {
@@ -2438,16 +2491,20 @@ export class SoroWillClient {
     if (operations.length > 1) {
       throw new UnsupportedBatchSizeError(operations.length);
     }
-    const singleOp = operations[0]!;
-    if (singleOp.when) {
-      const shouldRun = Boolean(await singleOp.when([]));
+    if (operations[0].condition) {
+      const shouldRun = await operations[0].condition([]);
       if (!shouldRun) {
         return {
-          success: false,
+          success: true,
           txHash: '',
           createdAt: 0,
           results: [
-            { index: 0, method: singleOp.method, status: 'skipped', attempts: 0 },
+            {
+              index: 0,
+              method: operations[0].method,
+              status: 'skipped',
+              attempts: 0,
+            },
           ] as unknown as BatchOperationResults<TOperations>,
         };
       }
@@ -2579,8 +2636,7 @@ export class SoroWillClient {
     const results: BatchOperationResult[] = [];
     let halted: Error | undefined;
 
-    for (const [index, op] of operations.entries()) {
-      const { method, args } = op;
+    for (const [index, { method, args, condition }] of operations.entries()) {
       if (!halted && requestOptions.signal?.aborted) {
         halted = new SoroWillError('Batch aborted before this operation was submitted', {
           cause: requestOptions.signal.reason,
@@ -2591,17 +2647,17 @@ export class SoroWillClient {
         continue;
       }
 
-      if (op.when) {
+      if (condition) {
         let shouldRun: boolean;
         try {
-          shouldRun = Boolean(await op.when(results.slice()));
+          shouldRun = await condition(results);
         } catch (err) {
-          const condError = err instanceof Error ? err : new Error(String(err));
-          results.push({ index, method, status: 'failed', error: condError, attempts: 0 });
+          const conditionError = err instanceof Error ? err : new Error(String(err));
+          results.push({ index, method, status: 'failed', error: conditionError, attempts: 0 });
           if (onFailure === 'stop') {
             halted = new SoroWillError(
-              `Skipped because operation ${index} (${method}) condition failed: ${condError.message}`,
-              { cause: condError },
+              `Skipped because operation ${index} (${method}) condition failed: ${conditionError.message}`,
+              { cause: conditionError },
             );
           }
           continue;
@@ -3258,13 +3314,32 @@ export class SoroWillClient {
    * signature. Identical concurrent calls (same method, arguments and
    * request options) are coalesced into a single RPC simulation (#619).
    */
-  private read<T>(
+  private async read<T>(
     method: string,
     args: Record<string, unknown>,
     options?: RequestOptions,
   ): Promise<T> {
+    const rawCacheKey = this.readCache ? createReadCacheKey(`raw:${method}`, args) : undefined;
+    if (this.readCache && rawCacheKey && !options?.skipCache) {
+      await this.readCache.ready();
+      const cached = this.readCache.get<T>(rawCacheKey);
+      if (cached !== undefined) {
+        return cached;
+      }
+    }
+
+    const executeAndCache = async (): Promise<T> => {
+      const value = await this.executeRead<T>(method, args, options);
+      if (this.readCache && rawCacheKey) {
+        const willIds =
+          args.will_id !== undefined && args.will_id !== null ? [String(args.will_id)] : [];
+        this.readCache.set(rawCacheKey, value, willIds);
+      }
+      return value;
+    };
+
     if (!this.deduplicateReads || options?.signal) {
-      return this.executeRead<T>(method, args, options);
+      return executeAndCache();
     }
 
     const key = createReadCacheKey(method, {
@@ -3278,7 +3353,7 @@ export class SoroWillClient {
       return existing as Promise<T>;
     }
 
-    const pending = this.executeRead<T>(method, args, options).finally(() => {
+    const pending = executeAndCache().finally(() => {
       if (this.inFlightReads.get(key) === pending) {
         this.inFlightReads.delete(key);
       }
@@ -4179,9 +4254,14 @@ export class SoroWillClient {
   }
 
   handleNetworkChange(newNetworkPassphrase: string): boolean {
-    this.inFlightReads.clear();
-    this.feeStatsCache.clear();
-    this.lastFeeStatsCachedPassphrase = undefined;
+    if (newNetworkPassphrase !== this.lastWalletNetworkPassphrase) {
+      this.lastWalletNetworkPassphrase = newNetworkPassphrase;
+      this.wallet.clearKeyCache?.();
+      this.feeStatsCache.clear();
+      if (!this.readOnly) {
+        void this.wallet.getPublicKey().catch(() => {});
+      }
+    }
     if (!this.readCache) {
       return false;
     }

@@ -101,6 +101,7 @@ export type {
 export { SOROBAN_EVENT_TYPES, WillStatus, WillErrorCode } from './types';
 
 export {
+  DEFAULT_FREIGHTER_CONNECT_TIMEOUT_MS,
   FreighterWalletAdapter,
   WalletSessionError,
   assertWalletSessionActive,
@@ -108,6 +109,7 @@ export {
   freighterAdapter,
   getDefaultWalletAdapter,
   getPublicKey,
+  isFreighterConnectionTimeoutError,
   isFreighterInstalled,
   isFreighterInstallCheckError,
   isSignTransactionTimeoutError,
@@ -131,6 +133,7 @@ export {
   LocalStorageWalletConnectSessionStore,
   MemoryWalletConnectSessionStore,
   WalletConnectAdapter,
+  WalletConnectQrExpiredError,
   WalletConnectTimeoutError,
   WalletConnectUnsupportedMethodError,
 } from './walletConnect';
@@ -152,7 +155,12 @@ export {
   escapeCacheKeyComponent,
   escapeKeyComponent,
 } from './cache';
-export type { CachePersistenceAdapter, PersistedCacheEntry, ReadCacheOptions } from './cache';
+export type {
+  CacheGetResult,
+  CachePersistenceAdapter,
+  PersistedCacheEntry,
+  ReadCacheOptions,
+} from './cache';
 
 export {
   addEventListener,
@@ -183,6 +191,7 @@ export {
   DuplicateOperationError,
   ExorbitantFeeError,
   FixedAmountExceedsBalanceError,
+  FreighterConnectionTimeoutError,
   FreighterInstallCheckError,
   FreighterNotAvailableError,
   GracePeriodActiveError,
@@ -250,7 +259,10 @@ export {
   WillNotSettledError,
   WillNotTriggeredError,
   ZeroAmountError,
+  ErrorCode,
   mapContractError,
+  sanitizeRpcError,
+  formatUserFriendlyError,
   registerContractError,
   registerContractErrors,
   setContractErrorMap,
@@ -258,7 +270,7 @@ export {
   UnsupportedBatchSizeError,
   UnknownContractErrorCodeError,
 } from './errors';
-export type { ContractErrorFactory, InvalidStellarAddressReason } from './errors';
+export type { ContractErrorFactory, InvalidStellarAddressReason, UserFriendlyErrorInfo } from './errors';
 
 export {
   DEFAULT_MAX_QUEUE_SIZE,
@@ -272,7 +284,7 @@ export {
   MAX_BACKOFF_MS,
   ErrorTransience,
 } from './requestQueue';
-export type { RequestQueueOptions } from './requestQueue';
+export type { RequestQueueMetrics, RequestQueueOptions } from './requestQueue';
 
 export { DebugLogger, DEFAULT_REDACTED_KEYS, REDACTED } from './debugLogger';
 export type { DebugLoggerOptions } from './debugLogger';
@@ -330,3 +342,17 @@ export {
   resolveSoroWillConfig,
 } from './config';
 export type { SoroWillConfig, SoroWillConfigInput } from './config';
+
+export {
+  isBatchOperationResult,
+  isBatchResult,
+  isBeneficiaryRecord,
+  isCreateWillParams,
+  isPaginatedWillsResult,
+  isSoroWillEvent,
+  isTransaction,
+  isUpdateBeneficiariesParams,
+  isWill,
+  isWillStatus,
+} from './typeGuards';
+export type { RpcTransaction } from './typeGuards';
