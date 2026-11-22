@@ -45,9 +45,20 @@ function withPersistenceLock(
   return result;
 }
 
+export interface CacheGetResult<T> {
+  value: T;
+  stale: boolean;
+  indicator?: 'offline';
+}
+
 export interface ReadCacheOptions {
   ttlMs?: number;
   now?: () => number;
+  /**
+   * Optional network connectivity check. Defaults to `navigator.onLine` when
+   * available in browser environments, or `true` otherwise.
+   */
+  isOnline?: () => boolean;
   persistence?: CachePersistenceAdapter;
   /**
    * Maximum number of entries to keep in the cache. When the number of entries
@@ -269,6 +280,10 @@ export class ReadCache {
   private readonly entries = new Map<string, CacheEntry>();
   private readonly ttlMs: number;
   private readonly now: () => number;
+  private readonly isOnlineFn: (() => boolean) | undefined;
+  private offlineSince: number | null = null;
+  private readonly onOnlineHandler: (() => void) | undefined;
+  private readonly onOfflineHandler: (() => void) | undefined;
   private readonly persistence: CachePersistenceAdapter | undefined;
   private readonly maxEntries: number;
   private readonly onPersistenceFailure: ((key: string, error: unknown) => void) | undefined;
@@ -328,11 +343,86 @@ export class ReadCache {
     }
 
     this.now = options.now ?? Date.now;
+    this.isOnlineFn = options.isOnline;
     this.persistence = options.persistence;
     this.maxEntries = options.maxEntries ?? DEFAULT_MAX_CACHE_ENTRIES;
     this.onPersistenceFailure = options.onPersistenceFailure;
     this.rollbackOnPersistenceFailure = options.rollbackOnPersistenceFailure ?? false;
+
+    if (!this.checkOnline()) {
+      this.offlineSince = this.now();
+    }
+
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      this.onOfflineHandler = () => {
+        if (this.offlineSince === null) {
+          this.offlineSince = this.now();
+        }
+      };
+      this.onOnlineHandler = () => {
+        this.restoreOnlineTtl();
+      };
+      window.addEventListener('offline', this.onOfflineHandler);
+      window.addEventListener('online', this.onOnlineHandler);
+    }
+
     this.readyPromise = this.hydrate();
+  }
+
+  /** Removes browser online/offline event listeners registered by this cache. */
+  destroy(): void {
+    if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+      if (this.onOfflineHandler) {
+        window.removeEventListener('offline', this.onOfflineHandler);
+      }
+      if (this.onOnlineHandler) {
+        window.removeEventListener('online', this.onOnlineHandler);
+      }
+    }
+  }
+
+  /** Whether the network is currently detected as offline. */
+  get isOffline(): boolean {
+    return !this.checkOnline();
+  }
+
+  private readOnlineState(): boolean {
+    if (this.isOnlineFn) {
+      return this.isOnlineFn();
+    }
+    if (typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean') {
+      return navigator.onLine;
+    }
+    return true;
+  }
+
+  private restoreOnlineTtl(): void {
+    if (this.offlineSince === null) {
+      return;
+    }
+    const offlineDuration = Math.max(0, this.now() - this.offlineSince);
+    this.offlineSince = null;
+    if (offlineDuration > 0) {
+      for (const entry of this.entries.values()) {
+        if (entry.expiresAt !== null) {
+          entry.expiresAt += offlineDuration;
+        }
+      }
+    }
+  }
+
+  private checkOnline(): boolean {
+    const online = this.readOnlineState();
+    if (!online) {
+      if (this.offlineSince === null) {
+        this.offlineSince = this.now();
+      }
+      return false;
+    }
+    if (this.offlineSince !== null) {
+      this.restoreOnlineTtl();
+    }
+    return true;
   }
 
   /** Number of entries currently held in memory (expired entries included until pruned). */
@@ -364,15 +454,22 @@ export class ReadCache {
    * @param key - The cache key to look up
    * @returns The cached value if found and not expired, or undefined
    */
-  get<T>(key: string): T | undefined {
+  /**
+   * Retrieves a cached value along with staleness and offline status metadata.
+   * When offline, expired entries are retained and returned with `stale: true`
+   * and `indicator: 'offline'` instead of being evicted.
+   */
+  getWithStatus<T>(key: string): CacheGetResult<T> | undefined {
     const entry = this.entries.get(key);
     if (!entry) {
       this.misses += 1;
       return undefined;
     }
 
-    if (isExpired(entry.expiresAt, this.now())) {
-      this.misses += 1;
+    const online = this.checkOnline();
+    const expired = isExpired(entry.expiresAt, this.now());
+
+    if (expired && online) {
       this.invalidateExpired(key);
       return undefined;
     }
@@ -382,7 +479,23 @@ export class ReadCache {
     this.entries.delete(key);
     this.entries.set(key, entry);
 
-    return entry.value as T;
+    if (expired && !online) {
+      return {
+        value: entry.value as T,
+        stale: true,
+        indicator: 'offline',
+      };
+    }
+
+    return {
+      value: entry.value as T,
+      stale: false,
+      ...(online ? {} : { indicator: 'offline' as const }),
+    };
+  }
+
+  get<T>(key: string): T | undefined {
+    return this.getWithStatus<T>(key)?.value;
   }
 
   /**
@@ -437,6 +550,19 @@ export class ReadCache {
     };
 
     this.touchedKeys.add(key);
+    // Clean up any stale willId -> key mappings if this key is being overwritten.
+    const previousEntry = this.entries.get(key);
+    if (previousEntry) {
+      for (const oldWillId of previousEntry.willIds) {
+        if (!entry.willIds.has(oldWillId)) {
+          const oldKeys = this.willIdToKeys.get(oldWillId);
+          oldKeys?.delete(key);
+          if (oldKeys?.size === 0) {
+            this.willIdToKeys.delete(oldWillId);
+          }
+        }
+      }
+    }
     // Index the key under each will ID so invalidation by will ID can find it.
     for (const willId of entry.willIds) {
       let keys = this.willIdToKeys.get(willId);
@@ -450,14 +576,21 @@ export class ReadCache {
     this.entries.delete(key);
     this.entries.set(key, entry);
     if (this.persistence) {
+      const persistedEntry: PersistedCacheEntry = {
+        key: entry.key,
+        value: serialized,
+        expiresAt: entry.expiresAt,
+        willIds: Array.from(entry.willIds),
+      };
       void withPersistenceLock(this.persistence, async () => {
         try {
-          await this.persistence!.write(this.toPersistedEntry(entry));
+          await this.persistence!.write(persistedEntry);
         } catch (err) {
           // Report persistence failure via callback if provided
           this.onPersistenceFailure?.(key, err);
-          // Optionally roll back the in-memory entry so memory and persistence stay in sync
-          if (this.rollbackOnPersistenceFailure) {
+          // Optionally roll back the in-memory entry only if it hasn't been
+          // superseded by a newer concurrent write.
+          if (this.rollbackOnPersistenceFailure && this.entries.get(key) === entry) {
             this.entries.delete(key);
             this.touchedKeys.delete(key);
           }
@@ -547,19 +680,22 @@ export class ReadCache {
       return;
     }
 
-    // Drop expired entries first so live data is not evicted in their place.
-    const now = this.now();
-    for (const [key, entry] of this.entries) {
-      if (entry.expiresAt !== null && entry.expiresAt <= now) {
-        this.entries.delete(key);
-        this.evictions += 1;
-        this.touchedKeys.add(key);
-        if (this.persistence) {
-          void withPersistenceLock(this.persistence, async () => {
-            await this.persistence!.delete(key).catch((err) =>
-              this.onPersistenceFailure?.(key, err),
-            );
-          });
+    // Drop expired entries first when online so live data is not evicted in their place.
+    // While offline, expired entries are preserved so stale data remains available.
+    const online = this.checkOnline();
+    if (online) {
+      const now = this.now();
+      for (const [key, entry] of this.entries) {
+        if (entry.expiresAt !== null && entry.expiresAt <= now) {
+          this.entries.delete(key);
+          this.touchedKeys.add(key);
+          if (this.persistence) {
+            void withPersistenceLock(this.persistence, async () => {
+              await this.persistence!.delete(key).catch((err) =>
+                this.onPersistenceFailure?.(key, err),
+              );
+            });
+          }
         }
       }
     }
@@ -589,10 +725,14 @@ export class ReadCache {
   private invalidateExpired(key: string): void {
     this.touchedKeys.add(key);
     this.entries.delete(key);
-    void this.persistence?.delete(key).catch(() => {
-      // Silently ignore persistence failures to prevent unhandled rejections
-      // The entry is already gone in-memory and hydration skips expired entries
-    });
+    if (this.persistence) {
+      void withPersistenceLock(this.persistence, async () => {
+        await this.persistence!.delete(key).catch(() => {
+          // Silently ignore persistence failures to prevent unhandled rejections
+          // The entry is already gone in-memory and hydration skips expired entries
+        });
+      });
+    }
   }
 
   private async delete(key: string): Promise<void> {
@@ -633,6 +773,7 @@ export class ReadCache {
     }
 
     const now = this.now();
+    const online = this.checkOnline();
     // Entries written while hydration was in flight are more recent than
     // anything persisted, so they are moved behind the hydrated entries below
     // to keep LRU order correct.
@@ -644,7 +785,7 @@ export class ReadCache {
       if (this.touchedKeys.has(persistedEntry.key)) {
         continue;
       }
-      if (persistedEntry.expiresAt !== null && persistedEntry.expiresAt <= now) {
+      if (online && persistedEntry.expiresAt !== null && persistedEntry.expiresAt <= now) {
         await this.persist((adapter) => adapter.delete(persistedEntry.key));
         continue;
       }
@@ -743,9 +884,19 @@ export class MemoryCachePersistenceAdapter implements CachePersistenceAdapter {
  */
 export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdapter {
   private readonly namespace: string;
+  private lock: Promise<void> = Promise.resolve();
 
   constructor(namespace: string = 'sorowill-cache') {
     this.namespace = namespace;
+  }
+
+  private withLock<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.lock.then(operation);
+    this.lock = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   async readAll(): Promise<PersistedCacheEntry[]> {
@@ -758,36 +909,42 @@ export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdap
   }
 
   async write(entry: PersistedCacheEntry): Promise<void> {
-    try {
-      const entries = await this.readAll();
-      const index = entries.findIndex((e) => e.key === entry.key);
-      if (index >= 0) {
-        entries[index] = entry;
-      } else {
-        entries.push(entry);
+    return this.withLock(async () => {
+      try {
+        const entries = await this.readAll();
+        const index = entries.findIndex((e) => e.key === entry.key);
+        if (index >= 0) {
+          entries[index] = entry;
+        } else {
+          entries.push(entry);
+        }
+        localStorage.setItem(this.namespace, JSON.stringify(entries));
+      } catch {
+        // Silently fail if localStorage is unavailable or quota exceeded
       }
-      localStorage.setItem(this.namespace, JSON.stringify(entries));
-    } catch {
-      // Silently fail if localStorage is unavailable or quota exceeded
-    }
+    });
   }
 
   async delete(key: string): Promise<void> {
-    try {
-      const entries = await this.readAll();
-      const filtered = entries.filter((e) => e.key !== key);
-      localStorage.setItem(this.namespace, JSON.stringify(filtered));
-    } catch {
-      // Silently fail if localStorage is unavailable
-    }
+    return this.withLock(async () => {
+      try {
+        const entries = await this.readAll();
+        const filtered = entries.filter((e) => e.key !== key);
+        localStorage.setItem(this.namespace, JSON.stringify(filtered));
+      } catch {
+        // Silently fail if localStorage is unavailable
+      }
+    });
   }
 
   async clear(): Promise<void> {
-    try {
-      localStorage.removeItem(this.namespace);
-    } catch {
-      // Silently fail if localStorage is unavailable
-    }
+    return this.withLock(async () => {
+      try {
+        localStorage.removeItem(this.namespace);
+      } catch {
+        // Silently fail if localStorage is unavailable
+      }
+    });
   }
 }
 

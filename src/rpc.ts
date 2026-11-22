@@ -1,5 +1,6 @@
 import { rpc } from '@stellar/stellar-sdk';
 import type { SoroWillRpcServer } from './SoroWillClient';
+import { computeBackoffDelay } from './requestQueue';
 
 export const DEFAULT_RPC_TIMEOUT_MS = 30_000;
 export const DEFAULT_RPC_TIMEOUT_MAX_ATTEMPTS = 3;
@@ -536,7 +537,9 @@ export class RpcEndpointPool {
         if (!isRpcTimeoutError(error) || isLastAttempt) {
           throw error;
         }
-        await sleep(this.timeoutRetryBaseDelayMs * 2 ** attempt);
+        await sleep(
+          computeBackoffDelay(attempt, this.timeoutRetryBaseDelayMs, this.endpointBackoffMaxMs),
+        );
       }
     }
 
@@ -594,8 +597,9 @@ export class RpcEndpointPool {
   async withFailover<T>(operation: (server: SoroWillRpcServer, rpcUrl: string) => Promise<T>): Promise<T> {
     this.maybeRepromotePrimaryEndpoint();
     let lastError: unknown;
+    const maxAttempts = Math.max(this.servers.length, this.timeoutMaxAttempts);
 
-    for (let attempt = 0; attempt < this.servers.length; attempt += 1) {
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       // Route to the latency-weighted best available endpoint.
       const index = this.selectEndpointIndex();
       const rpcUrl = this.rpcUrls[index];
@@ -615,6 +619,21 @@ export class RpcEndpointPool {
         continue;
       }
 
+      // If every endpoint is under backoff (or only a single endpoint exists),
+      // wait out the exponential backoff window instead of hammering the endpoint.
+      if (this.isEndpointUnderBackoff(index)) {
+        const remainingMs = Math.max(0, (this.backoffUntil[index] ?? 0) - Date.now());
+        const delayMs =
+          remainingMs > 0
+            ? Math.min(remainingMs, this.endpointBackoffMaxMs)
+            : computeBackoffDelay(
+                Math.max(0, attempt - 1),
+                this.endpointBackoffBaseMs,
+                this.endpointBackoffMaxMs,
+              );
+        await sleep(delayMs);
+      }
+
       const startTime = Date.now();
       try {
         const result = await this.runWithTimeoutRetry(operation, server, rpcUrl);
@@ -628,7 +647,7 @@ export class RpcEndpointPool {
         lastError = error;
         this.recordEndpointFailure(index);
         this.recordEndpointBackoff(index);
-        if (!isRetryableRpcConnectionError(error) || attempt === this.servers.length - 1) {
+        if (!isRetryableRpcConnectionError(error) || attempt === maxAttempts - 1) {
           throw error;
         }
         // Only advance if no concurrent call has already failed over away from this endpoint.
@@ -755,6 +774,63 @@ export class RpcEndpointPool {
    * Resolving the server lazily through this accessor keeps fee queries
    * pinned to the live network context.
    */
+  /**
+   * Probes every configured endpoint's `getHealth()` method in parallel,
+   * updating latency history, failure counts, and backoff state. If the
+   * currently active endpoint is unhealthy and another endpoint is healthy,
+   * automatically fails over to the healthiest (lowest-latency) endpoint.
+   */
+  async checkEndpointsHealth(): Promise<Array<{ url: string; healthy: boolean; latencyMs?: number }>> {
+    const results = await Promise.all(
+      this.servers.map(async (server, index) => {
+        const url = this.rpcUrls[index]!;
+        if (typeof server.getHealth !== 'function') {
+          return { url, healthy: true };
+        }
+        const startTime = Date.now();
+        try {
+          const res = await withTimeout(server.getHealth(), this.timeoutMs);
+          const latencyMs = Date.now() - startTime;
+          const healthy = res?.status === 'healthy';
+          if (healthy) {
+            this.recordEndpointLatency(index, latencyMs);
+            this.resetEndpointFailure(index);
+            this.clearEndpointBackoff(index);
+          } else {
+            this.recordEndpointFailure(index);
+            this.recordEndpointBackoff(index);
+          }
+          return { url, healthy, latencyMs };
+        } catch {
+          this.recordEndpointFailure(index);
+          this.recordEndpointBackoff(index);
+          return { url, healthy: false };
+        }
+      }),
+    );
+
+    if (results[this.activeIndex] && !results[this.activeIndex]!.healthy) {
+      let bestHealthyIndex = -1;
+      let bestLatency = Infinity;
+      for (let i = 0; i < results.length; i += 1) {
+        const entry = results[i];
+        if (entry?.healthy) {
+          const latency = entry.latencyMs ?? Infinity;
+          if (bestHealthyIndex === -1 || latency < bestLatency) {
+            bestHealthyIndex = i;
+            bestLatency = latency;
+          }
+        }
+      }
+      if (bestHealthyIndex !== -1) {
+        this.activeIndex = bestHealthyIndex;
+        this.lastFailoverAt = Date.now();
+      }
+    }
+
+    return results;
+  }
+
   getActiveServer(): SoroWillRpcServer {
     this.maybeRepromotePrimaryEndpoint();
     const server = this.servers[this.activeIndex];
