@@ -74,6 +74,13 @@ const will = await client.getWill(willId);
 console.log(will.status, will.balance, will.beneficiaries);
 ```
 
+## Guides
+
+- [Quick start](./docs/QUICKSTART.md): the full Create → Top up → Check in → Claim flow
+- [Best practices](./docs/BEST_PRACTICES.md): rate limits, caching, batching, and performance
+- [Troubleshooting](./docs/TROUBLESHOOTING.md): common errors and how to fix them
+- [Migration guide](./docs/MIGRATION.md): upgrading from v0.0.x to v0.1.x
+
 ## API Reference
 
 | Method | Description | Parameters | Returns |
