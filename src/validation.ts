@@ -11,15 +11,36 @@
 import { StrKey } from '@stellar/stellar-sdk';
 
 /**
- * Validates that a will ID is a non-empty string.
+ * Validates that a will ID is a valid Stellar contract address (56-character
+ * StrKey starting with `"C"`).
  * Prevents invalid IDs from being sent to RPC.
  *
- * @param willId - The will ID to validate.
- * @throws {Error} when will ID is missing or empty.
+ * @param willId - The will ID (contract address) to validate.
+ * @throws {Error} when will ID is missing, empty, or not a valid Stellar contract address.
  */
 export function validateWillId(willId: unknown): asserts willId is string {
   if (typeof willId !== 'string' || willId.trim().length === 0) {
     throw new Error(`Invalid will ID: expected a non-empty string, got ${typeof willId}`);
+  }
+  if (!StrKey.isValidContract(willId)) {
+    throw new Error(
+      `Invalid will ID: expected a valid Stellar contract address (56-character StrKey starting with "C"), got "${willId}"`,
+    );
+  }
+}
+
+/**
+ * Validates that a contract address is a valid Stellar contract ID
+ * (56-character StrKey starting with `"C"`).
+ *
+ * @param address - The contract address to validate.
+ * @throws {Error} when address is not a valid Stellar contract address.
+ */
+export function validateContractAddress(address: unknown): asserts address is string {
+  if (typeof address !== 'string' || !StrKey.isValidContract(address)) {
+    throw new Error(
+      `Invalid contract address: expected a valid Stellar contract address (56-character StrKey starting with "C"), got ${typeof address}`,
+    );
   }
 }
 
