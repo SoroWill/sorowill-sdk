@@ -7,9 +7,16 @@
  * re-exported and may change in any release. Import raw Soroban types from
  * `@stellar/stellar-sdk` directly if you need them.
  */
-export { SoroWillClient, parseWillId, SoroWillInvalidIdError } from './SoroWillClient';
+export {
+  SoroWillClient,
+  parseWillId,
+  SoroWillInvalidIdError,
+  buildContractDataLedgerKey,
+  buildContractInstanceLedgerKey,
+} from './SoroWillClient';
 export { MAX_CHECKIN_PERIOD_DAYS } from './SoroWillClient';
 export type {
+  ContractStorageDurability,
   EventSubscription,
   EventSubscriptionOptions,
   EventSubscriptionTransport,
@@ -102,6 +109,7 @@ export type {
 export { SOROBAN_EVENT_TYPES, WillStatus, WillErrorCode } from './types';
 
 export {
+  DEFAULT_FREIGHTER_CONNECT_TIMEOUT_MS,
   FreighterWalletAdapter,
   WalletSessionError,
   assertWalletSessionActive,
@@ -109,13 +117,15 @@ export {
   freighterAdapter,
   getDefaultWalletAdapter,
   getPublicKey,
+  isFreighterConnectionTimeoutError,
   isFreighterInstalled,
   isFreighterInstallCheckError,
   isSignTransactionTimeoutError,
-  isWalletCancelledError,
+  isValidWalletSessionToken,
   isWalletNetworkMismatchError,
   isWalletSessionError,
   signTransaction,
+  validateWalletSessionToken,
 } from './wallet';
 export type {
   WalletAdapter,
@@ -131,6 +141,7 @@ export {
   LocalStorageWalletConnectSessionStore,
   MemoryWalletConnectSessionStore,
   WalletConnectAdapter,
+  WalletConnectQrExpiredError,
   WalletConnectTimeoutError,
   WalletConnectUnsupportedMethodError,
 } from './walletConnect';
@@ -152,15 +163,24 @@ export {
   escapeCacheKeyComponent,
   escapeKeyComponent,
 } from './cache';
-export type { CachePersistenceAdapter, PersistedCacheEntry, ReadCacheOptions } from './cache';
+export type {
+  CacheGetResult,
+  CachePersistenceAdapter,
+  PersistedCacheEntry,
+  ReadCacheOptions,
+} from './cache';
 
 export {
+  EventDeduplicator,
   addEventListener,
+  getEventDeduplicationKey,
   matchesEventFilter,
   unsubscribeFromWillEvents,
   validateEventTypeFilter,
 } from './events';
 export type {
+  DeduplicatableEvent,
+  EventDeduplicatorOptions,
   EventFilter,
   WillEvent,
   WillEventListener,
@@ -183,6 +203,7 @@ export {
   DuplicateOperationError,
   ExorbitantFeeError,
   FixedAmountExceedsBalanceError,
+  FreighterConnectionTimeoutError,
   FreighterInstallCheckError,
   FreighterNotAvailableError,
   GracePeriodActiveError,
@@ -238,6 +259,7 @@ export {
   TooManyGuardiansError,
   TooManyIdsError,
   TooManyWillsError,
+  TransactionNetworkMismatchError,
   TransactionSubmissionError,
   WalletConnectChainIdMismatchError,
   WalletNetworkMismatchError,
@@ -252,7 +274,10 @@ export {
   WillNotSettledError,
   WillNotTriggeredError,
   ZeroAmountError,
+  ErrorCode,
   mapContractError,
+  sanitizeRpcError,
+  formatUserFriendlyError,
   registerContractError,
   registerContractErrors,
   setContractErrorMap,
@@ -260,7 +285,7 @@ export {
   UnsupportedBatchSizeError,
   UnknownContractErrorCodeError,
 } from './errors';
-export type { ContractErrorFactory, InvalidStellarAddressReason } from './errors';
+export type { ContractErrorFactory, InvalidStellarAddressReason, UserFriendlyErrorInfo } from './errors';
 
 export {
   DEFAULT_MAX_QUEUE_SIZE,
@@ -274,7 +299,7 @@ export {
   MAX_BACKOFF_MS,
   ErrorTransience,
 } from './requestQueue';
-export type { RequestQueueOptions } from './requestQueue';
+export type { RequestQueueMetrics, RequestQueueOptions } from './requestQueue';
 
 export { DebugLogger, DEFAULT_REDACTED_KEYS, REDACTED } from './debugLogger';
 export type { DebugLoggerOptions } from './debugLogger';
@@ -332,3 +357,17 @@ export {
   resolveSoroWillConfig,
 } from './config';
 export type { SoroWillConfig, SoroWillConfigInput } from './config';
+
+export {
+  isBatchOperationResult,
+  isBatchResult,
+  isBeneficiaryRecord,
+  isCreateWillParams,
+  isPaginatedWillsResult,
+  isSoroWillEvent,
+  isTransaction,
+  isUpdateBeneficiariesParams,
+  isWill,
+  isWillStatus,
+} from './typeGuards';
+export type { RpcTransaction } from './typeGuards';

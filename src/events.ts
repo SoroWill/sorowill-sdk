@@ -265,3 +265,130 @@ export function cleanupWillEventSubscriptions(owner: object): void {
   subscriptions.clear();
   clientSubscriptions.delete(owner);
 }
+
+/** Default maximum number of seen event keys retained by {@link EventDeduplicator}. */
+export const DEFAULT_EVENT_DEDUP_MAX_SIZE = 10_000;
+
+/**
+ * Configuration options for {@link EventDeduplicator}.
+ */
+export interface EventDeduplicatorOptions {
+  /**
+   * Maximum number of recently seen event keys to retain in memory.
+   * When exceeded, the oldest key is evicted (FIFO). Defaults to `10000`.
+   */
+  maxSize?: number | undefined;
+}
+
+/**
+ * Minimal event shape supported by {@link EventDeduplicator} and
+ * {@link getEventDeduplicationKey}.
+ */
+export interface DeduplicatableEvent {
+  readonly id?: string;
+  readonly cursor?: string;
+  readonly txHash?: string | null;
+  readonly ledger?: number | null;
+  readonly contractId?: string;
+  readonly type?: string;
+  readonly topics?: readonly unknown[];
+  readonly value?: unknown;
+}
+
+function safeStringify(value: unknown): string {
+  if (value === undefined) return '';
+  try {
+    return JSON.stringify(value, (_key, item) =>
+      typeof item === 'bigint' ? item.toString() : item,
+    );
+  } catch {
+    return String(value);
+  }
+}
+
+/**
+ * Computes a stable deduplication key for a contract event, or `null` when
+ * the event carries no identifying metadata (`id`, `cursor`, or `txHash`).
+ */
+export function getEventDeduplicationKey(event: DeduplicatableEvent): string | null {
+  if (typeof event.id === 'string' && event.id.length > 0) {
+    return `id:${event.id}`;
+  }
+  if (typeof event.cursor === 'string' && event.cursor.length > 0) {
+    return `cursor:${event.cursor}`;
+  }
+  if (typeof event.txHash === 'string' && event.txHash.length > 0) {
+    return [
+      'tx',
+      event.txHash,
+      event.ledger ?? '',
+      event.contractId ?? '',
+      event.type ?? '',
+      safeStringify(event.topics),
+      safeStringify(event.value),
+    ].join(':');
+  }
+  return null;
+}
+
+/**
+ * Bounded, FIFO-evicting deduplicator for incoming event notifications (#657).
+ *
+ * Prevents duplicate delivery to consumers when network reconnects, WebSocket
+ * retransmissions, or overlapping RPC polling windows emit the same event more
+ * than once.
+ */
+export class EventDeduplicator {
+  private readonly maxSize: number;
+  private readonly seen = new Set<string>();
+
+  constructor(options: EventDeduplicatorOptions = {}) {
+    const maxSize = options.maxSize ?? DEFAULT_EVENT_DEDUP_MAX_SIZE;
+    if (!Number.isInteger(maxSize) || maxSize < 1) {
+      throw new RangeError(
+        `EventDeduplicator maxSize must be a positive integer, received ${String(maxSize)}.`,
+      );
+    }
+    this.maxSize = maxSize;
+  }
+
+  /** Number of event keys currently tracked in the deduplication window. */
+  get size(): number {
+    return this.seen.size;
+  }
+
+  /** Returns `true` if `event` has already been seen within the current window. */
+  has(event: DeduplicatableEvent): boolean {
+    const key = getEventDeduplicationKey(event);
+    return key !== null && this.seen.has(key);
+  }
+
+  /**
+   * Checks whether `event` should be delivered and records its key if new.
+   *
+   * @returns `true` if the event has not been seen before (deliver it),
+   *   `false` if it is a duplicate (drop it).
+   */
+  shouldDeliver(event: DeduplicatableEvent): boolean {
+    const key = getEventDeduplicationKey(event);
+    if (key === null) {
+      return true;
+    }
+    if (this.seen.has(key)) {
+      return false;
+    }
+    if (this.seen.size >= this.maxSize) {
+      const oldest = this.seen.values().next().value;
+      if (oldest !== undefined) {
+        this.seen.delete(oldest);
+      }
+    }
+    this.seen.add(key);
+    return true;
+  }
+
+  /** Clears all tracked event keys. */
+  clear(): void {
+    this.seen.clear();
+  }
+}

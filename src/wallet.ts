@@ -1,6 +1,7 @@
 import type FreighterApi from '@stellar/freighter-api';
 
 import {
+  FreighterConnectionTimeoutError,
   FreighterInstallCheckError,
   FreighterNotAvailableError,
   InvalidSignedXdrEncodingError,
@@ -72,8 +73,59 @@ export function isFreighterInstallCheckError(
   return error instanceof FreighterInstallCheckError;
 }
 
+/** Type guard for {@link FreighterConnectionTimeoutError}. */
+export function isFreighterConnectionTimeoutError(
+  error: unknown,
+): error is FreighterConnectionTimeoutError {
+  return error instanceof FreighterConnectionTimeoutError;
+}
+
+/** Default timeout (ms) for Freighter wallet connection requests. */
+export const DEFAULT_FREIGHTER_CONNECT_TIMEOUT_MS = 30_000;
+
+/**
+ * Maximum allowed length for a {@link WalletSession} token string.
+ */
+const MAX_WALLET_SESSION_TOKEN_LENGTH = 4096;
+
+/**
+ * Allowed character set for {@link WalletSession} tokens: printable URL-safe /
+ * base64 / JWT / Stellar StrKey characters with no whitespace or control chars.
+ */
+const WALLET_SESSION_TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]+$/;
+
+/**
+ * Returns `true` when `token` is a non-empty string with a valid session token
+ * format (no whitespace, control characters, or arbitrary punctuation, and
+ * within {@link MAX_WALLET_SESSION_TOKEN_LENGTH}).
+ */
+export function isValidWalletSessionToken(token: unknown): token is string {
+  return (
+    typeof token === 'string' &&
+    token.length > 0 &&
+    token.length <= MAX_WALLET_SESSION_TOKEN_LENGTH &&
+    WALLET_SESSION_TOKEN_PATTERN.test(token)
+  );
+}
+
+/**
+ * Validates that `token` conforms to the expected {@link WalletSession} token
+ * format and returns it, throwing {@link WalletSessionError} otherwise.
+ */
+export function validateWalletSessionToken(token: unknown): string {
+  if (!isValidWalletSessionToken(token)) {
+    throw new WalletSessionError(
+      'The wallet session token has an invalid format. Reconnect the wallet and try again.',
+    );
+  }
+  return token;
+}
+
 /**
  * Represents a wallet session token used for transaction signing.
+ *
+ * `token` must be a non-empty string matching `/^[A-Za-z0-9._~+/=-]+$/`
+ * (up to 4096 characters, with no whitespace or control characters).
  */
 export interface WalletSession {
   token: string;
@@ -599,6 +651,12 @@ export interface WalletAdapter {
    */
   onNetworkChange?(listener: WalletNetworkChangeListener): () => void;
   /**
+   * Clears any locally cached public key or session state held by the
+   * adapter, e.g. after a wallet network switch so the next call re-fetches
+   * the key from the active network.
+   */
+  clearKeyCache?(): void;
+  /**
    * Returns the current session token for this wallet, if the adapter issues
    * one. Optional — adapters that do not use session tokens may omit it.
    *
@@ -642,7 +700,13 @@ export async function ensureValidSession(
     );
   }
 
-  if (session && session.token && session.expiresAt !== undefined && session.expiresAt > now) {
+  if (session && typeof session.token === 'string' && session.token.length > 0 && !isValidWalletSessionToken(session.token)) {
+    throw new WalletSessionError(
+      'The wallet session token has an invalid format. Reconnect the wallet and try again.',
+    );
+  }
+
+  if (session && isValidWalletSessionToken(session.token) && session.expiresAt !== undefined && session.expiresAt > now) {
     return session.token;
   }
 
@@ -662,7 +726,7 @@ export async function ensureValidSession(
     );
   }
 
-  if (!refreshed || !refreshed.token || refreshed.expiresAt === undefined || refreshed.expiresAt <= now) {
+  if (!refreshed || !isValidWalletSessionToken(refreshed.token) || refreshed.expiresAt === undefined || refreshed.expiresAt <= now) {
     throw new WalletSessionError(
       'The wallet session token is still invalid after refreshing. Reconnect the wallet and try again.',
     );
@@ -705,6 +769,12 @@ export interface FreighterWalletAdapterOptions extends WalletSessionOptions {
    * {@link DEFAULT_FREIGHTER_INJECTION_RETRY_DELAY_MS}.
    */
   injectionRetryDelayMs?: number;
+  /**
+   * Maximum time in milliseconds to wait for Freighter to respond during
+   * `connect()` / `reconnect()`. Defaults to
+   * {@link DEFAULT_FREIGHTER_CONNECT_TIMEOUT_MS} (30s).
+   */
+  connectTimeoutMs?: number;
 }
 
 /**
@@ -725,6 +795,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
   private readonly sessionTtlMs: number;
   private readonly injectionRetries: number;
   private readonly injectionRetryDelayMs: number;
+  private readonly connectTimeoutMs: number;
   private session?: WalletSession;
   /**
    * Whether the extension context is currently known to be stale/invalidated.
@@ -740,12 +811,16 @@ export class FreighterWalletAdapter implements WalletAdapter {
     this.sessionTtlMs = options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
     this.injectionRetries = options.injectionRetries ?? DEFAULT_FREIGHTER_INJECTION_RETRIES;
     this.injectionRetryDelayMs = options.injectionRetryDelayMs ?? DEFAULT_FREIGHTER_INJECTION_RETRY_DELAY_MS;
+    this.connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_FREIGHTER_CONNECT_TIMEOUT_MS;
 
     if (this.injectionRetries <= 0) {
       throw new RangeError('injectionRetries must be greater than 0');
     }
     if (this.injectionRetryDelayMs < 0) {
       throw new RangeError('injectionRetryDelayMs must be non-negative');
+    }
+    if (!Number.isFinite(this.connectTimeoutMs) || this.connectTimeoutMs <= 0) {
+      throw new RangeError('connectTimeoutMs must be a positive finite number');
     }
   }
 
@@ -863,41 +938,57 @@ export class FreighterWalletAdapter implements WalletAdapter {
     return isConnected;
   }
 
-  async connect(): Promise<WalletConnection> {
-    await this.assertFreighterVersion();
-    const freighterApi = await loadFreighterApi();
-    let access: Awaited<ReturnType<typeof freighterApi.requestAccess>>;
+  /**
+   * Races a Freighter connection operation against {@link connectTimeoutMs}
+   * so a hung or unresponsive extension fails with a clear recovery message.
+   */
+  private async withConnectTimeout<T>(operation: () => Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      access = await freighterApi.requestAccess();
-    } catch (err) {
-      const cancelled = toWalletCancelledError(err, 'connect');
-      if (cancelled) throw cancelled;
-      throw err;
+      return await Promise.race<T>([
+        operation(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new FreighterConnectionTimeoutError(this.connectTimeoutMs)),
+            this.connectTimeoutMs,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
     }
-    if (access.error) {
-      this.handlePossibleContextInvalidation(access.error);
-      const cancelled = toWalletCancelledError(access.error, 'connect');
-      if (cancelled) throw cancelled;
-      throw new Error(access.error.message);
-    }
+  }
 
-    const networkDetails = await freighterApi.getNetworkDetails();
-    if (networkDetails?.error) {
-      this.handlePossibleContextInvalidation(networkDetails.error);
-      throw new Error(networkDetails.error.message);
-    }
+  async connect(): Promise<WalletConnection> {
+    return this.withConnectTimeout(async () => {
+      await this.assertFreighterVersion();
+      const freighterApi = await loadFreighterApi();
+      const access = await freighterApi.requestAccess();
+      if (access.error) {
+        this.handlePossibleContextInvalidation(access.error);
+        throw new Error(access.error.message);
+      }
 
-    const networkPassphrase = networkDetails?.networkPassphrase ?? '';
-    this.assertNetworkMatches(networkPassphrase);
+      const networkDetails = await freighterApi.getNetworkDetails();
+      if (networkDetails?.error) {
+        this.handlePossibleContextInvalidation(networkDetails.error);
+        throw new Error(networkDetails.error.message);
+      }
 
-    // Successful connect — extension is live, clear any stale flag.
-    this._extensionContextStale = false;
+      const networkPassphrase = networkDetails?.networkPassphrase ?? '';
+      this.assertNetworkMatches(networkPassphrase);
 
-    return {
-      publicKey: access.address,
-      network: networkDetails?.network ?? '',
-      networkPassphrase,
-    };
+      // Successful connect — extension is live, clear any stale flag.
+      this._extensionContextStale = false;
+
+      return {
+        publicKey: access.address,
+        network: networkDetails?.network ?? '',
+        networkPassphrase,
+      };
+    });
   }
 
   async reconnect(): Promise<WalletConnection> {
@@ -906,37 +997,39 @@ export class FreighterWalletAdapter implements WalletAdapter {
       return this.connect();
     }
 
-    let publicKey: string;
-    try {
-      publicKey = await this.getPublicKey();
-    } catch (error) {
-      // If getPublicKey failed due to context error, fall through to connect
-      if (this._extensionContextStale) {
-        return this.connect();
+    return this.withConnectTimeout(async () => {
+      let publicKey: string;
+      try {
+        publicKey = await this.getPublicKey();
+      } catch (error) {
+        // If getPublicKey failed due to context error, fall through to connect
+        if (this._extensionContextStale) {
+          return this.connect();
+        }
+        throw error;
       }
-      throw error;
-    }
 
-    const freighterApi = await this.loadInjectedFreighterApi();
-    const networkDetails = await freighterApi.getNetworkDetails();
-    if (networkDetails?.error) {
-      this.handlePossibleContextInvalidation(networkDetails.error);
-      if (this._extensionContextStale) {
-        return this.connect();
+      const freighterApi = await this.loadInjectedFreighterApi();
+      const networkDetails = await freighterApi.getNetworkDetails();
+      if (networkDetails?.error) {
+        this.handlePossibleContextInvalidation(networkDetails.error);
+        if (this._extensionContextStale) {
+          return this.connect();
+        }
+        throw new Error(networkDetails.error.message);
       }
-      throw new Error(networkDetails.error.message);
-    }
 
-    const networkPassphrase = networkDetails?.networkPassphrase ?? '';
-    this.assertNetworkMatches(networkPassphrase);
+      const networkPassphrase = networkDetails?.networkPassphrase ?? '';
+      this.assertNetworkMatches(networkPassphrase);
 
-    this._extensionContextStale = false;
+      this._extensionContextStale = false;
 
-    return {
-      publicKey,
-      network: networkDetails?.network ?? '',
-      networkPassphrase,
-    };
+      return {
+        publicKey,
+        network: networkDetails?.network ?? '',
+        networkPassphrase,
+      };
+    });
   }
 
   async disconnect(): Promise<void> {
@@ -988,6 +1081,7 @@ export class FreighterWalletAdapter implements WalletAdapter {
           const previous = lastPassphrase;
           lastPassphrase = networkPassphrase;
           if (previous !== undefined && previous !== networkPassphrase) {
+            this.clearKeyCache();
             listener({ network, networkPassphrase });
           }
         });
@@ -1016,6 +1110,11 @@ export class FreighterWalletAdapter implements WalletAdapter {
     return address;
   }
 
+  /** Clears any cached session/key state so the next operation re-fetches from Freighter. */
+  clearKeyCache(): void {
+    delete this.session;
+  }
+
   /** Returns the current session token, if one has been established. */
   async getSession(): Promise<WalletSession | undefined> {
     return this.session;
@@ -1027,8 +1126,9 @@ export class FreighterWalletAdapter implements WalletAdapter {
    */
   async refreshSession(): Promise<WalletSession> {
     const publicKey = await this.getPublicKey();
+    const token = validateWalletSessionToken(publicKey);
     this.session = {
-      token: publicKey,
+      token,
       expiresAt: Date.now() + this.sessionTtlMs,
     };
     return this.session;
@@ -1108,6 +1208,12 @@ export class WalletConnectWalletAdapter implements WalletAdapter {
       ): Promise<string | SignatureResponse>;
       getNetwork?(): Promise<{ network: string; networkPassphrase: string }>;
       onNetworkChange?(listener: WalletNetworkChangeListener): () => void;
+  /**
+   * Clears any locally cached public key or session state held by the
+   * adapter, e.g. after a wallet network switch so the next call re-fetches
+   * the key from the active network.
+   */
+  clearKeyCache?(): void;
     },
   ) {
     if (connector.onNetworkChange) {
@@ -1173,6 +1279,7 @@ export const freighterAdapter: WalletAdapter = {
   signTransaction: (xdr: string, opts: SignTransactionOptions) => defaultFreighterWalletAdapter.signTransaction(xdr, opts),
   getNetwork: () => defaultFreighterWalletAdapter.getNetwork(),
   onNetworkChange: (listener: WalletNetworkChangeListener) => defaultFreighterWalletAdapter.onNetworkChange(listener),
+  clearKeyCache: () => defaultFreighterWalletAdapter.clearKeyCache(),
 };
 
 export function getDefaultWalletAdapter(): WalletAdapter {
@@ -1219,7 +1326,13 @@ export async function assertWalletSessionActive(
     return;
   }
 
-  if (!session || !session.expiresAt) {
+  if (!session) {
+    return;
+  }
+
+  validateWalletSessionToken(session.token);
+
+  if (!session.expiresAt) {
     return;
   }
 
@@ -1238,7 +1351,13 @@ export async function assertWalletSessionActive(
     throw new WalletSessionExpiredError(session.expiresAt, { cause: err });
   }
 
-  if (!refreshed || !refreshed.expiresAt || refreshed.expiresAt <= now) {
+  if (!refreshed || !isValidWalletSessionToken(refreshed.token)) {
+    throw new WalletSessionError(
+      'The refreshed wallet session token has an invalid format. Reconnect the wallet and try again.',
+    );
+  }
+
+  if (!refreshed.expiresAt || refreshed.expiresAt <= now) {
     throw new WalletSessionExpiredError(refreshed?.expiresAt);
   }
 }

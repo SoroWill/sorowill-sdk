@@ -488,9 +488,25 @@ export function isGuardian(will: Will, address: string): boolean {
   return will.guardians.includes(address);
 }
 
-/** Returns whether `address` is one of `will`'s beneficiaries. */
-export function isBeneficiary(will: Will, address: string): boolean {
-  return will.beneficiaries.some((b) => b.address === address);
+/** Returns whether `value` is a valid {@link Beneficiary} object, or whether `address` is one of `will`'s beneficiaries. */
+export function isBeneficiary(value: unknown): value is Beneficiary;
+export function isBeneficiary(will: Will, address: string): boolean;
+export function isBeneficiary(willOrValue: unknown, address?: string): boolean {
+  if (address !== undefined) {
+    return (willOrValue as Will).beneficiaries.some((b) => b.address === address);
+  }
+  if (typeof willOrValue !== 'object' || willOrValue === null || Array.isArray(willOrValue)) {
+    return false;
+  }
+  const candidate = willOrValue as Record<string, unknown>;
+  return (
+    typeof candidate.address === 'string' &&
+    StrKey.isValidEd25519PublicKey(candidate.address) &&
+    typeof candidate.percentage === 'number' &&
+    Number.isFinite(candidate.percentage) &&
+    candidate.percentage >= 0 &&
+    candidate.percentage <= 100
+  );
 }
 
 /**
