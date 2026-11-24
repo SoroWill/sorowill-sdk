@@ -191,13 +191,13 @@ const DEFAULT_FAILOVER_COOLDOWN_MS = 60_000;
  * Default number of consecutive failures before an endpoint is quarantined
  * by the circuit breaker.
  */
-export const DEFAULT_CIRCUIT_BREAKER_THRESHOLD = 3;
+export const DEFAULT_CIRCUIT_BREAKER_THRESHOLD = 5;
 
 /**
  * Default cooldown (ms) before a quarantined endpoint is eligible to be
  * retried again.
  */
-export const DEFAULT_CIRCUIT_BREAKER_COOLDOWN_MS = 60_000;
+export const DEFAULT_CIRCUIT_BREAKER_COOLDOWN_MS = 30_000;
 
 /**
  * Per-endpoint circuit-breaker state.
@@ -468,6 +468,7 @@ export class RpcEndpointPool {
     this.backoffUntil.push(0);
     this.consecutiveFailures.push(0);
     this.latencyHistory.push([]);
+    this.healthy.push(undefined);
 
     // Create server for the new endpoint
     const server = this.serverOverride
@@ -567,8 +568,8 @@ export class RpcEndpointPool {
 
   /**
    * Records a failure for the endpoint at `index`. When the consecutive
-   * failure count reaches the circuit breaker threshold, the endpoint is
-   * quarantined.
+   * failure count reaches the circuit breaker threshold, the circuit opens
+   * (the endpoint is quarantined) and routing moves to a backup endpoint.
    */
   private recordEndpointFailure(index: number): void {
     const state = this.circuitStates[index];
@@ -578,7 +579,39 @@ export class RpcEndpointPool {
     state.failureCount += 1;
     if (state.failureCount >= this.circuitBreakerThreshold && state.quarantinedAt === null) {
       state.quarantinedAt = Date.now();
+      this.openCircuit(index);
     }
+  }
+
+  /**
+   * Opens the circuit for the endpoint at `index`: the endpoint is skipped by
+   * {@link RpcEndpointPool.selectEndpointIndex} until the cooldown elapses,
+   * and the pool fails over to a backup endpoint if one is available.
+   */
+  private openCircuit(index: number): void {
+    if (this.servers.length < 2) {
+      return;
+    }
+    if (this.activeIndex === index) {
+      this.lastFailoverAt = Date.now();
+      this.activeIndex = (index + 1) % this.servers.length;
+    }
+  }
+
+  /**
+   * Returns the number of consecutive failures recorded for the endpoint at
+   * `index`. Exposed for testing and diagnostics.
+   */
+  getEndpointFailureCount(index: number): number {
+    return this.circuitStates[index]?.failureCount ?? 0;
+  }
+
+  /**
+   * Returns `true` when the circuit for the endpoint at `index` is open
+   * (quarantined). Exposed for testing and diagnostics.
+   */
+  isCircuitOpen(index: number): boolean {
+    return this.isEndpointQuarantined(index);
   }
 
   /**
