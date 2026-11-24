@@ -313,6 +313,16 @@ export interface Will {
    * @since 0.1.0
    */
   readonly guardianVotes: number;
+  /**
+   * Time-lock condition: the earliest instant at which the will may be
+   * released, or `null` when the will has no time lock.
+   *
+   * Enforced on-chain at release time; {@link SoroWillClient.releaseInheritance}
+   * also checks it client-side and throws `TimeLockActiveError` before signing.
+   *
+   * @since 0.1.3
+   */
+  readonly releaseAfter: Date | null;
 }
 
 /**
@@ -378,6 +388,26 @@ export interface CreateWillParams {
   readonly gracePeriodDays: number;
   /** 0 to 3 guardian addresses that may jointly force an early release. */
   readonly guardians: readonly string[];
+  /**
+   * Optional time-lock condition: the number of days after creation before the
+   * will may be released. Must be a positive integer. Mutually exclusive with
+   * {@link CreateWillParams.releaseAfter}.
+   *
+   * The SDK converts this to an absolute `release_after` ledger timestamp
+   * (`now + timeLockDays * 86_400`) when submitting `create_will`, so the
+   * condition is enforced on-chain at release time.
+   *
+   * @since 0.1.3
+   */
+  readonly timeLockDays?: number;
+  /**
+   * Optional time-lock condition: the absolute UTC instant before which the
+   * will may not be released. Must be a `Date` in the future. Mutually
+   * exclusive with {@link CreateWillParams.timeLockDays}.
+   *
+   * @since 0.1.3
+   */
+  readonly releaseAfter?: Date;
 }
 
 /** Parameters for {@link SoroWillClient.updateBeneficiaries}. */

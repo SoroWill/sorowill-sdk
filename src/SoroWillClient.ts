@@ -94,6 +94,8 @@ import {
   WillContractError,
   WebSocketNotConfiguredError,
   GracePeriodActiveError,
+  InvalidTimeLockError,
+  TimeLockActiveError,
 } from './errors';
 import { assertValidBeneficiaryAddresses, assertValidStellarAddress, deepFreezeObject, hasDuplicateBeneficiaries, MAX_BENEFICIARIES, MAX_GUARDIANS, PERCENTAGE_SUM_EPSILON, validateBeneficiaries, validateGuardianSignature } from './utils';
 import { RequestQueue } from './requestQueue';
@@ -576,6 +578,7 @@ interface RawWill {
   grace_period_days: bigint;
   last_checkin: bigint;
   trigger_time: bigint | undefined;
+  release_after?: bigint | undefined;
   status: WillStatus;
   guardians: string[];
   guardian_votes: number;
@@ -629,6 +632,7 @@ function isRawWillShape(value: unknown): value is RawWill {
     typeof v.grace_period_days === 'bigint' &&
     typeof v.last_checkin === 'bigint' &&
     (v.trigger_time === undefined || typeof v.trigger_time === 'bigint') &&
+    (v.release_after === undefined || typeof v.release_after === 'bigint') &&
     typeof v.status === 'string' &&
     Array.isArray(v.guardians) &&
     typeof v.guardian_votes === 'number'
@@ -655,6 +659,10 @@ function mapWill(raw: unknown): Will {
     status: raw.status,
     guardians: [...raw.guardians],
     guardianVotes: raw.guardian_votes,
+    releaseAfter:
+      raw.release_after === undefined || raw.release_after === 0n
+        ? null
+        : new Date(Number(raw.release_after) * 1000),
   };
 }
 
@@ -672,6 +680,7 @@ function cloneWill(will: Will): Will {
     guardians: [...will.guardians],
     lastCheckin: new Date(will.lastCheckin.getTime()),
     triggerTime: will.triggerTime === null ? null : new Date(will.triggerTime.getTime()),
+    releaseAfter: will.releaseAfter === null ? null : new Date(will.releaseAfter.getTime()),
   };
 }
 
@@ -966,6 +975,58 @@ function validateCheckinPeriodDays(value: number): bigint {
     throw new CheckinPeriodExceedsTtlError(value, MAX_CHECKIN_PERIOD_DAYS);
   }
   return days;
+}
+
+/**
+ * Resolves the optional time-lock condition supplied to `createWill` into the
+ * absolute Unix-seconds timestamp the contract stores as `release_after`.
+ *
+ * `timeLockDays` and `releaseAfter` are mutually exclusive; supplying neither
+ * yields `undefined` (no time lock). `timeLockDays` is converted relative to
+ * `now` so the condition is anchored at creation time.
+ *
+ * @param params - The `createWill` parameters carrying the time-lock fields.
+ * @param now - Reference instant used to resolve `timeLockDays` (injectable for tests).
+ * @returns The `release_after` timestamp in Unix seconds, or `undefined`.
+ * @throws {InvalidTimeLockError} If the condition is malformed or in the past.
+ * @since 0.1.3
+ */
+export function resolveTimeLock(
+  params: Pick<CreateWillParams, 'timeLockDays' | 'releaseAfter'>,
+  now: Date = new Date(),
+): bigint | undefined {
+  const { timeLockDays, releaseAfter } = params;
+  if (timeLockDays !== undefined && releaseAfter !== undefined) {
+    throw new InvalidTimeLockError(
+      'releaseAfter',
+      releaseAfter,
+      'timeLockDays and releaseAfter are mutually exclusive; supply only one time-lock condition.',
+    );
+  }
+  if (timeLockDays !== undefined) {
+    if (!Number.isInteger(timeLockDays) || timeLockDays <= 0) {
+      throw new InvalidTimeLockError(
+        'timeLockDays',
+        timeLockDays,
+        `must be a positive integer number of days (received ${String(timeLockDays)}).`,
+      );
+    }
+    return BigInt(Math.floor(now.getTime() / 1000) + timeLockDays * 86_400);
+  }
+  if (releaseAfter !== undefined) {
+    if (!(releaseAfter instanceof Date) || Number.isNaN(releaseAfter.getTime())) {
+      throw new InvalidTimeLockError('releaseAfter', releaseAfter, 'must be a valid Date.');
+    }
+    if (releaseAfter.getTime() <= now.getTime()) {
+      throw new InvalidTimeLockError(
+        'releaseAfter',
+        releaseAfter,
+        `must be in the future (received ${releaseAfter.toISOString()}).`,
+      );
+    }
+    return BigInt(Math.floor(releaseAfter.getTime() / 1000));
+  }
+  return undefined;
 }
 
 /**
