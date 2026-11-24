@@ -1276,6 +1276,22 @@ export class WebSocketNotConfiguredError extends SoroWillError {
 }
 
 /**
+ * Raised when {@link SoroWillClient.subscribeToEvents} is called with
+ * `{ transport: 'sse' }` but the client was not constructed with
+ * `eventSseUrl`. Thrown instead of silently downgrading to polling, since an
+ * explicit `'sse'` request implies the caller relies on push delivery.
+ */
+export class SseNotConfiguredError extends SoroWillError {
+  constructor(options?: ErrorOptions) {
+    super(
+      'transport: "sse" was requested but this client was not configured with ' +
+        'eventSseUrl. Configure it, or use transport: "auto" to allow falling back to polling.',
+      options,
+    );
+  }
+}
+
+/**
  * Raised when {@link mapContractError} encounters a numeric contract error
  * code that has no registered mapping in the SDK. This can happen when the
  * on-chain contract is upgraded and adds new error codes before the SDK is

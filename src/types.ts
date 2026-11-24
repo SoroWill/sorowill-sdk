@@ -631,6 +631,21 @@ export interface EventSubscriptionOptions {
   retryAttempts?: number;
   retryDelayMs?: number;
   websocketConnectTimeoutMs?: number;
+  /**
+   * Timeout for establishing an SSE connection before falling back to polling
+   * (or reporting an error when `transport: 'sse'` was requested explicitly).
+   * Defaults to 10 seconds.
+   */
+  sseConnectTimeoutMs?: number;
+  /**
+   * Base delay for SSE auto-reconnect backoff. Defaults to 1000 ms; the delay
+   * doubles per consecutive failure up to `sseMaxReconnectDelayMs`.
+   */
+  sseReconnectDelayMs?: number;
+  /** Maximum SSE auto-reconnect backoff delay. Defaults to 30000 ms. */
+  sseMaxReconnectDelayMs?: number;
+  /** Maximum consecutive SSE reconnect attempts before giving up. Defaults to `Infinity`. */
+  sseMaxReconnectAttempts?: number;
   pollIntervalMs?: number;
   pageSize?: number;
   cursor?: string;
@@ -647,6 +662,6 @@ export interface EventSubscriptionOptions {
   onError?: (error: Error) => void;
 }
 
-export type EventSubscriptionTransport = 'websocket' | 'polling';
+export type EventSubscriptionTransport = 'websocket' | 'sse' | 'polling';
 
 export type ContractSpecLike = Record<string, unknown>;

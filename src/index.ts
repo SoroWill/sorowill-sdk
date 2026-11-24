@@ -266,6 +266,7 @@ export {
   CheckInDuringGracePeriodError,
   GracePeriodExceedsCheckinPeriodError,
   WebSocketNotConfiguredError,
+  SseNotConfiguredError,
   WillContractError,
   WillNotActiveError,
   WillNotBothActiveError,

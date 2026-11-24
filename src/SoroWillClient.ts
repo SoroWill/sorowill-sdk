@@ -91,6 +91,7 @@ import {
   WalletNetworkMismatchError,
   WillContractError,
   WebSocketNotConfiguredError,
+  SseNotConfiguredError,
   GracePeriodActiveError,
 } from './errors';
 import { assertValidBeneficiaryAddresses, assertValidStellarAddress, deepFreezeObject, hasDuplicateBeneficiaries, MAX_BENEFICIARIES, MAX_GUARDIANS, PERCENTAGE_SUM_EPSILON, validateBeneficiaries, validateGuardianSignature } from './utils';
@@ -406,6 +407,12 @@ export interface SoroWillClientOptions {
   eventRpcUrl?: string;
   /** Optional override for the WebSocket event streaming endpoint. */
   eventStreamUrl?: string;
+  /**
+   * Optional Server-Sent Events (SSE) endpoint used for real-time event
+   * delivery when `subscribeToEvents` is called with `transport: 'sse'` (or
+   * `'auto'`, which prefers SSE over WebSocket and polling).
+   */
+  eventSseUrl?: string;
   /** Default polling interval for event subscriptions. */
   defaultPollIntervalMs?: number;
   /**
@@ -599,6 +606,9 @@ const EXCLUSIVE_INVOKE_METHODS: ReadonlySet<string> = new Set(['check_in']);
  * leave the returned promise pending forever.
  */
 const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS = 10_000;
+const DEFAULT_SSE_CONNECT_TIMEOUT_MS = 10_000;
+const DEFAULT_SSE_RECONNECT_DELAY_MS = 1_000;
+const DEFAULT_SSE_MAX_RECONNECT_DELAY_MS = 30_000;
 
 const DEFAULT_RETRY_OPTIONS: RpcRetryOptions = {
   maxAttempts: 1,
@@ -1121,6 +1131,7 @@ export class SoroWillClient {
   private readonly eventSource?: WillEventSource | undefined;
   private readonly eventRpcUrl: string;
   private readonly eventStreamUrl: string | undefined;
+  private readonly eventSseUrl: string | undefined;
   private readonly defaultPollIntervalMs: number;
   private readonly webSocketFactory: ((url: string) => WebSocketLike) | undefined;
   private readonly fetchImpl: FetchImplementation;
@@ -1232,6 +1243,7 @@ export class SoroWillClient {
     this.specJsonOverride = options.specJson;
     this.eventRpcUrl = options.eventRpcUrl ?? rpcUrl;
     this.eventStreamUrl = options.eventStreamUrl;
+    this.eventSseUrl = options.eventSseUrl;
     if (this.eventStreamUrl !== undefined) {
       if (!this.eventStreamUrl.startsWith('wss://')) {
         throw new InvalidWebSocketUrlError(this.eventStreamUrl);
@@ -3226,11 +3238,13 @@ export class SoroWillClient {
 
   /**
    * Subscribes to SoroWill contract events, delivering each decoded event to
-   * `listener` as it arrives. Prefers a WebSocket stream (via
+   * `listener` as it arrives. Prefers a Server-Sent Events stream (via
+   * `eventSseUrl`) when configured, then a WebSocket stream (via
    * `webSocketFactory` and `eventStreamUrl`) when both are configured,
    * automatically falling back to HTTP polling (via `fetch` and
-   * `eventRpcUrl`) if the WebSocket connection fails to open. Pass
-   * `{ transport: 'polling' }` to skip WebSocket entirely, or
+   * `eventRpcUrl`) if the stream connection fails to open. Pass
+   * `{ transport: 'sse' }` to require SSE (throws
+   * {@link SseNotConfiguredError} when `eventSseUrl` is not configured), or
    * `{ transport: 'websocket' }` to require it — this throws
    * {@link WebSocketNotConfiguredError} instead of silently falling back to
    * polling if `webSocketFactory`/`eventStreamUrl` aren't configured.
@@ -3238,7 +3252,7 @@ export class SoroWillClient {
    * **Operation Type:** Read-only (Subscription)
    *
    * @readonly
-   * @remarks Read-only subscription operation. Subscribes to contract events via WebSocket or polling without submitting transactions or modifying ledger state.
+   * @remarks Read-only subscription operation. Subscribes to contract events via SSE, WebSocket or polling without submitting transactions or modifying ledger state.
    *
    * @param listener - Callback receiving each incoming {@link SoroWillEvent}.
    * @param options - Subscription options (transport, cursor, intervals, etc.).
@@ -3279,6 +3293,14 @@ export class SoroWillClient {
           userListener(event);
         }
       };
+    }
+
+    const wantsSse = options.transport === 'sse' || options.transport === undefined;
+    if (wantsSse && this.eventSseUrl) {
+      return this.startSseSubscription(listener, options);
+    }
+    if (options.transport === 'sse') {
+      throw new SseNotConfiguredError();
     }
 
     const wantsWebSocket = options.transport !== 'polling';
@@ -3412,6 +3434,176 @@ export class SoroWillClient {
         clearConnectTimer();
         resolve(this.startPollingSubscription(listener, options));
       };
+    });
+  }
+
+  /**
+   * Subscribes to contract events over Server-Sent Events (SSE), decoding each
+   * `data:` frame as an event record and delivering it to `listener`.
+   *
+   * The connection auto-reconnects with exponential backoff when the stream
+   * drops, resuming from the last seen cursor. Connection failures are
+   * reported through `options.onError`; if the initial connection cannot be
+   * established the subscription falls back to polling (unless
+   * `transport: 'sse'` was requested explicitly, in which case the error is
+   * surfaced and the subscription is closed).
+   */
+  private async startSseSubscription(
+    listener: (event: SoroWillEvent) => void,
+    options: EventSubscriptionOptions,
+  ): Promise<EventSubscription> {
+    const baseUrl = this.eventSseUrl!;
+    const connectTimeoutMs = options.sseConnectTimeoutMs ?? DEFAULT_SSE_CONNECT_TIMEOUT_MS;
+    const baseReconnectDelayMs = options.sseReconnectDelayMs ?? DEFAULT_SSE_RECONNECT_DELAY_MS;
+    const maxReconnectDelayMs = options.sseMaxReconnectDelayMs ?? DEFAULT_SSE_MAX_RECONNECT_DELAY_MS;
+    const maxReconnectAttempts = options.sseMaxReconnectAttempts ?? Infinity;
+
+    let closed = false;
+    let settled = false;
+    let cursor = options.cursor;
+    let reconnectAttempts = 0;
+    let controller: AbortController | undefined;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const buildUrl = (): string => {
+      const url = new URL(baseUrl);
+      url.searchParams.set('contractId', this.getContractId());
+      if (cursor !== undefined) url.searchParams.set('cursor', cursor);
+      for (const type of options.eventTypes ?? []) url.searchParams.append('eventType', type);
+      return url.toString();
+    };
+
+    const deliver = (data: string): void => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(data);
+      } catch (err) {
+        options.onError?.(err instanceof Error ? err : new Error(String(err)));
+        return;
+      }
+      const records = Array.isArray(parsed)
+        ? (parsed as RawEventRecord[])
+        : ((parsed as { events?: RawEventRecord[] }).events ?? [parsed as RawEventRecord]);
+      for (const raw of records) {
+        if (closed) return;
+        if (raw?.pagingToken ?? raw?.id) cursor = raw.pagingToken ?? raw.id;
+        try {
+          listener(mapEventRecord(raw, this.getContractId()));
+        } catch (listenerError) {
+          const eventId = raw?.id ?? raw?.pagingToken ?? 'unknown';
+          options.onError?.(
+            new SoroWillError(`Event listener threw for event ${eventId}`, { cause: listenerError }),
+          );
+        }
+      }
+    };
+
+    const scheduleReconnect = (): void => {
+      if (closed) return;
+      if (reconnectAttempts >= maxReconnectAttempts) {
+        closed = true;
+        options.onError?.(new Error('SoroWill SSE stream reconnect attempts exhausted'));
+        return;
+      }
+      const delay = Math.min(baseReconnectDelayMs * 2 ** reconnectAttempts, maxReconnectDelayMs);
+      reconnectAttempts += 1;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = undefined;
+        void connect();
+      }, delay);
+    };
+
+    const connect = async (): Promise<void> => {
+      if (closed) return;
+      const abort = new AbortController();
+      controller = abort;
+      let connectTimer: ReturnType<typeof setTimeout> | undefined;
+      if (Number.isFinite(connectTimeoutMs) && connectTimeoutMs > 0) {
+        connectTimer = setTimeout(() => abort.abort(), connectTimeoutMs);
+      }
+      try {
+        const response = await this.fetchImpl(buildUrl(), {
+          headers: { Accept: 'text/event-stream' },
+          signal: abort.signal,
+        });
+        if (!response.ok || !response.body) {
+          throw new Error(`SoroWill SSE endpoint responded with status ${response.status}`);
+        }
+        if (connectTimer !== undefined) {
+          clearTimeout(connectTimer);
+          connectTimer = undefined;
+        }
+        reconnectAttempts = 0;
+        if (!settled) {
+          settled = true;
+          resolveSse(subscription);
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done || closed) break;
+          buffer += decoder.decode(value, { stream: true });
+          let boundary = buffer.indexOf('\n\n');
+          while (boundary !== -1) {
+            const frame = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            const dataLines: string[] = [];
+            for (const line of frame.split('\n')) {
+              const trimmed = line.endsWith('\r') ? line.slice(0, -1) : line;
+              if (trimmed.startsWith('data:')) {
+                dataLines.push(trimmed.slice(trimmed.startsWith('data: ') ? 6 : 5));
+              }
+            }
+            if (dataLines.length > 0) deliver(dataLines.join('\n'));
+            boundary = buffer.indexOf('\n\n');
+          }
+        }
+        if (closed) return;
+        options.onError?.(new Error('SoroWill SSE stream closed'));
+        scheduleReconnect();
+      } catch (err) {
+        if (closed) return;
+        options.onError?.(err instanceof Error ? err : new Error(String(err)));
+        if (!settled) {
+          settled = true;
+          resolveSse(this.startPollingSubscription(listener, options));
+          return;
+        }
+        scheduleReconnect();
+      } finally {
+        if (connectTimer !== undefined) clearTimeout(connectTimer);
+      }
+    };
+
+    let resolveSse!: (subscription: EventSubscription) => void;
+    const subscription: EventSubscription = {
+      transport: 'sse',
+      get closed() {
+        return closed;
+      },
+      unsubscribe: () => {
+        if (closed) return;
+        closed = true;
+        if (reconnectTimer !== undefined) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = undefined;
+        }
+        try {
+          controller?.abort();
+        } catch {
+          // Best-effort abort; the stream may already be gone.
+        }
+      },
+      close() {
+        this.unsubscribe();
+      },
+    };
+
+    return new Promise<EventSubscription>((resolve) => {
+      resolveSse = resolve;
+      void connect();
     });
   }
 
