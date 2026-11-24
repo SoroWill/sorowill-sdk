@@ -1984,6 +1984,63 @@ export class SoroWillClient {
   }
 
   /**
+   * Transfers ownership of `willId` to `newOwner`.
+   *
+   * **Operation Type:** Write (State-changing)
+   *
+   * @remarks The new owner address is validated client-side before any wallet
+   * or RPC interaction. The caller must be the current owner of the will;
+   * otherwise a {@link NotOwnerError} is thrown before a transaction is built.
+   * On success the previous owner loses all owner-only access to the will and
+   * the cached will record is invalidated so subsequent reads reflect the new
+   * owner.
+   *
+   * @param willId - The on-chain will ID.
+   * @param newOwner - The Stellar account address (`G...`) of the new owner.
+   * @param options - Optional per-call timeout and abort signal.
+   * @returns The transaction hash and the new owner address.
+   * @throws {InvalidStellarAddressError} If `newOwner` is not a valid Stellar account address.
+   * @throws {SoroWillInvalidIdError} If `willId` is not a valid numeric ID.
+   * @throws {WillNotFoundError} If the will does not exist.
+   * @throws {NotOwnerError} If the connected wallet is not the current owner.
+   * @throws {SoroWillError} If the transaction simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const { txHash, newOwner } = await client.migrateWill('1', 'GNEWOWNER...');
+   * console.log(`Will migrated to ${newOwner} in ${txHash}`);
+   * ```
+   */
+  async migrateWill(
+    willId: string,
+    newOwner: string,
+    options?: RequestOptions,
+  ): Promise<{ txHash: string; newOwner: string }> {
+    const canonicalWillId = parseWillId(willId).toString();
+    assertValidStellarAddress(newOwner, 'newOwner');
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
+    const owner = await this.getWalletPublicKey();
+    if (owner === newOwner) {
+      throw new SoroWillError(
+        'Invalid new owner: the will is already owned by the connected wallet.',
+      );
+    }
+    const will = await this.getWill(canonicalWillId, options);
+    if (will.owner !== owner) {
+      throw new NotOwnerError();
+    }
+    const { txHash } = await this.invoke(
+      'migrate_will',
+      { will_id: BigInt(canonicalWillId), owner, new_owner: newOwner },
+      options,
+    );
+    // The cached will record still names the previous owner.
+    this.statusCache.delete(canonicalWillId);
+    await this.readCache?.invalidateByWillId(canonicalWillId);
+    return { txHash, newOwner };
+  }
+
+  /**
    * Replaces the beneficiary list for a will before it has been triggered.
    *
    * The will's existence is validated via `getWill()` before submission. If
