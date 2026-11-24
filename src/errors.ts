@@ -55,6 +55,7 @@ export enum ErrorCode {
   WALLET_TIMEOUT = 'WALLET_TIMEOUT',
   WALLET_NETWORK_MISMATCH = 'WALLET_NETWORK_MISMATCH',
   VALIDATION_ERROR = 'VALIDATION_ERROR',
+  CERTIFICATE_ERROR = 'CERTIFICATE_ERROR',
   UNKNOWN_ERROR = 'UNKNOWN_ERROR',
 }
 
@@ -175,6 +176,24 @@ export class SoroWillInvalidAmountError extends SoroWillError {
       options,
     );
     this.amount = amount;
+  }
+}
+
+/**
+ * Raised when a will certificate cannot be generated or verified, e.g. the
+ * supplied will record is malformed or a certificate's proof does not match
+ * its contents.
+ */
+export class WillCertificateError extends SoroWillError {
+  /** The will id the certificate operation was attempted for, when known. */
+  readonly willId?: string | undefined;
+
+  constructor(message: string, options?: ErrorOptions & { willId?: string }) {
+    super(message, { ...options, errorCode: ErrorCode.CERTIFICATE_ERROR });
+    this.name = 'WillCertificateError';
+    if (options?.willId !== undefined) {
+      this.willId = options.willId;
+    }
   }
 }
 

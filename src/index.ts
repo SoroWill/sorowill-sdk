@@ -270,6 +270,7 @@ export {
   CheckInDuringGracePeriodError,
   GracePeriodExceedsCheckinPeriodError,
   WebSocketNotConfiguredError,
+  WillCertificateError,
   WillContractError,
   WillNotActiveError,
   WillNotBothActiveError,
@@ -376,3 +377,18 @@ export {
   isWillStatus,
 } from './typeGuards';
 export type { RpcTransaction } from './typeGuards';
+
+export {
+  CERTIFICATE_FORMAT_VERSION,
+  buildWillCertificate,
+  computeWillCertificateProof,
+  renderWillCertificatePdf,
+  verifyWillCertificate,
+} from './certificate';
+export type {
+  BuildWillCertificateOptions,
+  WillCertificate,
+  WillCertificateBeneficiary,
+  WillCertificateProof,
+  WillCertificateVerification,
+} from './certificate';
