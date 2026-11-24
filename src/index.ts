@@ -25,6 +25,7 @@ export type {
   SoroWillNetwork,
   SoroWillRpcServer,
   SoroWillReadCacheOptions,
+  TransactionDetails,
 } from './SoroWillClient';
 export { DEFAULT_CONTRACT_IDS } from './SoroWillClient';
 export {
@@ -260,6 +261,7 @@ export {
   TooManyIdsError,
   TooManyWillsError,
   TransactionNetworkMismatchError,
+  TransactionNotFoundError,
   TransactionSubmissionError,
   WalletConnectChainIdMismatchError,
   WalletNetworkMismatchError,

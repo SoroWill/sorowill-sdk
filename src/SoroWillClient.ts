@@ -87,6 +87,7 @@ import {
   SoroWillRestoreRequiredError,
   TooManyGuardiansError,
   TransactionNetworkMismatchError,
+  TransactionNotFoundError,
   UnsupportedBatchSizeError,
   WalletNetworkMismatchError,
   WillContractError,
@@ -237,6 +238,34 @@ export interface SoroWillRpcServer {
   ): Promise<rpc.Api.GetTransactionResponse>;
   getFeeStats?(): Promise<rpc.Api.GetFeeStatsResponse>;
   getHealth?(): Promise<rpc.Api.GetHealthResponse>;
+  /**
+   * Fetch a transaction by hash. Returns `status: 'NOT_FOUND'` when the
+   * network has no record of the hash.
+   */
+  getTransaction?(hash: string): Promise<rpc.Api.GetTransactionResponse>;
+}
+
+/**
+ * Full details of a transaction fetched by hash via
+ * {@link SoroWillClient.getTransaction}.
+ */
+export interface TransactionDetails {
+  /** The transaction hash (hex). */
+  hash: string;
+  /** Terminal status reported by the network: `SUCCESS` or `FAILED`. */
+  status: rpc.Api.GetTransactionStatus;
+  /** Ledger sequence in which the transaction was included, if reported. */
+  ledger?: number;
+  /** Ledger close time (Unix seconds) of the including ledger, if reported. */
+  createdAt?: number;
+  /** Base64-encoded result XDR, if reported. */
+  resultXdr?: string;
+  /** Base64-encoded result meta XDR, if reported. */
+  resultMetaXdr?: string;
+  /** Base64-encoded envelope XDR, if reported. */
+  envelopeXdr?: string;
+  /** The raw RPC response, for fields not surfaced above. */
+  raw: rpc.Api.GetTransactionResponse;
 }
 
 /** @internal */
@@ -2204,6 +2233,72 @@ export class SoroWillClient {
       createdAt: txResponse.createdAt,
       returnValue: txResponse.returnValue,
     };
+  }
+
+  /**
+   * Fetches a transaction by hash and returns its full details (#793).
+   *
+   * **Operation Type:** Read-only (Query)
+   *
+   * @readonly
+   * @remarks Read-only query operation. Does not modify ledger state.
+   *
+   * Unlike {@link SoroWillClient.waitForTransaction}, this performs a single
+   * RPC round trip and does not poll or throw on a `FAILED` status — the
+   * status is returned so callers can inspect it.
+   *
+   * @param txHash - The transaction hash returned by `sendTransaction`.
+   * @param options - Optional per-call timeout and abort signal.
+   * @returns The transaction details, including status and ledger metadata.
+   * @throws {TransactionNotFoundError} If the network has no record of `txHash`.
+   * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout.
+   *
+   * @example
+   * ```ts
+   * try {
+   *   const tx = await client.getTransaction('abc123hash');
+   *   console.log(tx.status, tx.ledger);
+   * } catch (err) {
+   *   if (err instanceof TransactionNotFoundError) {
+   *     console.warn('Unknown transaction', err.txHash);
+   *   }
+   * }
+   * ```
+   */
+  async getTransaction(txHash: string, options?: RequestOptions): Promise<TransactionDetails> {
+    if (typeof txHash !== 'string' || txHash.trim() === '') {
+      throw new SoroWillError('getTransaction requires a non-empty transaction hash');
+    }
+    const hash = txHash.trim();
+
+    const response = await this.rpc(
+      () =>
+        this.rpcPool.withFailover((server) => {
+          if (typeof server.getTransaction !== 'function') {
+            throw new SoroWillError('The configured RPC server does not support getTransaction');
+          }
+          return server.getTransaction(hash);
+        }),
+      options,
+      'getTransaction',
+    );
+
+    if (!response || response.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
+      throw new TransactionNotFoundError(hash);
+    }
+
+    const record = response as unknown as Record<string, unknown>;
+    const details: TransactionDetails = {
+      hash,
+      status: response.status,
+      raw: response,
+    };
+    if (typeof record.ledger === 'number') details.ledger = record.ledger;
+    if (typeof record.createdAt === 'number') details.createdAt = record.createdAt;
+    if (typeof record.resultXdr === 'string') details.resultXdr = record.resultXdr;
+    if (typeof record.resultMetaXdr === 'string') details.resultMetaXdr = record.resultMetaXdr;
+    if (typeof record.envelopeXdr === 'string') details.envelopeXdr = record.envelopeXdr;
+    return details;
   }
 
   /**

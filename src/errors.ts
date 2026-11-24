@@ -1114,6 +1114,24 @@ export class InvokeFailedError extends SoroWillError {
 }
 
 /**
+ * Raised when {@link SoroWillClient.getTransaction} cannot find a transaction
+ * with the requested hash on the network.
+ *
+ * The hash is kept as a structured property — not embedded in the message —
+ * because it is caller-supplied data that would otherwise surface in any
+ * error-tracking pipeline.
+ */
+export class TransactionNotFoundError extends SoroWillError {
+  /** The transaction hash that was not found. Treat as untrusted before logging. */
+  readonly txHash: string;
+
+  constructor(txHash: string, options?: ErrorOptions) {
+    super('Transaction not found on the network', options);
+    this.txHash = txHash;
+  }
+}
+
+/**
  * Raised when a pagination cursor supplied by the caller fails validation.
  *
  * The offending cursor string is kept as a structured property — not embedded
