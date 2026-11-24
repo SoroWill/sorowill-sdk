@@ -15,6 +15,12 @@ export {
   buildContractInstanceLedgerKey,
 } from './SoroWillClient';
 export { MAX_CHECKIN_PERIOD_DAYS } from './SoroWillClient';
+export {
+  MAX_CHECKIN_PERIOD_YEARS,
+  getMaxCheckinPeriodDate,
+  validateCheckinPeriodDate,
+  validateCheckinPeriodDaysHorizon,
+} from './validation';
 export type {
   ContractStorageDurability,
   EventSubscription,
