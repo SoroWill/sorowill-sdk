@@ -293,6 +293,7 @@ export {
   DEFAULT_MAX_QUEUE_SIZE,
   RequestQueue,
   RequestPriority,
+  DEFAULT_PRIORITIES,
   getSharedRequestQueue,
   releaseSharedRequestQueue,
   computeBackoffDelay,
