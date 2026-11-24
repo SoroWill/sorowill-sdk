@@ -178,6 +178,28 @@ export class SoroWillInvalidAmountError extends SoroWillError {
   }
 }
 
+/**
+ * Raised when a will state transition is not permitted by the client-side
+ * state machine (see `willStateMachine.ts`). The offending states are exposed
+ * as typed properties so callers can branch on them without parsing the
+ * message.
+ */
+export class InvalidWillStateTransitionError extends SoroWillError {
+  /** The state the will is currently in. */
+  readonly from: string;
+  /** The state the caller attempted to move to. */
+  readonly to: string;
+
+  constructor(from: string, to: string, options?: ErrorOptions) {
+    super(
+      `Invalid will state transition: cannot move from "${from}" to "${to}".`,
+      { ...options, errorCode: ErrorCode.CONTRACT_STATE_ERROR },
+    );
+    this.from = from;
+    this.to = to;
+  }
+}
+
 /** Raised when an RPC call exceeds its configured deadline. */
 export class RequestTimeoutError extends SoroWillError {
   readonly timeoutMs: number;

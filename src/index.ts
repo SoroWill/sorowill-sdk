@@ -109,6 +109,16 @@ export type {
 export { SOROBAN_EVENT_TYPES, WillStatus, WillErrorCode } from './types';
 
 export {
+  WILL_STATES,
+  WILL_STATE_TRANSITIONS,
+  assertValidWillTransition,
+  canTransitionWill,
+  getValidNextStates,
+  isTerminalWillState,
+  isWillState,
+} from './willStateMachine';
+
+export {
   DEFAULT_FREIGHTER_CONNECT_TIMEOUT_MS,
   FreighterWalletAdapter,
   WalletSessionError,
@@ -249,6 +259,7 @@ export {
   WalletCancelledError,
   isUserCancellationError,
   HookReturnValueError,
+  InvalidWillStateTransitionError,
   SameWillIdError,
   SignTransactionTimeoutError,
   SimulationError,
