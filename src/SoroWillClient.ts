@@ -51,6 +51,8 @@ import type {
   SorobanEventType,
   UpdateBeneficiariesParams,
   Will,
+  WillAccessControlInfo,
+  WillAccessEntry,
 } from './types';
 import { WillStatus } from './types';
 import {
@@ -2431,6 +2433,57 @@ export class SoroWillClient {
     const { status } = mapWill(raw);
     this.statusCache.set(canonicalWillId, { status, expiresAt: now + WILL_STATUS_CACHE_TTL_MS });
     return status;
+  }
+
+  /**
+   * Returns the access control information for `willId`: every authorized
+   * address (owner, beneficiaries and guardians), the kind of access each one
+   * holds, and the timestamps relevant to that access.
+   *
+   * The result is derived from the will record, so it is served from the same
+   * read cache as {@link SoroWillClient.getWill} when caching is enabled.
+   *
+   * @param willId - The on-chain will ID.
+   * @param options - Optional per-call timeout and abort signal.
+   * @returns The will's {@link WillAccessControlInfo}.
+   * @throws {SoroWillInvalidIdError} If `willId` is not a valid numeric ID.
+   * @throws {WillNotFoundError} If the will does not exist on-chain.
+   * @throws {RequestTimeoutError} If the RPC request exceeds its configured timeout.
+   */
+  async getWillAccessControl(
+    willId: string,
+    options?: RequestOptions,
+  ): Promise<WillAccessControlInfo> {
+    const will = await this.getWill(willId, options);
+    const createdAt = will.lastCheckin;
+    const authorizedAddresses: WillAccessEntry[] = [
+      {
+        address: will.owner,
+        accessType: 'owner',
+        grantedAt: createdAt,
+        lastAccessedAt: will.lastCheckin,
+      },
+      ...will.beneficiaries.map((beneficiary) => ({
+        address: beneficiary.address,
+        accessType: 'beneficiary' as const,
+        grantedAt: createdAt,
+        lastAccessedAt: null,
+      })),
+      ...will.guardians.map((guardian) => ({
+        address: guardian,
+        accessType: 'guardian' as const,
+        grantedAt: createdAt,
+        lastAccessedAt: null,
+      })),
+    ];
+    return {
+      willId: will.id,
+      owner: will.owner,
+      authorizedAddresses,
+      createdAt,
+      lastCheckin: will.lastCheckin,
+      triggerTime: will.triggerTime,
+    };
   }
 
   /**

@@ -105,6 +105,9 @@ export type {
   SorobanEventType,
   UpdateBeneficiariesParams,
   Will,
+  WillAccessControlInfo,
+  WillAccessEntry,
+  WillAccessType,
 } from './types';
 export { SOROBAN_EVENT_TYPES, WillStatus, WillErrorCode } from './types';
 
