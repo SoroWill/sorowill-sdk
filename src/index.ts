@@ -135,6 +135,27 @@ export type {
   WalletSessionOptions,
 } from './wallet';
 
+export {
+  DEFAULT_WEBHOOK_MAX_ATTEMPTS,
+  DEFAULT_WEBHOOK_MAX_RETRY_DELAY_MS,
+  DEFAULT_WEBHOOK_RETRY_BASE_DELAY_MS,
+  DEFAULT_WEBHOOK_TIMEOUT_MS,
+  InvalidWebhookUrlError,
+  WEBHOOK_ATTEMPT_HEADER,
+  WEBHOOK_DELIVERY_ID_HEADER,
+  WEBHOOK_SIGNATURE_HEADER,
+  WebhookDeliveryError,
+  WebhookManager,
+  computeWebhookSignature,
+  verifyWebhookSignature,
+} from './webhooks';
+export type {
+  WebhookDeliveryResult,
+  WebhookManagerOptions,
+  WebhookPayload,
+  WebhookRegistration,
+} from './webhooks';
+
 export { createAlbedoAdapter } from './adapters/albedo';
 export type { AlbedoAdapterOptions } from './adapters/albedo';
 export {
