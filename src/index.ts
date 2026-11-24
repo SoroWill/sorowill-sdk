@@ -56,8 +56,16 @@ export type {
 
 export {
   buildFeeBumpXdr,
+  clampFeeToBounds,
+  computeNetworkFeeLoad,
   estimateFeeBumpFee,
+  estimateSmartFee,
   isFeeEstimateStale,
+  resolveFeeEstimationBounds,
+  DEFAULT_CONGESTION_LOAD_RATIO,
+  DEFAULT_CONGESTION_MULTIPLIER,
+  DEFAULT_MAX_ESTIMATED_FEE,
+  DEFAULT_MIN_ESTIMATED_FEE,
   refreshFeeEstimateIfStale,
   DEFAULT_FEE_STALENESS_THRESHOLD_MS,
   signFeeBumpXdr,
@@ -68,8 +76,11 @@ export {
 } from './feeBump';
 export type {
   EstimateFeeBumpFeeOptions,
+  EstimateSmartFeeOptions,
   FeeBumpOptions,
   FeeEstimate,
+  FeeEstimationBounds,
+  NetworkFeeLoad,
   SubmitFeeBumpOptions,
 } from './feeBump';
 

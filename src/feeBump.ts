@@ -53,6 +53,151 @@ export interface EstimateFeeBumpFeeOptions {
   innerTransactionXdr: string;
   /** Optional RPC server to use instead of the network's configured endpoints (e.g. for tests). */
   rpcServer?: SoroWillRpcServer;
+  /**
+   * Optional bounds applied to the dynamically estimated fee. The estimate is
+   * clamped to `[minFee, maxFee]` (in stroops) after network-load adjustment.
+   */
+  bounds?: FeeEstimationBounds;
+}
+
+/**
+ * Configurable bounds for smart fee estimation, in stroops.
+ *
+ * - `minFee` — never bid below this per-operation fee (defaults to {@link BASE_FEE}).
+ * - `maxFee` — never bid above this per-operation fee (defaults to
+ *   {@link DEFAULT_MAX_FEE_MULTIPLIER} × {@link BASE_FEE}).
+ */
+export interface FeeEstimationBounds {
+  /** Minimum per-operation fee in stroops. */
+  minFee?: string | number | bigint;
+  /** Maximum per-operation fee in stroops. */
+  maxFee?: string | number | bigint;
+}
+
+/** Default lower bound for smart fee estimation, in stroops. */
+export const DEFAULT_MIN_ESTIMATED_FEE = BASE_FEE;
+
+/** Default upper bound for smart fee estimation, in stroops. */
+export const DEFAULT_MAX_ESTIMATED_FEE = String(
+  BigInt(BASE_FEE) * BigInt(DEFAULT_MAX_FEE_MULTIPLIER),
+);
+
+/** A snapshot of network fee load used to adjust fee estimates. */
+export interface NetworkFeeLoad {
+  /** p90 Soroban inclusion fee reported by the network, in stroops. */
+  sorobanInclusionFeeP90: string;
+  /** p90 classic inclusion fee reported by the network, in stroops. */
+  inclusionFeeP90: string;
+  /** Ratio of the p90 to the p50 Soroban inclusion fee (1 when unknown). */
+  loadRatio: number;
+  /** Whether the network is considered congested (load ratio above the threshold). */
+  congested: boolean;
+}
+
+/** Options for {@link estimateSmartFee}. */
+export interface EstimateSmartFeeOptions extends EstimateFeeBumpFeeOptions {
+  /**
+   * Load ratio (p90 / p50) above which the estimate is scaled up as
+   * congested. Defaults to {@link DEFAULT_CONGESTION_LOAD_RATIO}.
+   */
+  congestionLoadRatio?: number;
+  /**
+   * Multiplier applied to the p90 baseline when the network is congested.
+   * Defaults to {@link DEFAULT_CONGESTION_MULTIPLIER}.
+   */
+  congestionMultiplier?: number;
+}
+
+/** Default p90/p50 ratio above which the network is treated as congested. */
+export const DEFAULT_CONGESTION_LOAD_RATIO = 2;
+
+/** Default multiplier applied to the p90 baseline under congestion. */
+export const DEFAULT_CONGESTION_MULTIPLIER = 1.5;
+
+/** Resolves configurable fee bounds, validating and ordering them. */
+export function resolveFeeEstimationBounds(bounds: FeeEstimationBounds = {}): {
+  minFee: bigint;
+  maxFee: bigint;
+} {
+  const minFee =
+    bounds.minFee === undefined ? BigInt(DEFAULT_MIN_ESTIMATED_FEE) : BigInt(bounds.minFee);
+  const maxFee =
+    bounds.maxFee === undefined ? BigInt(DEFAULT_MAX_ESTIMATED_FEE) : BigInt(bounds.maxFee);
+  if (minFee < 0n || maxFee < 0n) {
+    throw new SoroWillError('Fee estimation bounds must be non-negative');
+  }
+  if (minFee > maxFee) {
+    throw new SoroWillError('Fee estimation minFee must not exceed maxFee');
+  }
+  return { minFee, maxFee };
+}
+
+/** Clamps `fee` to the given inclusive bounds. */
+export function clampFeeToBounds(fee: bigint, bounds: FeeEstimationBounds = {}): bigint {
+  const { minFee, maxFee } = resolveFeeEstimationBounds(bounds);
+  if (fee < minFee) return minFee;
+  if (fee > maxFee) return maxFee;
+  return fee;
+}
+
+/**
+ * Derives the current network fee load from a `getFeeStats` response.
+ * The load ratio compares the p90 Soroban inclusion fee to the p50, so a
+ * congested network (where the top decile bids far above the median) is
+ * detected without hard-coding absolute fee values.
+ */
+export function computeNetworkFeeLoad(
+  stats: rpc.Api.GetFeeStatsResponse,
+  congestionLoadRatio: number = DEFAULT_CONGESTION_LOAD_RATIO,
+): NetworkFeeLoad {
+  const p90 = BigInt(stats.sorobanInclusionFee.p90);
+  const p50 = BigInt(stats.sorobanInclusionFee.p50);
+  const loadRatio = p50 > 0n ? Number(p90) / Number(p50) : 1;
+  return {
+    sorobanInclusionFeeP90: p90.toString(),
+    inclusionFeeP90: BigInt(stats.inclusionFee.p90).toString(),
+    loadRatio,
+    congested: loadRatio >= congestionLoadRatio,
+  };
+}
+
+/**
+ * Estimate a per-operation fee that adapts to current network load.
+ *
+ * The estimate starts from the network's p90 Soroban inclusion fee, is scaled
+ * up by `congestionMultiplier` when the network is congested, is never lower
+ * than the inner transaction's own per-operation inclusion fee, and is finally
+ * clamped to the configurable `bounds`.
+ *
+ * @throws {SoroWillError} If the RPC server does not support `getFeeStats`.
+ */
+export async function estimateSmartFee(options: EstimateSmartFeeOptions): Promise<FeeEstimate> {
+  const config = NETWORK_CONFIG[options.network];
+  const pool = new RpcEndpointPool(config.rpcUrls, options.rpcServer);
+
+  const innerTx = TransactionBuilder.fromXDR(
+    options.innerTransactionXdr,
+    config.networkPassphrase,
+  ) as Transaction;
+
+  const stats = await pool.withFailover((server) => {
+    if (typeof server.getFeeStats !== 'function') {
+      throw new SoroWillError('The configured RPC server does not support getFeeStats');
+    }
+    return server.getFeeStats();
+  });
+
+  const load = computeNetworkFeeLoad(stats, options.congestionLoadRatio);
+  const multiplier = options.congestionMultiplier ?? DEFAULT_CONGESTION_MULTIPLIER;
+
+  let fee = BigInt(load.sorobanInclusionFeeP90);
+  if (load.congested && multiplier > 1) {
+    fee = BigInt(Math.ceil(Number(fee) * multiplier));
+  }
+  const innerPerOp = getInnerInclusionFeePerOp(innerTx);
+  if (fee < innerPerOp) fee = innerPerOp;
+
+  return { fee: clampFeeToBounds(fee, options.bounds).toString(), estimatedAt: Date.now() };
 }
 
 /**
