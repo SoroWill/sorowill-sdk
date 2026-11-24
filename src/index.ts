@@ -160,14 +160,20 @@ export {
   LocalStorageCachePersistenceAdapter,
   MemoryCachePersistenceAdapter,
   ReadCache,
+  applyCacheFieldChanges,
   createReadCacheKey,
+  diffCacheValues,
   escapeCacheKeyComponent,
   escapeKeyComponent,
 } from './cache';
 export type {
+  CacheFieldChange,
   CacheGetResult,
   CachePersistenceAdapter,
+  CacheValueDiff,
+  DifferentialSetResult,
   PersistedCacheEntry,
+  PersistedCachePatch,
   ReadCacheOptions,
 } from './cache';
 
