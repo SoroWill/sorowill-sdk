@@ -591,6 +591,66 @@ const DEFAULT_POLL_ATTEMPTS = 30;
  */
 const EXCLUSIVE_INVOKE_METHODS: ReadonlySet<string> = new Set(['check_in']);
 
+/** How a {@link SoroWillClient.batchCheckIn} run treats individual failures. */
+export type BatchCheckInMode = 'best-effort' | 'atomic';
+
+/** Per-will outcome of a {@link SoroWillClient.batchCheckIn} run. */
+export interface BatchCheckInResult {
+  /** The will id that was checked in. */
+  willId: string;
+  /** `true` when the check-in succeeded (or was skipped in atomic mode). */
+  success: boolean;
+  /** Number of attempts made for this will (0 when skipped). */
+  attempts: number;
+  /** Transaction hash of the successful check-in, when available. */
+  txHash?: string;
+  /** The error that caused the final failure, when `success` is `false`. */
+  error?: unknown;
+  /** `true` when the will was not attempted because an earlier will failed in atomic mode. */
+  skipped?: boolean;
+}
+
+/** Options for {@link SoroWillClient.batchCheckIn}. */
+export interface BatchCheckInOptions {
+  /**
+   * `'best-effort'` (default) attempts every will and reports each outcome.
+   * `'atomic'` stops at the first failure and marks the remaining wills as skipped.
+   */
+  mode?: BatchCheckInMode;
+  /** Maximum attempts per will, including the first. Defaults to `3`. */
+  maxAttempts?: number;
+  /** Base delay in milliseconds for exponential backoff between retries. Defaults to `250`. */
+  retryBaseDelayMs?: number;
+  /** Maximum delay in milliseconds between retries. Defaults to `5_000`. */
+  retryMaxDelayMs?: number;
+  /** Called after each will settles, in input order. */
+  onResult?: (result: BatchCheckInResult) => void;
+}
+
+/** Aggregate outcome of a {@link SoroWillClient.batchCheckIn} run. */
+export interface BatchCheckInSummary {
+  /** The mode the run used. */
+  mode: BatchCheckInMode;
+  /** Per-will results, in input order. */
+  results: BatchCheckInResult[];
+  /** Will ids that were checked in successfully. */
+  succeeded: string[];
+  /** Will ids that failed after all retries. */
+  failed: string[];
+  /** Will ids not attempted because of an earlier failure in atomic mode. */
+  skipped: string[];
+  /** `true` when every will succeeded. */
+  allSucceeded: boolean;
+}
+
+const DEFAULT_BATCH_CHECKIN_MAX_ATTEMPTS = 3;
+const DEFAULT_BATCH_CHECKIN_RETRY_BASE_DELAY_MS = 250;
+const DEFAULT_BATCH_CHECKIN_RETRY_MAX_DELAY_MS = 5_000;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * How long `subscribeToEvents` waits for a WebSocket to fire `onopen` before
  * giving up and falling back to HTTP polling. Guards against a server that
