@@ -121,7 +121,9 @@ export { SOROBAN_EVENT_TYPES, WillStatus, WillErrorCode } from './types';
 
 export {
   DEFAULT_FREIGHTER_CONNECT_TIMEOUT_MS,
+  DEFAULT_MULTISIG_SIGNER_TIMEOUT_MS,
   FreighterWalletAdapter,
+  MultisigWalletAdapter,
   WalletSessionError,
   assertWalletSessionActive,
   connectWallet,
@@ -139,6 +141,10 @@ export {
   validateWalletSessionToken,
 } from './wallet';
 export type {
+  MultisigSigner,
+  MultisigSignerResult,
+  MultisigSignResult,
+  MultisigWalletAdapterOptions,
   WalletAdapter,
   WalletAdapterError,
   WalletConnection,
