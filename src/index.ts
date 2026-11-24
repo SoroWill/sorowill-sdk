@@ -166,6 +166,8 @@ export {
 export type {
   CacheGetResult,
   CachePersistenceAdapter,
+  CacheQueryOptions,
+  CacheStrategy,
   PersistedCacheEntry,
   ReadCacheOptions,
 } from './cache';
