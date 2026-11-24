@@ -194,6 +194,7 @@ export {
   AlreadyVotedError,
   BatchNetworkMismatchError,
   BeneficiaryNotFoundError,
+  BeneficiaryNotWhitelistedError,
   BeneficiaryValidationError,
   CheckinNotDueError,
   CheckinPeriodExceedsTtlError,
@@ -351,6 +352,13 @@ export {
   validateGuardianSignature,
 } from './utils';
 export type { NextActionableState } from './utils';
+
+export {
+  isBeneficiaryWhitelisted,
+  validateBeneficiariesAgainstWhitelist,
+  validateBeneficiaryWhitelist,
+} from './validation';
+export type { BeneficiaryWhitelistOptions } from './validation';
 
 export {
   DEFAULT_NETWORK,

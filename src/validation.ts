@@ -10,6 +10,7 @@
 
 import { StrKey } from '@stellar/stellar-sdk';
 import { MAX_BENEFICIARIES } from './utils';
+import { BeneficiaryNotWhitelistedError } from './errors';
 
 /**
  * Validates that a will ID is a valid Stellar contract address (56-character
@@ -285,5 +286,72 @@ export function validateBeneficiaryCount(count: unknown, max: number = MAX_BENEF
     throw new RangeError(
       `Too many beneficiaries: ${count} provided, contract maximum is ${max}`,
     );
+  }
+}
+
+/**
+ * Configuration for per-app beneficiary whitelist validation (#814).
+ *
+ * The whitelist is supplied by the integrating application (e.g. from its own
+ * config or backend) and is intentionally not part of the SDK defaults.
+ */
+export interface BeneficiaryWhitelistOptions {
+  /**
+   * Allowed beneficiary addresses. Matching is case-sensitive and exact.
+   * An empty list rejects every beneficiary.
+   */
+  whitelist: readonly string[];
+  /**
+   * When `true`, an empty whitelist disables the check instead of rejecting
+   * every beneficiary. Defaults to `false`.
+   */
+  allowWhenEmpty?: boolean;
+}
+
+/**
+ * Returns `true` when `address` is present in the configured whitelist.
+ *
+ * @param address - Beneficiary address to look up.
+ * @param whitelist - Allowed beneficiary addresses.
+ */
+export function isBeneficiaryWhitelisted(address: string, whitelist: readonly string[]): boolean {
+  return whitelist.includes(address);
+}
+
+/**
+ * Validates that a beneficiary address is authorized by the app-configured
+ * whitelist (#814).
+ *
+ * @param address - Beneficiary address to validate.
+ * @param options - Whitelist configuration for the app.
+ * @throws {BeneficiaryNotWhitelistedError} when the address is not whitelisted.
+ */
+export function validateBeneficiaryWhitelist(
+  address: string,
+  options: BeneficiaryWhitelistOptions,
+): asserts address is string {
+  const { whitelist, allowWhenEmpty = false } = options;
+  if (whitelist.length === 0 && allowWhenEmpty) {
+    return;
+  }
+  if (!isBeneficiaryWhitelisted(address, whitelist)) {
+    throw new BeneficiaryNotWhitelistedError(address);
+  }
+}
+
+/**
+ * Validates every beneficiary address against the app-configured whitelist
+ * (#814). Throws on the first unauthorized address.
+ *
+ * @param addresses - Beneficiary addresses to validate.
+ * @param options - Whitelist configuration for the app.
+ * @throws {BeneficiaryNotWhitelistedError} when any address is not whitelisted.
+ */
+export function validateBeneficiariesAgainstWhitelist(
+  addresses: readonly string[],
+  options: BeneficiaryWhitelistOptions,
+): void {
+  for (const address of addresses) {
+    validateBeneficiaryWhitelist(address, options);
   }
 }

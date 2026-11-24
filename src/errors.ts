@@ -55,6 +55,7 @@ export enum ErrorCode {
   WALLET_TIMEOUT = 'WALLET_TIMEOUT',
   WALLET_NETWORK_MISMATCH = 'WALLET_NETWORK_MISMATCH',
   VALIDATION_ERROR = 'VALIDATION_ERROR',
+  BENEFICIARY_NOT_WHITELISTED = 'BENEFICIARY_NOT_WHITELISTED',
   UNKNOWN_ERROR = 'UNKNOWN_ERROR',
 }
 
@@ -549,6 +550,26 @@ export class InvalidBeneficiaryAddressError extends BeneficiaryValidationError {
     );
     this.address = address;
     this.reason = reason;
+  }
+}
+
+/**
+ * Raised when a beneficiary is not present in the app-configured beneficiary
+ * whitelist (#814). The offending address is exposed as a typed property
+ * rather than embedded in the message.
+ */
+export class BeneficiaryNotWhitelistedError extends BeneficiaryValidationError {
+  /** Machine-readable error code for this failure. */
+  readonly code: ErrorCode = ErrorCode.BENEFICIARY_NOT_WHITELISTED;
+  /** The beneficiary address that is not whitelisted. */
+  readonly address: string;
+
+  constructor(address: string, options?: ErrorOptions) {
+    super(
+      'Beneficiary is not authorized: the address is not in the configured beneficiary whitelist.',
+      options,
+    );
+    this.address = address;
   }
 }
 
