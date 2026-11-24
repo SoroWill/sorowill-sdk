@@ -1134,6 +1134,39 @@ function assertBatchSize(length: number, method: string): void {
   }
 }
 
+/**
+ * Options for {@link SoroWillClient.exportWill}.
+ */
+export interface ExportWillOptions {
+  /** Pretty-print the JSON output. Defaults to `false`. */
+  pretty?: boolean;
+  /**
+   * When `true`, the export is signed by the connected wallet and the
+   * signature is embedded in the returned document.
+   */
+  signed?: boolean;
+}
+
+/**
+ * Signed backup document produced by {@link SoroWillClient.exportWill}.
+ */
+export interface SignedWillExport {
+  /** Export format version. */
+  version: 1;
+  /** ISO-8601 timestamp of when the export was produced. */
+  exportedAt: string;
+  /** Network the will lives on. */
+  network: SoroWillNetwork;
+  /** Contract ID the will belongs to. */
+  contractId: string;
+  /** Full will configuration, including all fields. */
+  will: Will;
+  /** Base64 signature over the canonical JSON of the unsigned payload. */
+  signature: string;
+  /** Public key of the signer. */
+  signer: string;
+}
+
 export class SoroWillClient {
   private readonly server: SoroWillRpcServer;
   private readonly rpcPool: RpcEndpointPool;
