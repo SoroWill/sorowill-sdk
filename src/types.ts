@@ -315,6 +315,33 @@ export interface Will {
   readonly guardianVotes: number;
 }
 
+/**
+ * Lightweight snapshot of a will's expiration state, returned by
+ * `SoroWillClient.getWillExpirationStatus()`.
+ *
+ * @since 0.1.2
+ */
+export interface WillExpirationStatus {
+  /** Current lifecycle state of the will. */
+  readonly status: WillStatus;
+  /**
+   * Whole days remaining until the will expires (the check-in deadline while
+   * `Active`, or the end of the grace period while `Triggered`). `0` when the
+   * deadline has already passed or the will is no longer expirable.
+   */
+  readonly daysToExpiry: number;
+  /** The moment the will expires, or `null` if it can no longer expire. */
+  readonly expiresAt: Date | null;
+  /** Whether the will is currently inside its grace period. */
+  readonly inGracePeriod: boolean;
+  /** Configured grace period length, in days. */
+  readonly gracePeriodDays: number;
+  /** Whole days remaining in the grace period; `0` when not in one. */
+  readonly gracePeriodDaysRemaining: number;
+  /** When the grace period ends, or `null` if the will is not in one. */
+  readonly gracePeriodEndsAt: Date | null;
+}
+
 /** Parameters for {@link SoroWillClient.createWill}. */
 export interface CreateWillParams {
   /** The token contract address (e.g. a USDC Stellar Asset Contract) to lock. */
