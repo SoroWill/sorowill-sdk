@@ -1,4 +1,5 @@
 import {
+  FeeBumpTransaction,
   Keypair,
   Transaction,
   TransactionBuilder,
@@ -172,6 +173,53 @@ export function estimateBatchFee(invocationCount: number, baseFee: number = 100)
   return String(count * perOp);
 }
 
+/**
+ * A breakdown of a transaction's total fee into its components, all in stroops
+ * (1 XLM = 10,000,000 stroops).
+ *
+ * Stellar charges a transaction fee made up of three parts:
+ *
+ * - **Base fees** (`baseFee`): the network minimum fee per operation
+ *   ({@link BASE_FEE}, 100 stroops) multiplied by the number of operations.
+ *   This is the floor every transaction pays for inclusion.
+ * - **Priority fees** (`priorityFee`): the per-operation bid above the base fee
+ *   that a transaction offers to outbid others for inclusion in a ledger. It is
+ *   `(inclusionFeePerOp - baseFeePerOp) * operationCount` and is zero when the
+ *   transaction bids only the network minimum.
+ * - **Resource fees** (`resourceFee`): the Soroban fee for CPU instructions,
+ *   ledger reads/writes and events, taken from the transaction's Soroban
+ *   transaction data. It is zero for non-Soroban transactions.
+ *
+ * `totalFee` is the sum of the three components and equals the transaction's
+ * declared fee.
+ */
+export interface TransactionCostBreakdown {
+  /** Total fee in stroops (`baseFee + priorityFee + resourceFee`). */
+  totalFee: string;
+  /** Base fees in stroops: {@link BASE_FEE} times the operation count. */
+  baseFee: string;
+  /** Priority fees in stroops: the per-operation bid above the base fee, times the operation count. */
+  priorityFee: string;
+  /** Soroban resource fee in stroops (0 for non-Soroban transactions). */
+  resourceFee: string;
+  /** The network minimum base fee per operation, in stroops. */
+  baseFeePerOp: string;
+  /** The inclusion fee per operation actually bid, in stroops. */
+  inclusionFeePerOp: string;
+  /** Number of operations in the transaction. */
+  operationCount: number;
+}
+
+/** Options for {@link computeTransactionCostBreakdown}. */
+export interface ComputeTransactionCostBreakdownOptions {
+  /** The network the transaction is built for. */
+  network: SoroWillNetwork;
+  /** The base64-encoded XDR of the transaction (or fee-bump transaction). */
+  transactionXdr: string;
+  /** Base fee per operation in stroops. Defaults to {@link BASE_FEE}. */
+  baseFeePerOp?: string;
+}
+
 /** Returns the inner transaction's per-operation inclusion fee (its fee minus any Soroban resource fee). */
 function getInnerInclusionFeePerOp(innerTx: Transaction): bigint {
   let resourceFee = 0n;
@@ -184,6 +232,64 @@ function getInnerInclusionFeePerOp(innerTx: Transaction): bigint {
   const ops = BigInt(Math.max(innerTx.operations.length, 1));
   const perOp = (BigInt(innerTx.fee) - resourceFee + ops - 1n) / ops;
   return perOp > 0n ? perOp : 0n;
+}
+
+/**
+ * Break a transaction's total fee down into base fees, priority fees and
+ * Soroban resource fees (see {@link TransactionCostBreakdown}).
+ *
+ * The transaction's declared fee is split as follows: the Soroban resource fee
+ * is read from the transaction's Soroban data, the remainder is the inclusion
+ * fee, of which `baseFeePerOp * operationCount` is base fees and anything above
+ * that is the priority fee. For fee-bump transactions the inner transaction's
+ * fee is broken down.
+ *
+ * @throws {SoroWillError} If the XDR cannot be parsed as a transaction.
+ */
+export function computeTransactionCostBreakdown(
+  options: ComputeTransactionCostBreakdownOptions,
+): TransactionCostBreakdown {
+  const config = NETWORK_CONFIG[options.network];
+  let parsed: Transaction | FeeBumpTransaction;
+  try {
+    parsed = TransactionBuilder.fromXDR(options.transactionXdr, config.networkPassphrase) as
+      | Transaction
+      | FeeBumpTransaction;
+  } catch (error) {
+    throw new SoroWillError('Unable to parse transaction XDR for cost breakdown', {
+      cause: error,
+    });
+  }
+
+  const innerTx = 'innerTransaction' in parsed ? parsed.innerTransaction : parsed;
+  const operationCount = Math.max(innerTx.operations.length, 1);
+  const ops = BigInt(operationCount);
+
+  let resourceFee = 0n;
+  try {
+    const ext = innerTx.toEnvelope().v1().tx().ext();
+    if (ext.switch() === 1) resourceFee = BigInt(ext.sorobanData().resourceFee().toString());
+  } catch {
+    resourceFee = 0n;
+  }
+
+  const totalFee = BigInt(innerTx.fee);
+  const inclusionFee = totalFee > resourceFee ? totalFee - resourceFee : 0n;
+  const inclusionFeePerOp = (inclusionFee + ops - 1n) / ops;
+
+  const baseFeePerOp = BigInt(options.baseFeePerOp ?? BASE_FEE);
+  const baseFee = baseFeePerOp * ops;
+  const priorityFee = inclusionFee > baseFee ? inclusionFee - baseFee : 0n;
+
+  return {
+    totalFee: totalFee.toString(),
+    baseFee: baseFee.toString(),
+    priorityFee: priorityFee.toString(),
+    resourceFee: resourceFee.toString(),
+    baseFeePerOp: baseFeePerOp.toString(),
+    inclusionFeePerOp: inclusionFeePerOp.toString(),
+    operationCount,
+  };
 }
 
 /**

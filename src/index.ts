@@ -54,8 +54,9 @@ export type {
   MultisigCollectorOptions,
 } from './multisig';
 
-export {
+    export {
   buildFeeBumpXdr,
+  computeTransactionCostBreakdown,
   estimateFeeBumpFee,
   isFeeEstimateStale,
   refreshFeeEstimateIfStale,
@@ -67,10 +68,12 @@ export {
   StaleTransactionSequenceError,
 } from './feeBump';
 export type {
+  ComputeTransactionCostBreakdownOptions,
   EstimateFeeBumpFeeOptions,
   FeeBumpOptions,
   FeeEstimate,
   SubmitFeeBumpOptions,
+  TransactionCostBreakdown,
 } from './feeBump';
 
 export {
