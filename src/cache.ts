@@ -81,6 +81,81 @@ export interface ReadCacheOptions {
    * fails). When `false`, only the `onPersistenceFailure` callback is invoked.
    */
   rollbackOnPersistenceFailure?: boolean;
+  /**
+   * Enables cross-tab response deduplication. When set, identical queries in
+   * other tabs share a single in-flight request and its cached response.
+   *
+   * - `true` uses the default channel name ({@link DEFAULT_CACHE_CHANNEL_NAME}).
+   * - A string overrides the channel name (tabs must use the same name).
+   * - `false` (default) disables cross-tab sharing.
+   *
+   * Uses `BroadcastChannel` when available and falls back to polling the
+   * persistence adapter otherwise.
+   */
+  crossTab?: boolean | string;
+  /** Polling interval in ms for the non-BroadcastChannel fallback. Defaults to 250. */
+  crossTabPollIntervalMs?: number;
+  /** How long (ms) a tab waits for another tab's response before fetching itself. Defaults to 10000. */
+  crossTabTimeoutMs?: number;
+}
+
+/** Default BroadcastChannel name used for cross-tab cache deduplication. */
+export const DEFAULT_CACHE_CHANNEL_NAME = 'sorowill-cache-dedup';
+
+/** Default polling interval for the cross-tab deduplication fallback. */
+export const DEFAULT_CROSS_TAB_POLL_INTERVAL_MS = 250;
+
+/** Default wait for another tab's response before fetching locally. */
+export const DEFAULT_CROSS_TAB_TIMEOUT_MS = 10_000;
+
+/** Message exchanged between tabs for response deduplication. */
+export interface CrossTabCacheMessage {
+  type: 'request' | 'response' | 'invalidate';
+  /** Cache key the message refers to. */
+  key: string;
+  /** Unique id of the tab that sent the message. */
+  tabId: string;
+  /** Unique id of the request (present on `request`/`response`). */
+  requestId?: string;
+  /** Serialized cached value (present on `response`). */
+  value?: string;
+  /** Expiry timestamp of the shared entry (present on `response`). */
+  expiresAt?: number | null;
+  /** Will IDs referenced by the shared entry (present on `response`). */
+  willIds?: string[];
+  /** Set when the originating request failed, so waiters stop waiting. */
+  failed?: boolean;
+}
+
+/** Minimal BroadcastChannel surface used by {@link ReadCache}. */
+interface CrossTabChannel {
+  postMessage(message: CrossTabCacheMessage): void;
+  close(): void;
+  onmessage: ((event: { data: CrossTabCacheMessage }) => void) | null;
+}
+
+function createCrossTabChannel(name: string): CrossTabChannel | undefined {
+  const Ctor = (globalThis as { BroadcastChannel?: new (name: string) => CrossTabChannel })
+    .BroadcastChannel;
+  if (typeof Ctor !== 'function') {
+    return undefined;
+  }
+  try {
+    return new Ctor(name);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Prefix for cross-tab messages persisted by the polling fallback. */
+const CROSS_TAB_MESSAGE_PREFIX = '__sorowill_cross_tab__:';
+
+function crossTabMessageKey(message: CrossTabCacheMessage): string {
+  return `${CROSS_TAB_MESSAGE_PREFIX}${message.type}:${message.requestId ?? message.key}`;
+}
+
+function createTabId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 /** Performance metrics returned by {@link ReadCache.getCacheStats}. */
@@ -316,6 +391,21 @@ export class ReadCache {
   private hits = 0;
   private misses = 0;
   private evictions = 0;
+  /** Cross-tab deduplication state (only populated when `crossTab` is enabled). */
+  private readonly crossTabChannel: CrossTabChannel | undefined;
+  private readonly crossTabTabId = createTabId();
+  private readonly crossTabPollIntervalMs: number;
+  private readonly crossTabTimeoutMs: number;
+  /** Requests this tab is currently fetching, keyed by cache key. */
+  private readonly crossTabPending = new Map<string, string>();
+  /** Requests other tabs are fetching, keyed by cache key. */
+  private readonly crossTabRemotePending = new Map<string, string>();
+  /** Waiters for a response from another tab, keyed by request id. */
+  private readonly crossTabWaiters = new Map<
+    string,
+    { resolve: (message: CrossTabCacheMessage) => void; timer: ReturnType<typeof setTimeout> }
+  >();
+  private crossTabPollTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(options: ReadCacheOptions = {}) {
     const ttlMs = options.ttlMs ?? 60_000;
@@ -349,6 +439,25 @@ export class ReadCache {
     this.onPersistenceFailure = options.onPersistenceFailure;
     this.rollbackOnPersistenceFailure = options.rollbackOnPersistenceFailure ?? false;
 
+    this.crossTabPollIntervalMs =
+      options.crossTabPollIntervalMs ?? DEFAULT_CROSS_TAB_POLL_INTERVAL_MS;
+    this.crossTabTimeoutMs = options.crossTabTimeoutMs ?? DEFAULT_CROSS_TAB_TIMEOUT_MS;
+    if (options.crossTab) {
+      const channelName =
+        typeof options.crossTab === 'string' ? options.crossTab : DEFAULT_CACHE_CHANNEL_NAME;
+      this.crossTabChannel = createCrossTabChannel(channelName);
+      if (this.crossTabChannel) {
+        this.crossTabChannel.onmessage = (event) => this.handleCrossTabMessage(event.data);
+      } else {
+        // No BroadcastChannel: poll the persistence adapter for shared responses.
+        this.crossTabPollTimer = setInterval(() => {
+          void this.pollCrossTabResponses();
+        }, this.crossTabPollIntervalMs);
+        // Do not keep a Node.js process alive just for polling.
+        (this.crossTabPollTimer as { unref?: () => void }).unref?.();
+      }
+    }
+
     if (!this.checkOnline()) {
       this.offlineSince = this.now();
     }
@@ -371,6 +480,20 @@ export class ReadCache {
 
   /** Removes browser online/offline event listeners registered by this cache. */
   destroy(): void {
+    if (this.crossTabPollTimer !== undefined) {
+      clearInterval(this.crossTabPollTimer);
+      this.crossTabPollTimer = undefined;
+    }
+    if (this.crossTabChannel) {
+      this.crossTabChannel.onmessage = null;
+      this.crossTabChannel.close();
+    }
+    for (const waiter of this.crossTabWaiters.values()) {
+      clearTimeout(waiter.timer);
+    }
+    this.crossTabWaiters.clear();
+    this.crossTabPending.clear();
+    this.crossTabRemotePending.clear();
     if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
       if (this.onOfflineHandler) {
         window.removeEventListener('offline', this.onOfflineHandler);
@@ -496,6 +619,198 @@ export class ReadCache {
 
   get<T>(key: string): T | undefined {
     return this.getWithStatus<T>(key)?.value;
+  }
+
+  /**
+   * Returns a cached value, sharing the work with other tabs when cross-tab
+   * deduplication is enabled.
+   *
+   * - A fresh local entry is returned immediately.
+   * - If another tab is already fetching the same key, this tab waits for that
+   *   tab's response (bounded by `crossTabTimeoutMs`) and adopts it.
+   * - Otherwise `fetcher` runs in this tab, its result is cached and broadcast
+   *   to the other tabs.
+   *
+   * Without `crossTab` enabled this is equivalent to `get()` followed by
+   * `fetcher()` and `set()`.
+   *
+   * @param key - Cache key identifying the query.
+   * @param fetcher - Produces the value on a cache miss.
+   * @param willIds - Will IDs referenced by the value, for invalidation.
+   */
+  async getOrFetch<T>(
+    key: string,
+    fetcher: () => Promise<T>,
+    willIds: Iterable<string> = [],
+  ): Promise<T> {
+    const cached = this.get<T>(key);
+    if (cached !== undefined) {
+      return cached;
+    }
+    if (!this.crossTabChannel && this.crossTabPollTimer === undefined) {
+      const value = await fetcher();
+      this.set(key, value, willIds);
+      return value;
+    }
+
+    const remoteRequestId = this.crossTabRemotePending.get(key);
+    if (remoteRequestId) {
+      const shared = await this.waitForCrossTabResponse(remoteRequestId);
+      if (shared && !shared.failed && typeof shared.value === 'string') {
+        try {
+          const value = deserializeCacheValue<T>(shared.value);
+          this.adoptCrossTabEntry(key, shared);
+          return value;
+        } catch {
+          // Fall through and fetch locally on a malformed shared response.
+        }
+      }
+      const afterWait = this.get<T>(key);
+      if (afterWait !== undefined) {
+        return afterWait;
+      }
+    }
+
+    const requestId = `${this.crossTabTabId}:${createTabId()}`;
+    this.crossTabPending.set(key, requestId);
+    this.broadcastCrossTab({ type: 'request', key, tabId: this.crossTabTabId, requestId });
+    try {
+      const value = await fetcher();
+      this.set(key, value, willIds);
+      const entry = this.entries.get(key);
+      this.broadcastCrossTab({
+        type: 'response',
+        key,
+        tabId: this.crossTabTabId,
+        requestId,
+        value: serializeCacheValue(value),
+        expiresAt: entry?.expiresAt ?? null,
+        willIds: Array.from(entry?.willIds ?? willIds),
+      });
+      return value;
+    } catch (err) {
+      this.broadcastCrossTab({
+        type: 'response',
+        key,
+        tabId: this.crossTabTabId,
+        requestId,
+        failed: true,
+      });
+      throw err;
+    } finally {
+      if (this.crossTabPending.get(key) === requestId) {
+        this.crossTabPending.delete(key);
+      }
+    }
+  }
+
+  private broadcastCrossTab(message: CrossTabCacheMessage): void {
+    if (this.crossTabChannel) {
+      try {
+        this.crossTabChannel.postMessage(message);
+      } catch {
+        // A closed channel must not break the caller.
+      }
+    }
+    if (this.crossTabPollTimer !== undefined && this.persistence) {
+      // Fallback transport: persist the message so other tabs can poll it.
+      const entry: PersistedCacheEntry = {
+        key: crossTabMessageKey(message),
+        value: JSON.stringify(message),
+        expiresAt: this.now() + this.crossTabTimeoutMs,
+        willIds: [],
+      };
+      void this.persist((adapter) => adapter.write(entry));
+    }
+  }
+
+  private handleCrossTabMessage(message: CrossTabCacheMessage | undefined): void {
+    if (!message || typeof message !== 'object' || message.tabId === this.crossTabTabId) {
+      return;
+    }
+    if (message.type === 'request' && message.requestId) {
+      this.crossTabRemotePending.set(message.key, message.requestId);
+      return;
+    }
+    if (message.type === 'response' && message.requestId) {
+      if (this.crossTabRemotePending.get(message.key) === message.requestId) {
+        this.crossTabRemotePending.delete(message.key);
+      }
+      const waiter = this.crossTabWaiters.get(message.requestId);
+      if (waiter) {
+        clearTimeout(waiter.timer);
+        this.crossTabWaiters.delete(message.requestId);
+        waiter.resolve(message);
+      }
+      return;
+    }
+    if (message.type === 'invalidate') {
+      this.touchedKeys.add(message.key);
+      this.entries.delete(message.key);
+    }
+  }
+
+  private waitForCrossTabResponse(requestId: string): Promise<CrossTabCacheMessage | undefined> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.crossTabWaiters.delete(requestId);
+        resolve(undefined);
+      }, this.crossTabTimeoutMs);
+      (timer as { unref?: () => void }).unref?.();
+      this.crossTabWaiters.set(requestId, { resolve, timer });
+    });
+  }
+
+  /** Stores a response received from another tab without re-broadcasting it. */
+  private adoptCrossTabEntry(key: string, message: CrossTabCacheMessage): void {
+    if (typeof message.value !== 'string') {
+      return;
+    }
+    const value = deserializeCacheValue(message.value);
+    const entry: CacheEntry = {
+      key,
+      value,
+      expiresAt: message.expiresAt ?? null,
+      willIds: new Set(message.willIds ?? []),
+    };
+    this.touchedKeys.add(key);
+    for (const willId of entry.willIds) {
+      let keys = this.willIdToKeys.get(willId);
+      if (!keys) {
+        keys = new Set();
+        this.willIdToKeys.set(willId, keys);
+      }
+      keys.add(key);
+    }
+    this.entries.delete(key);
+    this.entries.set(key, entry);
+    this.evictIfNeeded();
+  }
+
+  /** Polls the persistence adapter for cross-tab messages (BroadcastChannel fallback). */
+  private async pollCrossTabResponses(): Promise<void> {
+    const adapter = this.persistence;
+    if (!adapter || this.crossTabWaiters.size === 0) {
+      return;
+    }
+    let entries: PersistedCacheEntry[];
+    try {
+      entries = await adapter.readAll();
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.key.startsWith(CROSS_TAB_MESSAGE_PREFIX)) {
+        continue;
+      }
+      let message: CrossTabCacheMessage;
+      try {
+        message = JSON.parse(entry.value) as CrossTabCacheMessage;
+      } catch {
+        continue;
+      }
+      this.handleCrossTabMessage(message);
+    }
   }
 
   /**
@@ -748,6 +1063,9 @@ export class ReadCache {
       }
     }
     this.entries.delete(key);
+    if (this.crossTabChannel) {
+      this.broadcastCrossTab({ type: 'invalidate', key, tabId: this.crossTabTabId });
+    }
     if (this.persistence) {
       await withPersistenceLock(this.persistence, async () => {
         try {

@@ -155,6 +155,9 @@ export type {
 } from './walletConnect';
 
 export {
+  DEFAULT_CACHE_CHANNEL_NAME,
+  DEFAULT_CROSS_TAB_POLL_INTERVAL_MS,
+  DEFAULT_CROSS_TAB_TIMEOUT_MS,
   IndexedDbCachePersistenceAdapter,
   LocalStorageCachePersistenceAdapter,
   MemoryCachePersistenceAdapter,
@@ -166,6 +169,7 @@ export {
 export type {
   CacheGetResult,
   CachePersistenceAdapter,
+  CrossTabCacheMessage,
   PersistedCacheEntry,
   ReadCacheOptions,
 } from './cache';
