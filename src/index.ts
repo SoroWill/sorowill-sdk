@@ -302,6 +302,15 @@ export {
 } from './requestQueue';
 export type { RequestQueueMetrics, RequestQueueOptions } from './requestQueue';
 
+export { MetricsCollector, MetricsReporter } from './metrics';
+export type {
+  AggregatedMetrics,
+  AnalyticsSnapshot,
+  MetricsReporterOptions,
+  OperationCounters,
+  OperationMetrics,
+} from './metrics';
+
 export { DebugLogger, DEFAULT_REDACTED_KEYS, REDACTED } from './debugLogger';
 export type { DebugLoggerOptions } from './debugLogger';
 
