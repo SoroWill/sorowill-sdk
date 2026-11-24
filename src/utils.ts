@@ -233,6 +233,189 @@ export function tagOnChainOrder(
   return beneficiaries.map((beneficiary, onChainIndex) => ({ ...beneficiary, onChainIndex }));
 }
 
+/**
+ * Inputs used to derive a deterministic transaction ID.
+ *
+ * Every field is part of the ID's identity: two calls with the same inputs
+ * always produce the same ID, and any difference in any field produces a
+ * different ID (see {@link generateDeterministicTransactionId}).
+ */
+export interface DeterministicTransactionIdInput {
+  /** Network the transaction targets, e.g. `"testnet"`. */
+  network: string;
+  /** Contract ID the transaction invokes. */
+  contractId: string;
+  /** Contract method being invoked, e.g. `"create_will"`. */
+  method: string;
+  /** Source account (public key) submitting the transaction. */
+  sourceAccount: string;
+  /** Optional caller-supplied nonce to disambiguate otherwise identical calls. */
+  nonce?: string;
+  /** Optional sequence number of the source account. */
+  sequence?: string | number | bigint;
+  /** Optional operation-specific parameters, serialized canonically. */
+  params?: unknown;
+}
+
+/**
+ * Canonical, order-independent JSON serialization used for ID derivation.
+ *
+ * Object keys are sorted recursively so that logically identical inputs
+ * (e.g. `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }`) hash to the same value, while
+ * values of different types (e.g. `1` vs `"1"`) remain distinguishable.
+ * `bigint` values are encoded with a `bigint:` prefix so they cannot collide
+ * with the equivalent string. `undefined` object properties are dropped.
+ */
+function canonicalize(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  switch (typeof value) {
+    case 'bigint':
+      return `bigint:${value.toString()}`;
+    case 'number':
+      return Number.isFinite(value) ? `number:${value}` : `number:${String(value)}`;
+    case 'string':
+      return `string:${JSON.stringify(value)}`;
+    case 'boolean':
+      return `boolean:${value}`;
+    case 'object': {
+      if (Array.isArray(value)) {
+        return `[${value.map((item) => canonicalize(item)).join(',')}]`;
+      }
+      const entries = Object.entries(value as Record<string, unknown>)
+        .filter(([, entryValue]) => entryValue !== undefined)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+      return `{${entries
+        .map(([key, entryValue]) => `${JSON.stringify(key)}:${canonicalize(entryValue)}`)
+        .join(',')}}`;
+    }
+    default:
+      return `${typeof value}:${String(value)}`;
+  }
+}
+
+/**
+ * Generates a deterministic transaction ID from the supplied inputs.
+ *
+ * The ID is the lowercase hex SHA-256 digest of a canonical serialization of
+ * every input field, so it is:
+ *
+ * - **Deterministic**: identical inputs always yield the identical ID.
+ * - **Input-derived**: changing any field (network, contract, method, source
+ *   account, nonce, sequence or params) changes the ID.
+ * - **Collision-free in practice**: 256 bits of digest, with length-prefixed
+ *   field encoding so that e.g. `{ method: "ab", nonce: "c" }` and
+ *   `{ method: "a", nonce: "bc" }` cannot collide.
+ *
+ * This is a pure function: it performs no I/O and does not touch the network.
+ * It is intended for idempotency keys and request deduplication, **not** as a
+ * replacement for {@link generateRandomNonce} when unpredictability is
+ * required.
+ */
+export function generateDeterministicTransactionId(
+  input: DeterministicTransactionIdInput,
+): string {
+  const fields: Array<[string, string]> = [
+    ['network', input.network],
+    ['contractId', input.contractId],
+    ['method', input.method],
+    ['sourceAccount', input.sourceAccount],
+    ['nonce', input.nonce ?? ''],
+    ['sequence', input.sequence === undefined ? '' : String(input.sequence)],
+    ['params', canonicalize(input.params)],
+  ];
+  const payload = fields
+    .map(([key, value]) => `${key.length}:${key}=${value.length}:${value}`)
+    .join('|');
+  return sha256Hex(payload);
+}
+
+/**
+ * Derives a deterministic, collision-free transaction ID from the supplied
+ * inputs. Alias of {@link generateDeterministicTransactionId} kept for
+ * discoverability.
+ */
+export function deriveTransactionId(input: DeterministicTransactionIdInput): string {
+  return generateDeterministicTransactionId(input);
+}
+
+const SHA256_K = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+]);
+
+/**
+ * Computes the lowercase hex SHA-256 digest of a UTF-8 string.
+ *
+ * Implemented synchronously in pure JS so the public API stays sync and works
+ * identically in Node, browsers and workers (WebCrypto's `subtle.digest` is
+ * async-only).
+ */
+function sha256Hex(message: string): string {
+  const bytes = new TextEncoder().encode(message);
+  const bitLength = bytes.length * 8;
+  const paddedLength = (((bytes.length + 9 + 63) >> 6) << 6) >>> 0;
+  const buffer = new Uint8Array(paddedLength);
+  buffer.set(bytes);
+  buffer[bytes.length] = 0x80;
+  const view = new DataView(buffer.buffer);
+  view.setUint32(paddedLength - 8, Math.floor(bitLength / 0x100000000));
+  view.setUint32(paddedLength - 4, bitLength >>> 0);
+
+  const hash = new Uint32Array([
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+  ]);
+  const w = new Uint32Array(64);
+
+  for (let offset = 0; offset < paddedLength; offset += 64) {
+    for (let i = 0; i < 16; i += 1) {
+      w[i] = view.getUint32(offset + i * 4);
+    }
+    for (let i = 16; i < 64; i += 1) {
+      const w15 = w[i - 15];
+      const w2 = w[i - 2];
+      const s0 = ((w15 >>> 7) | (w15 << 25)) ^ ((w15 >>> 18) | (w15 << 14)) ^ (w15 >>> 3);
+      const s1 = ((w2 >>> 17) | (w2 << 15)) ^ ((w2 >>> 19) | (w2 << 13)) ^ (w2 >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+    }
+
+    let [a, b, c, d, e, f, g, h] = hash;
+    for (let i = 0; i < 64; i += 1) {
+      const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+      const ch = (e & f) ^ (~e & g);
+      const temp1 = (h + S1 + ch + SHA256_K[i] + w[i]) >>> 0;
+      const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (S0 + maj) >>> 0;
+      h = g;
+      g = f;
+      f = e;
+      e = (d + temp1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) >>> 0;
+    }
+
+    hash[0] = (hash[0] + a) >>> 0;
+    hash[1] = (hash[1] + b) >>> 0;
+    hash[2] = (hash[2] + c) >>> 0;
+    hash[3] = (hash[3] + d) >>> 0;
+    hash[4] = (hash[4] + e) >>> 0;
+    hash[5] = (hash[5] + f) >>> 0;
+    hash[6] = (hash[6] + g) >>> 0;
+    hash[7] = (hash[7] + h) >>> 0;
+  }
+
+  return Array.from(hash, (word) => word.toString(16).padStart(8, '0')).join('');
+}
+
 /** Formats a `Date` as a human-readable string, e.g. `"Jan 5, 2027, 3:45 PM"`. */
 export function formatDeadline(date: Date): string {
   return new Intl.DateTimeFormat('en-US', {

@@ -346,6 +346,8 @@ export {
   formatDeadline,
   formatTokenAmount,
   formatUSDC,
+  generateDeterministicTransactionId,
+  deriveTransactionId,
   getNextActionableState,
   getStellarAddressError,
   getTimeUntilCheckin,
@@ -361,7 +363,7 @@ export {
   validateGuardians,
   validateGuardianSignature,
 } from './utils';
-export type { NextActionableState } from './utils';
+export type { DeterministicTransactionIdInput, NextActionableState } from './utils';
 
 export {
   DEFAULT_NETWORK,
