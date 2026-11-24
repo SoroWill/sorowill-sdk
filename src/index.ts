@@ -87,8 +87,11 @@ export type {
 export {
   SimulationResultError,
   UnsupportedSignatureAlgorithmError,
+  NetworkMismatchError,
   assertSupportedSignatureAlgorithm,
   assertSignedTransactionXdrSignatures,
+  assertTransactionNetwork,
+  computeNetworkId,
   ED25519_SIGNATURE_LENGTH,
 } from './txValidation';
 export type {
