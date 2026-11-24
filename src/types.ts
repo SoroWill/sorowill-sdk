@@ -382,6 +382,31 @@ export interface PaginatedWillsResult {
   readonly nextCursor: string | null;
 }
 
+/**
+ * A single historical check-in record for a will (#808).
+ *
+ * Records are derived from the contract's `check_in` events, so they are
+ * immutable and ordered oldest-first by ledger sequence.
+ */
+export interface CheckInRecord {
+  /** The will this check-in belongs to. */
+  readonly willId: string;
+  /** When the check-in was recorded on-chain. */
+  readonly timestamp: Date;
+  /** The will balance (in stroops) at the time of the check-in. */
+  readonly amount: bigint;
+  /** Ledger sequence in which the check-in was recorded, when known. */
+  readonly ledger?: number;
+  /** Transaction hash of the check-in, when known. */
+  readonly txHash?: string | null;
+}
+
+/** A page of check-in records plus the cursor for the next page, if any. */
+export interface PaginatedCheckInRecordsResult {
+  readonly records: CheckInRecord[];
+  readonly nextCursor: string | null;
+}
+
 
 /**
  * A function that signs a transaction envelope (XDR) and resolves to the
