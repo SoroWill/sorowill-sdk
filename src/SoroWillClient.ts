@@ -5,6 +5,7 @@ import {
   Contract,
   FeeBumpTransaction,
   Networks,
+  hash as stellarHash,
   StrKey,
   Transaction,
   TransactionBuilder,
@@ -211,6 +212,28 @@ export const NETWORK_CONFIG: Record<SoroWillNetwork, NetworkConfig> = {
     networkPassphrase: Networks.PUBLIC,
   },
 };
+
+/**
+ * Result of a sign-only operation: a signed, prepared transaction envelope
+ * that has **not** been submitted to the network.
+ *
+ * Use {@link SoroWillClient.submitSignedTransaction} to submit it later, or
+ * hand the XDR to an offline/air-gapped signer or relayer.
+ */
+export interface SignedTransactionResult {
+  /** Signed transaction envelope XDR (base64), ready for submission. */
+  signedTxXdr: string;
+  /** Network passphrase the envelope was signed for. */
+  networkPassphrase: string;
+  /** Transaction hash of the signed envelope (hex). */
+  txHash: string;
+  /** Source account public key of the signed transaction. */
+  sourcePublicKey: string;
+  /** Sequence number of the signed transaction (base-10 string). */
+  sequence: string;
+  /** Total fee of the signed transaction in stroops (base-10 string). */
+  fee: string;
+}
 
 export interface RpcRetryOptions {
   maxAttempts: number;
@@ -4568,6 +4591,145 @@ export class SoroWillClient {
       txHash: sendResponse.hash,
       createdAt: txResponse.createdAt,
       returnValue: txResponse.returnValue,
+    };
+  }
+
+  /**
+   * Builds, simulates, and signs a contract invocation, returning the signed
+   * envelope **without submitting it** to the network.
+   *
+   * **Operation Type:** Read-only (Signing)
+   *
+   * @readonly
+   * @remarks Sign-only operation. Simulates the invocation (an RPC round trip)
+   * and asks the wallet to sign, but never calls `sendTransaction`, so ledger
+   * state is unchanged. Use this for offline, air-gapped, or relayer workflows
+   * where the signed envelope is submitted later — for example by
+   * {@link submitSignedTransaction} from another process or machine.
+   *
+   * The returned envelope is already prepared (footprint and resource fees
+   * included), so it can be submitted as-is once the network is reachable.
+   *
+   * @param method - The contract method name (e.g. `'check_in'`, `'create_will'`)
+   * @param args - Arguments to the method as a record of name-value pairs
+   * @param options - Optional per-call timeout, abort signal, and `maxFee` guard
+   * @returns The signed envelope XDR plus its hash, source, sequence, and fee
+   * @throws {ReadOnlyModeError} If the client is in read-only mode
+   * @throws {ExorbitantFeeError} If the prepared fee exceeds `options.maxFee`
+   * @throws {SoroWillError} If the wallet returns a fee-bump envelope
+   *
+   * @example
+   * ```ts
+   * const signed = await client.signTransaction('check_in', { will_id: 1n });
+   * // Later, from a machine with network access:
+   * await client.submitSignedTransaction(signed.signedTxXdr);
+   * ```
+   */
+  async signTransaction(
+    method: string,
+    args: Record<string, unknown>,
+    options?: RequestOptions,
+  ): Promise<SignedTransactionResult> {
+    // #635: Signing is a write-path operation; reject in read-only mode.
+    if (this.readOnly) {
+      throw new ReadOnlyModeError(method);
+    }
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
+    options?.signal?.throwIfAborted();
+
+    const builtTx = await this.buildInvocationTransaction(method, args);
+    options?.signal?.throwIfAborted();
+    const prepared = await this.prepareInvocation(method, args, builtTx);
+    this.assertTransactionNetwork(prepared);
+
+    if (options?.maxFee !== undefined) {
+      const maxFeeBigInt = BigInt(options.maxFee);
+      if (BigInt(prepared.fee) > maxFeeBigInt) {
+        throw new ExorbitantFeeError(String(prepared.fee), maxFeeBigInt.toString());
+      }
+    }
+
+    options?.signal?.throwIfAborted();
+    const signedTxResponse = await this.signWithWallet(prepared.toXDR());
+    options?.signal?.throwIfAborted();
+    const signedTxXdr = normalizeSignatureResponse(signedTxResponse);
+    const signedTx = TransactionBuilder.fromXDR(signedTxXdr, this.networkPassphrase);
+    if (!(signedTx instanceof Transaction)) {
+      throw new SoroWillError(
+        'Expected a plain Transaction envelope after signing, but received FeeBumpTransaction',
+      );
+    }
+    assertSupportedSignatureAlgorithm(signedTx, { context: `signTransaction(${method})` });
+
+    return {
+      signedTxXdr,
+      networkPassphrase: this.networkPassphrase,
+      txHash: stellarHash(signedTx.toXDR()).toString('hex'),
+      sourcePublicKey: signedTx.source,
+      sequence: signedTx.sequence,
+      fee: signedTx.fee,
+    };
+  }
+
+  /**
+   * Signs an already-built (and ideally prepared) transaction envelope without
+   * submitting it.
+   *
+   * **Operation Type:** Read-only (Signing)
+   *
+   * @readonly
+   * @remarks Sign-only operation. Hands the envelope to the configured wallet
+   * and returns the signed XDR. No RPC submission happens, so this works for
+   * offline workflows where the envelope was prepared earlier (e.g. via
+   * {@link buildSep7SigningUri} or {@link buildTransaction} +
+   * `prepareTransaction`).
+   *
+   * @param transactionXdr - Unsigned (or partially signed) transaction envelope XDR
+   * @param options - Optional abort signal
+   * @returns The signed envelope XDR plus its hash, source, sequence, and fee
+   * @throws {ReadOnlyModeError} If the client is in read-only mode
+   * @throws {SoroWillError} If the XDR is a fee-bump envelope
+   *
+   * @example
+   * ```ts
+   * const signed = await client.signTransactionXdr(preparedXdr);
+   * console.log(signed.signedTxXdr);
+   * ```
+   */
+  async signTransactionXdr(
+    transactionXdr: string,
+    options?: RequestOptions,
+  ): Promise<SignedTransactionResult> {
+    if (this.readOnly) {
+      throw new ReadOnlyModeError('signTransactionXdr');
+    }
+    options?.signal?.throwIfAborted();
+    const envelope = TransactionBuilder.fromXDR(transactionXdr, this.networkPassphrase);
+    this.assertTransactionNetwork(envelope);
+    if (!(envelope instanceof Transaction)) {
+      throw new SoroWillError(
+        'Expected a plain Transaction envelope to sign, but received FeeBumpTransaction',
+      );
+    }
+
+    const signedTxResponse = await this.signWithWallet(transactionXdr);
+    options?.signal?.throwIfAborted();
+    const signedTxXdr = normalizeSignatureResponse(signedTxResponse);
+    const signedTx = TransactionBuilder.fromXDR(signedTxXdr, this.networkPassphrase);
+    if (!(signedTx instanceof Transaction)) {
+      throw new SoroWillError(
+        'Expected a plain Transaction envelope after signing, but received FeeBumpTransaction',
+      );
+    }
+    assertSupportedSignatureAlgorithm(signedTx, { context: 'signTransactionXdr' });
+
+    return {
+      signedTxXdr,
+      networkPassphrase: this.networkPassphrase,
+      txHash: stellarHash(signedTx.toXDR()).toString('hex'),
+      sourcePublicKey: signedTx.source,
+      sequence: signedTx.sequence,
+      fee: signedTx.fee,
     };
   }
 
