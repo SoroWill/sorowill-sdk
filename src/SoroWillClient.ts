@@ -1673,6 +1673,61 @@ function assertBatchSize(length: number, method: string): void {
   }
 }
 
+/** Maximum accepted slippage buffer for {@link SoroWillClient.estimateGasCost}, in basis points (100%). */
+export const MAX_SLIPPAGE_BPS = 10_000;
+
+/** Stroops per lumen (XLM). */
+const STROOPS_PER_LUMEN = 10_000_000n;
+
+/** Converts an integer stroop amount to a decimal XLM string. */
+function stroopsToLumens(stroops: bigint): string {
+  const negative = stroops < 0n;
+  const abs = negative ? -stroops : stroops;
+  const whole = abs / STROOPS_PER_LUMEN;
+  const fraction = (abs % STROOPS_PER_LUMEN).toString().padStart(7, '0').replace(/0+$/, '');
+  const value = fraction === '' ? whole.toString() : `${whole}.${fraction}`;
+  return negative ? `-${value}` : value;
+}
+
+/** Options for {@link SoroWillClient.estimateGasCost}. */
+export interface EstimateGasCostOptions extends RequestOptions {
+  /**
+   * Slippage buffer applied to the estimated total fee, in basis points
+   * (1 bps = 0.01%). `100` adds 1%. Defaults to `0`.
+   */
+  slippageBps?: number;
+}
+
+/**
+ * Gas/fee estimate for a contract invocation, returned by
+ * {@link SoroWillClient.estimateGasCost}. All stroop amounts are base-10
+ * strings; `*Lumens` fields are decimal XLM strings.
+ */
+export interface GasCostEstimate {
+  /** Contract method name that was simulated. */
+  method: string;
+  /** Simulated Soroban resource fee, in stroops. */
+  resourceFee: string;
+  /** Per-operation inclusion fee (`BASE_FEE`), in stroops. */
+  inclusionFee: string;
+  /** Total fee (`inclusionFee + resourceFee`), in stroops. */
+  totalFee: string;
+  /** Fee-bump fee for the same inner transaction, in stroops. */
+  feeBumpFee: string;
+  /** Slippage buffer applied to `totalFee`, in basis points. */
+  slippageBps: number;
+  /** `totalFee` plus the slippage buffer, in stroops. */
+  maxFee: string;
+  /** `resourceFee` in lumens (XLM). */
+  resourceFeeLumens: string;
+  /** `totalFee` in lumens (XLM). */
+  totalFeeLumens: string;
+  /** `feeBumpFee` in lumens (XLM). */
+  feeBumpFeeLumens: string;
+  /** `maxFee` in lumens (XLM). */
+  maxFeeLumens: string;
+}
+
 /** A single beneficiary's previewed share of a will's distribution. */
 export interface BeneficiaryDistributionPreview {
   /** The beneficiary's Stellar address. */
@@ -4373,6 +4428,74 @@ export class SoroWillClient {
       totalFee,
       estimatedRpcCalls,
       method,
+    };
+  }
+
+  /**
+   * Estimates the gas (Soroban resource) cost of invoking a contract method,
+   * returning the cost in stroops and lumens, including the fee-bump cost and
+   * an optional slippage buffer (#777).
+   *
+   * **Operation Type:** Read-only (Simulation)
+   *
+   * The estimate is produced by a read-only Soroban simulation (see
+   * {@link SoroWillClient.previewFee}); nothing is signed or submitted.
+   *
+   * - `resourceFee` — simulated Soroban resource fee, in stroops.
+   * - `inclusionFee` — `BASE_FEE` per operation, in stroops.
+   * - `totalFee` — `inclusionFee + resourceFee`, in stroops.
+   * - `feeBumpFee` — the fee-bump fee for the same inner transaction, in
+   *   stroops (the inner fee plus the fee-bump's own inclusion fee).
+   * - `slippageBps` — the applied slippage buffer, in basis points.
+   * - `maxFee` — `totalFee` plus the slippage buffer, in stroops. Use this as
+   *   the `maxFee` request option when submitting.
+   * - `*Lumens` — the same amounts converted to XLM (1 XLM = 10,000,000 stroops).
+   *
+   * @param method - The contract method name to simulate (e.g. `'check_in'`).
+   * @param args - Native arguments to pass to the contract method.
+   * @param options - Optional request options plus `slippageBps` (default 0).
+   * @returns The gas/fee estimate in stroops and lumens.
+   *
+   * @example
+   * ```ts
+   * const gas = await client.estimateGasCost('check_in', { will_id: 1n }, { slippageBps: 100 });
+   * console.log(`${gas.totalFee} stroops (${gas.totalFeeLumens} XLM), max ${gas.maxFee}`);
+   * ```
+   */
+  async estimateGasCost(
+    method: string,
+    args: Record<string, unknown> = {},
+    options?: EstimateGasCostOptions,
+  ): Promise<GasCostEstimate> {
+    const slippageBps = options?.slippageBps ?? 0;
+    if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > MAX_SLIPPAGE_BPS) {
+      throw new RangeError(
+        `slippageBps must be an integer between 0 and ${MAX_SLIPPAGE_BPS}`,
+      );
+    }
+
+    const { resourceFee, totalFee } = await this.previewFee(method, args, options);
+
+    const inclusionFee = BigInt(BASE_FEE);
+    const resource = BigInt(resourceFee);
+    const total = BigInt(totalFee);
+    // A fee-bump transaction pays its own inclusion fee on top of the inner
+    // transaction's fee.
+    const feeBumpFee = total + inclusionFee;
+    const maxFee = total + (total * BigInt(slippageBps)) / 10_000n;
+
+    return {
+      method,
+      resourceFee,
+      inclusionFee: inclusionFee.toString(),
+      totalFee: total.toString(),
+      feeBumpFee: feeBumpFee.toString(),
+      slippageBps,
+      maxFee: maxFee.toString(),
+      resourceFeeLumens: stroopsToLumens(resource),
+      totalFeeLumens: stroopsToLumens(total),
+      feeBumpFeeLumens: stroopsToLumens(feeBumpFee),
+      maxFeeLumens: stroopsToLumens(maxFee),
     };
   }
 
