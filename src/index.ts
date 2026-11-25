@@ -10,6 +10,7 @@
 export {
   SoroWillClient,
   parseWillId,
+  computeGuardianQuorum,
   SoroWillInvalidIdError,
   buildContractDataLedgerKey,
   buildContractInstanceLedgerKey,
@@ -27,6 +28,7 @@ export type {
   EventSubscription,
   EventSubscriptionOptions,
   EventSubscriptionTransport,
+  GuardianQuorum,
   RpcRetryOptions,
   SoroWillClientOptions,
   SoroWillNetwork,
@@ -146,6 +148,14 @@ export {
   isTerminalWillState,
   isWillState,
 } from './willStateMachine';
+
+export { compareWills } from './willComparison';
+export type {
+  CompareWillsOptions,
+  WillComparison,
+  WillComparisonEntry,
+  WillFieldName,
+} from './willComparison';
 
 export {
   DEFAULT_FREIGHTER_CONNECT_TIMEOUT_MS,
@@ -455,6 +465,30 @@ export {
   validateBeneficiaryWhitelist,
 } from './validation';
 export type { BeneficiaryWhitelistOptions } from './validation';
+
+export {
+  DistributionAllocationError,
+  InvalidDistributionConditionError,
+  evaluateDistributionCondition,
+  planConditionalDistribution,
+} from './conditionalDistribution';
+export type {
+  AndCondition,
+  BalanceAtLeastCondition,
+  ComparisonCondition,
+  ComparisonOperator,
+  ConditionContext,
+  ConditionalDistributionAllocation,
+  ConditionalDistributionOptions,
+  ConditionalDistributionPlan,
+  ConditionalDistributionRule,
+  DistributionCondition,
+  NotCondition,
+  OrCondition,
+  TimeAfterCondition,
+  TimeBeforeCondition,
+  WillStatusCondition,
+} from './conditionalDistribution';
 
 export {
   DEFAULT_NETWORK,

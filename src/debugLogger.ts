@@ -124,6 +124,23 @@ export const DEFAULT_REDACTED_KEYS: readonly string[] = Object.freeze([
   'refreshToken',
   'authorization',
   'cookie',
+  'encryptionKey',
+  'dataKey',
+  'dek',
+  'wrappedKey',
+  'plaintext',
+  'ciphertext',
+  'encryptedData',
+  'encryptionKeyId',
+  'keyMaterial',
+  'salt',
+  'iv',
+  'nonce',
+  'authTag',
+  'tag',
+  'passphrase',
+  'key',
+  'keyId',
 ]);
 
 /** Placeholder written in place of a redacted value. */
