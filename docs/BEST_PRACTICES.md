@@ -154,9 +154,20 @@ Create one `SoroWillClient` per network/contract and share it across your app. E
 ### Use pagination for list views
 
 ```ts
-const page = await client.getWillsByOwner(owner, { pageSize: 20 });
-// page.wills, page.nextCursor
+// Offset/limit
+const page = await client.getWillsByOwner(owner, { offset: 0, limit: 20 });
+// page.wills, page.nextCursor, page.prevCursor, page.total, page.hasMore
+
+// Cursor-based
+let cursor: string | undefined;
+do {
+  const page = await client.getWillsByOwner(owner, { limit: 20, cursor });
+  render(page.wills);
+  cursor = page.nextCursor ?? undefined;
+} while (cursor);
 ```
+
+`pageSize` is still accepted as an alias for `limit`. When both `cursor` and `offset` are given, `cursor` wins. Cursors are opaque: pass back `nextCursor`/`prevCursor` exactly as received, and don't build them yourself.
 
 The contract returns the full list, and the SDK splits it into pages on the client. The cache reuses the full result, so moving between pages doesn't make new RPC calls within the TTL.
 

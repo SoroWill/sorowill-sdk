@@ -316,6 +316,44 @@ export class InvalidContractIdError extends SoroWillError {
 }
 
 /**
+ * Raised when a configuration option passed to the {@link SoroWillClient}
+ * constructor is invalid (unknown network, malformed URL, out-of-range number,
+ * wrong type, …). Thrown synchronously before any RPC call is made so
+ * misconfiguration fails fast with an actionable message.
+ *
+ * The offending option name is exposed as {@link SoroWillConfigError.option}
+ * and the rejected value as {@link SoroWillConfigError.value}.
+ *
+ * @example
+ * ```ts
+ * try {
+ *   new SoroWillClient({ network: 'devnet' as never, contractId: 'C...' });
+ * } catch (err) {
+ *   if (err instanceof SoroWillConfigError) {
+ *     console.error(`${err.option}: ${err.message}`);
+ *   }
+ * }
+ * ```
+ */
+export class SoroWillConfigError extends SoroWillError {
+  /** Name of the invalid configuration option (e.g. `"rpcUrl"`). */
+  readonly option: string;
+  /** The rejected value, when it is safe to expose. */
+  readonly value?: unknown;
+
+  constructor(option: string, message: string, value?: unknown, options?: ErrorOptions) {
+    super(`Invalid SoroWill configuration option "${option}": ${message}`, {
+      ...options,
+      errorCode: ErrorCode.VALIDATION_ERROR,
+    });
+    this.option = option;
+    if (value !== undefined) {
+      this.value = value;
+    }
+  }
+}
+
+/**
  * Raised when the `guardians` list passed to {@link SoroWillClient.createWill}
  * exceeds the contract's `MAX_GUARDIANS` limit. Thrown synchronously before
  * any transaction is built or signed, saving a full round-trip.
@@ -1135,6 +1173,24 @@ export class InvokeFailedError extends SoroWillError {
 }
 
 /**
+ * Raised when {@link SoroWillClient.getTransaction} cannot find a transaction
+ * with the requested hash on the network.
+ *
+ * The hash is kept as a structured property — not embedded in the message —
+ * because it is caller-supplied data that would otherwise surface in any
+ * error-tracking pipeline.
+ */
+export class TransactionNotFoundError extends SoroWillError {
+  /** The transaction hash that was not found. Treat as untrusted before logging. */
+  readonly txHash: string;
+
+  constructor(txHash: string, options?: ErrorOptions) {
+    super('Transaction not found on the network', options);
+    this.txHash = txHash;
+  }
+}
+
+/**
  * Raised when a pagination cursor supplied by the caller fails validation.
  *
  * The offending cursor string is kept as a structured property — not embedded
@@ -1291,6 +1347,22 @@ export class WebSocketNotConfiguredError extends SoroWillError {
       'transport: "websocket" was requested but this client was not configured with ' +
         'both webSocketFactory and eventStreamUrl. Configure both, or use transport: "auto" ' +
         'to allow falling back to polling.',
+      options,
+    );
+  }
+}
+
+/**
+ * Raised when {@link SoroWillClient.subscribeToEvents} is called with
+ * `{ transport: 'sse' }` but the client was not constructed with
+ * `eventSseUrl`. Thrown instead of silently downgrading to polling, since an
+ * explicit `'sse'` request implies the caller relies on push delivery.
+ */
+export class SseNotConfiguredError extends SoroWillError {
+  constructor(options?: ErrorOptions) {
+    super(
+      'transport: "sse" was requested but this client was not configured with ' +
+        'eventSseUrl. Configure it, or use transport: "auto" to allow falling back to polling.',
       options,
     );
   }

@@ -12,6 +12,7 @@ export const SDK_REQUIRED_CONTRACT_METHODS: readonly string[] = [
   'emergency_checkin',
   'get_will',
   'get_wills_by_beneficiary',
+  'get_wills_by_guardian',
   'get_wills_by_owner',
   'guardian_trigger',
   'release_inheritance',
