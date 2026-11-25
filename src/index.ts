@@ -158,13 +158,16 @@ export type {
 } from './willComparison';
 
 export {
+  BIP39_VALID_WORD_COUNTS,
   DEFAULT_FREIGHTER_CONNECT_TIMEOUT_MS,
   DEFAULT_MULTISIG_SIGNER_TIMEOUT_MS,
   FreighterWalletAdapter,
+  InvalidRecoveryPhraseError,
   MultisigWalletAdapter,
   WalletSessionError,
   assertWalletSessionActive,
   connectWallet,
+  deriveKeypairFromRecoveryPhrase,
   freighterAdapter,
   getDefaultWalletAdapter,
   getPublicKey,
@@ -172,13 +175,17 @@ export {
   isFreighterInstalled,
   isFreighterInstallCheckError,
   isSignTransactionTimeoutError,
+  isValidRecoveryPhrase,
   isValidWalletSessionToken,
   isWalletNetworkMismatchError,
   isWalletSessionError,
+  normalizeRecoveryPhrase,
   signTransaction,
   validateWalletSessionToken,
 } from './wallet';
 export type {
+  DeriveKeypairOptions,
+  DerivedKeypair,
   MultisigSigner,
   MultisigSignerResult,
   MultisigSignResult,

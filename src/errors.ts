@@ -1826,6 +1826,27 @@ export class WalletSessionError extends Error {
   }
 }
 
+/**
+ * Raised when a BIP-39 recovery phrase cannot be used to derive a Stellar
+ * keypair — for example an unknown word, a bad checksum, or an unsupported
+ * word count (#796).
+ *
+ * The error message never contains the phrase itself; only the failing word
+ * index (when known) is exposed as a typed property.
+ */
+export class InvalidRecoveryPhraseError extends SoroWillError {
+  /** Zero-based index of the offending word, when it could be determined. */
+  readonly wordIndex?: number;
+
+  constructor(message: string, options?: ErrorOptions & { wordIndex?: number }) {
+    super(message, { ...options, errorCode: ErrorCode.KEY_MANAGEMENT_ERROR });
+    this.name = 'InvalidRecoveryPhraseError';
+    if (options?.wordIndex !== undefined) {
+      this.wordIndex = options.wordIndex;
+    }
+  }
+}
+
 export class WalletSessionExpiredError extends WalletSessionError {
   readonly expiresAt: number | undefined;
 

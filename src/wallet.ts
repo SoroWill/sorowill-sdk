@@ -4,6 +4,7 @@ import {
   FreighterConnectionTimeoutError,
   FreighterInstallCheckError,
   FreighterNotAvailableError,
+  InvalidRecoveryPhraseError,
   InvalidSignedXdrEncodingError,
   SignTransactionTimeoutError,
   SoroWillError,
@@ -15,7 +16,7 @@ import {
   WalletSessionExpiredError,
 } from './errors';
 
-export { WalletCancelledError, WalletSessionError, WalletSessionExpiredError };
+export { InvalidRecoveryPhraseError, WalletCancelledError, WalletSessionError, WalletSessionExpiredError };
 
 /**
  * Union of the typed errors a {@link WalletAdapter} implementation — or the
@@ -83,6 +84,151 @@ export function isFreighterConnectionTimeoutError(
 
 /** Default timeout (ms) for Freighter wallet connection requests. */
 export const DEFAULT_FREIGHTER_CONNECT_TIMEOUT_MS = 30_000;
+
+/**
+ * BIP-39 recovery-phrase support (#796).
+ *
+ * ### Security
+ *
+ * A recovery phrase is equivalent to the private key it derives: anyone who
+ * reads it can move every asset the account holds. This module therefore:
+ *
+ * - never logs, echoes, or embeds the phrase (or any derived secret) in an
+ *   error message — only the failing word index is exposed;
+ * - never persists the phrase; callers are responsible for keeping it in
+ *   memory only for as long as needed and for zeroing their own copies;
+ * - derives keys in-process with `@stellar/stellar-sdk`'s `Keypair`, so the
+ *   phrase never leaves the runtime;
+ * - is intended for scripts, automation, and tests. Browser applications
+ *   handling real end-user funds should use a hardware or extension wallet
+ *   (Freighter, Ledger, …) so the secret never enters page memory.
+ *
+ * Use a BIP-39 passphrase only if the wallet that created the phrase used one;
+ * a wrong passphrase silently derives a different (empty) account.
+ */
+
+/** Word counts accepted by BIP-39 (128–256 bits of entropy). */
+export const BIP39_VALID_WORD_COUNTS: readonly number[] = [12, 15, 18, 21, 24];
+
+/**
+ * Normalizes a recovery phrase: trims, collapses whitespace, and lowercases
+ * (BIP-39 phrases are case-insensitive and space-separated).
+ */
+export function normalizeRecoveryPhrase(phrase: string): string {
+  return phrase.trim().toLowerCase().split(/\s+/).filter(Boolean).join(' ');
+}
+
+/**
+ * Returns `true` when `phrase` has a BIP-39 word count and only lowercase
+ * ASCII letters. This is a cheap shape check — it does not verify the
+ * checksum; use {@link deriveKeypairFromRecoveryPhrase} for full validation.
+ */
+export function isValidRecoveryPhrase(phrase: unknown): phrase is string {
+  if (typeof phrase !== 'string') return false;
+  const words = normalizeRecoveryPhrase(phrase).split(' ');
+  return (
+    BIP39_VALID_WORD_COUNTS.includes(words.length) &&
+    words.every((word) => /^[a-z]+$/.test(word))
+  );
+}
+
+/**
+ * Derives a Stellar keypair from a BIP-39 recovery phrase using the standard
+ * Stellar derivation path `m/44'/148'/accountIndex'` (SEP-0005).
+ *
+ * @param phrase - The BIP-39 mnemonic (12/15/18/21/24 words).
+ * @param options.accountIndex - Account index in the derivation path (default `0`).
+ * @param options.passphrase - Optional BIP-39 passphrase ("25th word").
+ * @throws {InvalidRecoveryPhraseError} When the phrase is malformed, contains
+ *   an unknown word, or fails the BIP-39 checksum. The message never contains
+ *   the phrase.
+ *
+ * @example
+ * ```ts
+ * const { publicKey } = await deriveKeypairFromRecoveryPhrase(phrase);
+ * const signer = new KeypairSigner(await deriveKeypairFromRecoveryPhrase(phrase));
+ * ```
+ */
+export async function deriveKeypairFromRecoveryPhrase(
+  phrase: string,
+  options: DeriveKeypairOptions = {},
+): Promise<DerivedKeypair> {
+  const accountIndex = options.accountIndex ?? 0;
+  if (!Number.isInteger(accountIndex) || accountIndex < 0) {
+    throw new InvalidRecoveryPhraseError(
+      'accountIndex must be a non-negative integer.',
+    );
+  }
+
+  const normalized = normalizeRecoveryPhrase(phrase);
+  const words = normalized.length === 0 ? [] : normalized.split(' ');
+  if (!BIP39_VALID_WORD_COUNTS.includes(words.length)) {
+    throw new InvalidRecoveryPhraseError(
+      `Recovery phrase must contain ${BIP39_VALID_WORD_COUNTS.join(', ')} words; received ${words.length}.`,
+    );
+  }
+  const badWordIndex = words.findIndex((word) => !/^[a-z]+$/.test(word));
+  if (badWordIndex !== -1) {
+    throw new InvalidRecoveryPhraseError(
+      `Recovery phrase word at index ${badWordIndex} is not a valid BIP-39 word.`,
+      { wordIndex: badWordIndex },
+    );
+  }
+
+  const { Keypair } = await import('@stellar/stellar-sdk');
+  let keypair: InstanceType<typeof Keypair>;
+  try {
+    keypair = Keypair.fromMnemonic(normalized, options.passphrase);
+  } catch (err) {
+    throw new InvalidRecoveryPhraseError(
+      'Recovery phrase failed BIP-39 validation (unknown word or invalid checksum).',
+      { cause: err },
+    );
+  }
+
+  if (accountIndex !== 0) {
+    const { derivePath } = await import('@stellar/stellar-sdk');
+    const derived = derivePath(
+      `m/44'/148'/${accountIndex}'`,
+      normalized,
+      options.passphrase,
+    );
+    keypair = Keypair.fromRawEd25519Seed(derived.key);
+  }
+
+  return {
+    publicKey: keypair.publicKey(),
+    secretKey: keypair.secret(),
+    accountIndex,
+    keypair,
+  };
+}
+
+/** Options for {@link deriveKeypairFromRecoveryPhrase}. */
+export interface DeriveKeypairOptions {
+  /** Account index in the SEP-0005 path `m/44'/148'/index'`. Defaults to `0`. */
+  accountIndex?: number;
+  /** Optional BIP-39 passphrase ("25th word"). */
+  passphrase?: string;
+}
+
+/**
+ * Result of {@link deriveKeypairFromRecoveryPhrase}.
+ *
+ * > **Security:** `secretKey` and `keypair` are as sensitive as the recovery
+ * > phrase itself. Never log them, send them over the network, or store them
+ * > in plaintext.
+ */
+export interface DerivedKeypair {
+  /** Stellar public key (`G...`) derived from the phrase. */
+  publicKey: string;
+  /** Stellar secret key (`S...`). Handle as a secret. */
+  secretKey: string;
+  /** Account index used in the derivation path. */
+  accountIndex: number;
+  /** The underlying `@stellar/stellar-sdk` keypair, ready for signing. */
+  keypair: unknown;
+}
 
 /**
  * Maximum allowed length for a {@link WalletSession} token string.
