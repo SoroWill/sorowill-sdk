@@ -115,6 +115,9 @@ export function isWill(value: unknown): value is Will {
   if (value.triggerTime !== null && !isValidDate(value.triggerTime)) {
     return false;
   }
+  if (value.releaseAfter !== undefined && value.releaseAfter !== null && !isValidDate(value.releaseAfter)) {
+    return false;
+  }
   if (!isWillStatus(value.status)) {
     return false;
   }
@@ -258,7 +261,12 @@ export function isCreateWillParams(value: unknown): value is CreateWillParams {
   }
   return (
     Array.isArray(value.guardians) &&
-    value.guardians.every((g) => typeof g === 'string' && StrKey.isValidEd25519PublicKey(g))
+    value.guardians.every((g) => typeof g === 'string' && StrKey.isValidEd25519PublicKey(g)) &&
+    (value.timeLockDays === undefined ||
+      (typeof value.timeLockDays === 'number' &&
+        Number.isInteger(value.timeLockDays) &&
+        value.timeLockDays > 0)) &&
+    (value.releaseAfter === undefined || isValidDate(value.releaseAfter))
   );
 }
 

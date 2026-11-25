@@ -48,11 +48,20 @@ export interface RequestQueueOptions {
   maxRateLimitRetries?: number;
   /**
    * Base delay in milliseconds for rate-limit retries. The n-th retry waits
-   * `2^n * retryBaseDelayMs` (capped by {@link maxBackoffMs}). Defaults to 500.
+   * `2^n * retryBaseDelayMs` (capped by {@link maxBackoffMs}), then scaled by
+   * the configured {@link jitter} range. Defaults to 500.
    */
   retryBaseDelayMs?: number;
   /** Upper bound in milliseconds for a single backoff delay. Defaults to 60 000 (60s). */
   maxBackoffMs?: number;
+  /**
+   * Random jitter applied to retry backoff delays to avoid thundering herds
+   * (#801). Either a boolean (`true` = default 0.5–1.0 range) or an explicit
+   * `{ min, max }` fraction range where `0 <= min <= max <= 1`. The delay is
+   * multiplied by a random factor in `[min, max]`. Defaults to `true`.
+   * Set to `false` for deterministic exponential backoff.
+   */
+  jitter?: boolean | BackoffJitterRange;
   /**
    * Default timeout in milliseconds for requests that do not specify an
    * explicit `timeoutMs` in {@link RequestQueue.enqueue}. Prevents stuck
@@ -75,6 +84,20 @@ export interface RequestQueueOptions {
    * exceeds {@link backupThreshold}.
    */
   onQueueDepthWarning?: (depth: number, maxQueueSize: number) => void;
+  /**
+   * Priority assigned to requests enqueued without an explicit priority.
+   * Defaults to {@link RequestPriority.Normal}. Use this to make a queue
+   * critical (e.g. `RequestPriority.High`) or background-only
+   * (`RequestPriority.Low`) without changing every call site.
+   */
+  defaultPriority?: RequestPriority;
+  /**
+   * Optional custom priority levels. When provided, these replace the built-in
+   * {@link RequestPriority} levels: higher numeric values are processed first.
+   * Requests enqueued with a priority that is not listed here are rejected with
+   * a `RangeError`.
+   */
+  priorities?: readonly number[];
 }
 
 /** Snapshot of {@link RequestQueue} depth and active execution metrics. */
@@ -90,22 +113,41 @@ export interface RequestQueueMetrics {
 export const MAX_BACKOFF_MS = 60_000;
 
 /**
+ * Fractional jitter range applied to a backoff delay. The delay is multiplied
+ * by a uniformly random factor in `[min, max]`, where `0 <= min <= max <= 1`.
+ */
+export interface BackoffJitterRange {
+  min: number;
+  max: number;
+}
+
+/** Default jitter range: 50%–100% of the computed exponential delay. */
+export const DEFAULT_JITTER_RANGE: BackoffJitterRange = { min: 0.5, max: 1 };
+
+/**
  * Computes the exponential backoff delay for a retry: `2^attempt * baseDelayMs`,
  * capped at `maxBackoffMs`. `attempt` is zero-based (the first retry is attempt 0).
- * When `jitter` is `true`, applies 50%–100% jitter to prevent retry storms.
+ *
+ * When `jitter` is `true` (or a {@link BackoffJitterRange}), the capped delay is
+ * multiplied by a uniformly random factor in the jitter range to spread retries
+ * and avoid thundering herds (#801). `true` uses {@link DEFAULT_JITTER_RANGE}.
  */
 export function computeBackoffDelay(
   attempt: number,
   baseDelayMs: number,
   maxBackoffMs: number = MAX_BACKOFF_MS,
-  jitter: boolean = false,
+  jitter: boolean | BackoffJitterRange = false,
 ): number {
   const delay = 2 ** attempt * baseDelayMs;
   const capped = Number.isFinite(delay) ? Math.min(delay, maxBackoffMs) : maxBackoffMs;
-  if (!jitter) {
+  if (jitter === false) {
     return capped;
   }
-  return Math.floor(capped * (0.5 + Math.random() * 0.5));
+  const range = jitter === true ? DEFAULT_JITTER_RANGE : jitter;
+  const min = Math.min(Math.max(range.min, 0), 1);
+  const max = Math.min(Math.max(range.max, min), 1);
+  const factor = min + Math.random() * (max - min);
+  return Math.floor(capped * factor);
 }
 
 /**
@@ -254,7 +296,6 @@ export function classifyRpcError(error: unknown): ErrorTransience {
   return ErrorTransience.Permanent;
 }
 
-/** Priority level for requests in the queue. Higher priority requests are processed first within FIFO ordering constraints. */
 /**
  * Raised by {@link RequestQueue.enqueueAfter} when a dependency of a queued
  * request rejects, so the dependent request is never executed (#733).
@@ -273,6 +314,11 @@ export class RequestDependencyError extends Error {
   }
 }
 
+/**
+ * Priority level for requests in the queue. Higher priority requests are
+ * processed first; requests with equal priority are processed in FIFO order.
+ * Levels are configurable per queue via {@link RequestQueueOptions.priorities}.
+ */
 export enum RequestPriority {
   /** Low priority for background operations (e.g., UI polling). */
   Low = 0,
@@ -281,6 +327,13 @@ export enum RequestPriority {
   /** High priority for user-initiated operations (e.g., form submissions). */
   High = 2,
 }
+
+/** Built-in priority levels, ordered from lowest to highest. */
+export const DEFAULT_PRIORITIES: readonly RequestPriority[] = [
+  RequestPriority.Low,
+  RequestPriority.Normal,
+  RequestPriority.High,
+];
 
 /** Maximum number of completed request traces kept for debugging. */
 export const MAX_REQUEST_TRACES = 100;
@@ -341,10 +394,13 @@ class QueueCore {
   readonly maxRateLimitRetries: number;
   readonly retryBaseDelayMs: number;
   readonly maxBackoffMs: number;
+  readonly jitter: boolean | BackoffJitterRange;
   readonly defaultTimeoutMs: number;
   readonly batchSize: number;
   readonly backupThreshold: number;
   readonly onQueueDepthWarning: ((depth: number, maxQueueSize: number) => void) | undefined;
+  readonly defaultPriority: RequestPriority;
+  readonly priorities: readonly number[];
   readonly pending: Array<PendingRequest<unknown>> = [];
   readonly starts: number[] = [];
   /** Most recent completed request traces, oldest first. */
@@ -361,10 +417,13 @@ class QueueCore {
     maxRateLimitRetries: number,
     retryBaseDelayMs: number,
     maxBackoffMs: number,
+    jitter: boolean | BackoffJitterRange,
     defaultTimeoutMs: number,
     batchSize: number,
     backupThreshold: number,
     onQueueDepthWarning?: (depth: number, maxQueueSize: number) => void,
+    defaultPriority: RequestPriority = RequestPriority.Normal,
+    priorities: readonly number[] = DEFAULT_PRIORITIES,
   ) {
     this.maxConcurrent = maxConcurrent;
     this.requestsPerSecond = requestsPerSecond;
@@ -372,10 +431,13 @@ class QueueCore {
     this.maxRateLimitRetries = maxRateLimitRetries;
     this.retryBaseDelayMs = retryBaseDelayMs;
     this.maxBackoffMs = maxBackoffMs;
+    this.jitter = jitter;
     this.defaultTimeoutMs = defaultTimeoutMs;
     this.batchSize = batchSize;
     this.backupThreshold = backupThreshold;
     this.onQueueDepthWarning = onQueueDepthWarning;
+    this.defaultPriority = defaultPriority;
+    this.priorities = priorities;
   }
 }
 
@@ -415,6 +477,22 @@ export class RequestQueue {
         throw new RangeError(`maxBackoffMs must be at most ${MAX_BACKOFF_MS}ms, received ${options.maxBackoffMs}`);
       }
     }
+    if (options.jitter !== undefined && typeof options.jitter !== 'boolean') {
+      const { min, max } = options.jitter;
+      if (
+        typeof min !== 'number' ||
+        typeof max !== 'number' ||
+        !Number.isFinite(min) ||
+        !Number.isFinite(max) ||
+        min < 0 ||
+        max > 1 ||
+        min > max
+      ) {
+        throw new RangeError(
+          `jitter range must satisfy 0 <= min <= max <= 1, received { min: ${min}, max: ${max} }`,
+        );
+      }
+    }
 
     const maxConcurrent = options.maxConcurrent ?? 4;
     const requestsPerSecond = options.requestsPerSecond ?? 10;
@@ -422,10 +500,28 @@ export class RequestQueue {
     const maxRateLimitRetries = options.maxRateLimitRetries ?? 3;
     const retryBaseDelayMs = options.retryBaseDelayMs ?? 500;
     const maxBackoffMs = options.maxBackoffMs ?? MAX_BACKOFF_MS;
+    const jitter = options.jitter ?? true;
     const defaultTimeoutMs = options.defaultTimeoutMs ?? 30_000;
     const batchSize = options.batchSize ?? 10;
     const backupThreshold = options.backupThreshold ?? 50;
     const onQueueDepthWarning = options.onQueueDepthWarning;
+    const defaultPriority = options.defaultPriority ?? RequestPriority.Normal;
+    const priorities = options.priorities ?? DEFAULT_PRIORITIES;
+    if (options.priorities !== undefined) {
+      if (!Array.isArray(options.priorities) || options.priorities.length === 0) {
+        throw new RangeError('priorities must be a non-empty array of numbers');
+      }
+      for (const level of options.priorities) {
+        if (typeof level !== 'number' || !Number.isFinite(level)) {
+          throw new RangeError(`priorities must contain only finite numbers, received ${level}`);
+        }
+      }
+    }
+    if (!priorities.includes(defaultPriority)) {
+      throw new RangeError(
+        `defaultPriority ${defaultPriority} is not one of the configured priorities`,
+      );
+    }
     this.account = options.account;
     if (this.account !== undefined) {
       let core = sharedCores.get(this.account);
@@ -437,10 +533,13 @@ export class RequestQueue {
           maxRateLimitRetries,
           retryBaseDelayMs,
           maxBackoffMs,
+          jitter,
           defaultTimeoutMs,
           batchSize,
           backupThreshold,
           onQueueDepthWarning,
+          defaultPriority,
+          priorities,
         );
         sharedCores.set(this.account, core);
       }
@@ -454,10 +553,13 @@ export class RequestQueue {
         maxRateLimitRetries,
         retryBaseDelayMs,
         maxBackoffMs,
+        jitter,
         defaultTimeoutMs,
         batchSize,
         backupThreshold,
         onQueueDepthWarning,
+        defaultPriority,
+        priorities,
       );
     }
   }
@@ -466,11 +568,18 @@ export class RequestQueue {
     run: () => Promise<T>,
     timeoutMs?: number,
     signal?: AbortSignal,
-    priority: RequestPriority = RequestPriority.Normal,
+    priority: RequestPriority = this.core.defaultPriority,
     method?: string,
   ): Promise<T> {
     if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
       return Promise.reject(new RangeError('timeoutMs must be greater than zero'));
+    }
+    if (!this.core.priorities.includes(priority)) {
+      return Promise.reject(
+        new RangeError(
+          `priority ${priority} is not one of the configured priorities (${this.core.priorities.join(', ')})`,
+        ),
+      );
     }
     if (signal?.aborted) {
       return Promise.reject(signal.reason);
@@ -559,7 +668,7 @@ export class RequestQueue {
     run: () => Promise<T>,
     timeoutMs?: number,
     signal?: AbortSignal,
-    priority: RequestPriority = RequestPriority.Normal,
+    priority: RequestPriority = this.core.defaultPriority,
     method?: string,
   ): Promise<T> {
     const waits = dependencies.map((dep, index) =>
@@ -701,15 +810,19 @@ export class RequestQueue {
    * Selects and removes a request in one synchronous operation. JavaScript runs
    * this to completion before another producer, abort listener, or drain can
    * touch the shared core. Callers use the removal result, not a size check.
+   *
+   * The highest-priority request is selected first; requests sharing that
+   * priority are served in FIFO order (the earliest enqueued wins).
    */
   private dequeue(): PendingRequest<unknown> | undefined {
     const pending = this.core.pending;
     let selectedIndex = -1;
     let selectedPriority = -Infinity;
     for (let i = 0; i < pending.length; i++) {
-      if (pending[i]!.priority > selectedPriority) {
+      const candidate = pending[i]!;
+      if (candidate.priority > selectedPriority) {
         selectedIndex = i;
-        selectedPriority = pending[i]!.priority;
+        selectedPriority = candidate.priority;
       }
     }
     return selectedIndex === -1 ? undefined : pending.splice(selectedIndex, 1)[0];
@@ -748,7 +861,12 @@ export class RequestQueue {
       } catch (error) {
         // Retry rate-limit errors with exponential backoff
         if (isRateLimitError(error) && attemptNumber < this.core.maxRateLimitRetries) {
-          const delay = computeBackoffDelay(attemptNumber, this.core.retryBaseDelayMs, this.core.maxBackoffMs);
+          const delay = computeBackoffDelay(
+            attemptNumber,
+            this.core.retryBaseDelayMs,
+            this.core.maxBackoffMs,
+            this.core.jitter,
+          );
           await new Promise((resolve) => setTimeout(resolve, delay));
           return executeWithRetry(attemptNumber + 1);
         }

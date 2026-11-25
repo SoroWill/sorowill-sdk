@@ -10,6 +10,12 @@ export interface CachePersistenceAdapter {
   write(entry: PersistedCacheEntry): Promise<void>;
   delete(key: string): Promise<void>;
   clear(): Promise<void>;
+  /**
+   * Optional differential write: applies only the changed fields to the stored
+   * entry instead of rewriting the whole value. Adapters that omit this method
+   * fall back to {@link CachePersistenceAdapter.write}.
+   */
+  applyPatch?(patch: PersistedCachePatch): Promise<void>;
 }
 
 /**
@@ -45,10 +51,165 @@ function withPersistenceLock(
   return result;
 }
 
+/**
+ * A single field-level change detected between two cached values.
+ *
+ * `path` is a dotted path into the value (array indices are numeric segments,
+ * e.g. `beneficiaries.0.amount`). `previous` is `undefined` for added fields
+ * and `next` is `undefined` for removed fields.
+ */
+export interface CacheFieldChange {
+  path: string;
+  previous: unknown;
+  next: unknown;
+}
+
+/** Result of {@link diffCacheValues}. */
+export interface CacheValueDiff {
+  /** `true` when at least one field differs. */
+  changed: boolean;
+  /** Field-level changes, in stable key order. */
+  changes: CacheFieldChange[];
+  /** Dotted paths of the changed fields (convenience for `changes.map(c => c.path)`). */
+  changedPaths: string[];
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    !(value instanceof Date)
+  );
+}
+
+function collectFieldChanges(
+  previous: unknown,
+  next: unknown,
+  prefix: string,
+  changes: CacheFieldChange[],
+): void {
+  if (isPlainObject(previous) && isPlainObject(next)) {
+    const keys = new Set([...Object.keys(previous), ...Object.keys(next)]);
+    for (const key of Array.from(keys).sort()) {
+      collectFieldChanges(previous[key], next[key], prefix ? `${prefix}.${key}` : key, changes);
+    }
+    return;
+  }
+
+  if (Array.isArray(previous) && Array.isArray(next)) {
+    const length = Math.max(previous.length, next.length);
+    for (let index = 0; index < length; index += 1) {
+      collectFieldChanges(previous[index], next[index], `${prefix}.${index}`, changes);
+    }
+    return;
+  }
+
+  if (stableStringify(previous) !== stableStringify(next)) {
+    changes.push({ path: prefix, previous, next });
+  }
+}
+
+/**
+ * Computes the field-level difference between two cached values.
+ *
+ * Only changed fields are reported, so callers can apply incremental updates
+ * instead of replacing (and re-transferring) the whole value. Objects are
+ * compared key by key, arrays element by element, and `Date`/`bigint` values
+ * are compared structurally.
+ */
+export function diffCacheValues(previous: unknown, next: unknown): CacheValueDiff {
+  const changes: CacheFieldChange[] = [];
+  collectFieldChanges(previous, next, '', changes);
+  return {
+    changed: changes.length > 0,
+    changes,
+    changedPaths: changes.map((change) => change.path),
+  };
+}
+
+/**
+ * Applies a set of field-level changes to `base`, returning a new value.
+ * Fields whose `next` is `undefined` are removed. The input is not mutated.
+ */
+export function applyCacheFieldChanges<T>(base: T, changes: readonly CacheFieldChange[]): T {
+  if (changes.length === 0) {
+    return base;
+  }
+  const root: unknown = structuredCloneSafe(base);
+  for (const change of changes) {
+    const segments = change.path.split('.');
+    let target: Record<string, unknown> | unknown[] = root as Record<string, unknown>;
+    for (let index = 0; index < segments.length - 1; index += 1) {
+      const segment = segments[index]!;
+      const container = target as Record<string, unknown>;
+      if (container[segment] === undefined || container[segment] === null) {
+        container[segment] = /^\d+$/.test(segments[index + 1]!) ? [] : {};
+      }
+      target = container[segment] as Record<string, unknown>;
+    }
+    const last = segments[segments.length - 1]!;
+    if (change.next === undefined) {
+      if (Array.isArray(target)) {
+        target.splice(Number(last), 1);
+      } else {
+        delete (target as Record<string, unknown>)[last];
+      }
+    } else {
+      (target as Record<string, unknown>)[last] = change.next;
+    }
+  }
+  return root as T;
+}
+
+function structuredCloneSafe<T>(value: T): T {
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(value);
+    } catch {
+      // Fall through to the JSON round-trip for values structuredClone rejects.
+    }
+  }
+  return deserializeCacheValue<T>(serializeCacheValue(value));
+}
+
 export interface CacheGetResult<T> {
   value: T;
   stale: boolean;
   indicator?: 'offline';
+}
+
+/**
+ * Caching strategy for a cached response.
+ *
+ * - `static`: the response never changes for a given key (e.g. contract spec,
+ *   network config). It is cached indefinitely (`expiresAt: null`).
+ * - `dynamic`: the response can change over time (e.g. will state, balances).
+ *   It is cached for a TTL, defaulting to the cache's configured `ttlMs`.
+ */
+export type CacheStrategy = 'static' | 'dynamic';
+
+/** Per-query caching options accepted by {@link ReadCache.getOrFetch}. */
+export interface CacheQueryOptions {
+  /**
+   * Caching strategy for this query. Defaults to `'dynamic'`.
+   */
+  strategy?: CacheStrategy;
+  /**
+   * TTL in milliseconds for `'dynamic'` queries. Ignored for `'static'`
+   * queries, which are cached indefinitely. Defaults to the cache's `ttlMs`.
+   */
+  ttlMs?: number;
+  /**
+   * Will IDs the cached value references, so it can be invalidated with
+   * {@link ReadCache.invalidateByWillId}.
+   */
+  willIds?: Iterable<string>;
+  /**
+   * When `true`, bypasses any cached value and always calls `fetcher`,
+   * replacing the cached entry with the fresh result.
+   */
+  forceRefresh?: boolean;
 }
 
 export interface ReadCacheOptions {
@@ -82,80 +243,31 @@ export interface ReadCacheOptions {
    */
   rollbackOnPersistenceFailure?: boolean;
   /**
-   * Enables cross-tab response deduplication. When set, identical queries in
-   * other tabs share a single in-flight request and its cached response.
-   *
-   * - `true` uses the default channel name ({@link DEFAULT_CACHE_CHANNEL_NAME}).
-   * - A string overrides the channel name (tabs must use the same name).
-   * - `false` (default) disables cross-tab sharing.
-   *
-   * Uses `BroadcastChannel` when available and falls back to polling the
-   * persistence adapter otherwise.
+   * When `true`, {@link ReadCache.set} compares the incoming value with the
+   * cached one and only persists the changed fields (as a differential patch)
+   * instead of rewriting the whole entry. Unchanged writes are skipped
+   * entirely, which reduces persistence bandwidth. Defaults to `false`.
    */
-  crossTab?: boolean | string;
-  /** Polling interval in ms for the non-BroadcastChannel fallback. Defaults to 250. */
-  crossTabPollIntervalMs?: number;
-  /** How long (ms) a tab waits for another tab's response before fetching itself. Defaults to 10000. */
-  crossTabTimeoutMs?: number;
+  differentialSync?: boolean;
 }
 
-/** Default BroadcastChannel name used for cross-tab cache deduplication. */
-export const DEFAULT_CACHE_CHANNEL_NAME = 'sorowill-cache-dedup';
-
-/** Default polling interval for the cross-tab deduplication fallback. */
-export const DEFAULT_CROSS_TAB_POLL_INTERVAL_MS = 250;
-
-/** Default wait for another tab's response before fetching locally. */
-export const DEFAULT_CROSS_TAB_TIMEOUT_MS = 10_000;
-
-/** Message exchanged between tabs for response deduplication. */
-export interface CrossTabCacheMessage {
-  type: 'request' | 'response' | 'invalidate';
-  /** Cache key the message refers to. */
+/** A persisted field-level patch produced by differential sync. */
+export interface PersistedCachePatch {
   key: string;
-  /** Unique id of the tab that sent the message. */
-  tabId: string;
-  /** Unique id of the request (present on `request`/`response`). */
-  requestId?: string;
-  /** Serialized cached value (present on `response`). */
-  value?: string;
-  /** Expiry timestamp of the shared entry (present on `response`). */
-  expiresAt?: number | null;
-  /** Will IDs referenced by the shared entry (present on `response`). */
-  willIds?: string[];
-  /** Set when the originating request failed, so waiters stop waiting. */
-  failed?: boolean;
+  /** Field-level changes relative to the previously persisted value. */
+  changes: CacheFieldChange[];
+  expiresAt: number | null;
+  willIds: string[];
 }
 
-/** Minimal BroadcastChannel surface used by {@link ReadCache}. */
-interface CrossTabChannel {
-  postMessage(message: CrossTabCacheMessage): void;
-  close(): void;
-  onmessage: ((event: { data: CrossTabCacheMessage }) => void) | null;
-}
-
-function createCrossTabChannel(name: string): CrossTabChannel | undefined {
-  const Ctor = (globalThis as { BroadcastChannel?: new (name: string) => CrossTabChannel })
-    .BroadcastChannel;
-  if (typeof Ctor !== 'function') {
-    return undefined;
-  }
-  try {
-    return new Ctor(name);
-  } catch {
-    return undefined;
-  }
-}
-
-/** Prefix for cross-tab messages persisted by the polling fallback. */
-const CROSS_TAB_MESSAGE_PREFIX = '__sorowill_cross_tab__:';
-
-function crossTabMessageKey(message: CrossTabCacheMessage): string {
-  return `${CROSS_TAB_MESSAGE_PREFIX}${message.type}:${message.requestId ?? message.key}`;
-}
-
-function createTabId(): string {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+/** Result of a differential {@link ReadCache.set}. */
+export interface DifferentialSetResult {
+  /** `true` when the value differed from the cached one. */
+  changed: boolean;
+  /** Dotted paths of the fields that changed (empty when unchanged). */
+  changedPaths: string[];
+  /** `true` when a persistence write was issued. */
+  persisted: boolean;
 }
 
 /** Performance metrics returned by {@link ReadCache.getCacheStats}. */
@@ -175,6 +287,8 @@ interface CacheEntry {
   value: unknown;
   expiresAt: number | null;
   willIds: Set<string>;
+  /** Strategy the entry was written with. Defaults to `'dynamic'` when absent. */
+  strategy?: CacheStrategy;
 }
 
 /**
@@ -363,6 +477,7 @@ export class ReadCache {
   private readonly maxEntries: number;
   private readonly onPersistenceFailure: ((key: string, error: unknown) => void) | undefined;
   private readonly rollbackOnPersistenceFailure: boolean;
+  private readonly differentialSync: boolean;
   private readonly readyPromise: Promise<void>;
   /**
    * Will-ID to cache-key index. Maps each will ID to the set of cache keys
@@ -371,6 +486,8 @@ export class ReadCache {
    * instead of leaking them.
    */
   private readonly willIdToKeys = new Map<string, Set<string>>();
+  /** In-flight `getOrFetch` fetches, keyed by cache key, to deduplicate calls. */
+  private readonly inFlightFetches = new Map<string, Promise<unknown>>();
   /**
    * Keys written or deleted after construction but before hydration completes.
    * Hydration must not overwrite these with older persisted values.
@@ -438,6 +555,7 @@ export class ReadCache {
     this.maxEntries = options.maxEntries ?? DEFAULT_MAX_CACHE_ENTRIES;
     this.onPersistenceFailure = options.onPersistenceFailure;
     this.rollbackOnPersistenceFailure = options.rollbackOnPersistenceFailure ?? false;
+    this.differentialSync = options.differentialSync ?? false;
 
     this.crossTabPollIntervalMs =
       options.crossTabPollIntervalMs ?? DEFAULT_CROSS_TAB_POLL_INTERVAL_MS;
@@ -622,195 +740,86 @@ export class ReadCache {
   }
 
   /**
-   * Returns a cached value, sharing the work with other tabs when cross-tab
-   * deduplication is enabled.
+   * Returns the caching strategy an entry was written with, or `undefined`
+   * when the key is not cached.
+   */
+  getStrategy(key: string): CacheStrategy | undefined {
+    return this.entries.get(key)?.strategy;
+  }
+
+  /**
+   * Returns a cached value, or calls `fetcher` and caches its result when the
+   * key is missing or expired.
    *
-   * - A fresh local entry is returned immediately.
-   * - If another tab is already fetching the same key, this tab waits for that
-   *   tab's response (bounded by `crossTabTimeoutMs`) and adopts it.
-   * - Otherwise `fetcher` runs in this tab, its result is cached and broadcast
-   *   to the other tabs.
+   * The caching strategy is configurable per query:
+   * - `strategy: 'static'` caches the response indefinitely.
+   * - `strategy: 'dynamic'` (the default) caches the response for `ttlMs`,
+   *   falling back to the cache's configured TTL.
    *
-   * Without `crossTab` enabled this is equivalent to `get()` followed by
-   * `fetcher()` and `set()`.
+   * Concurrent calls for the same key share a single in-flight `fetcher`
+   * invocation. A rejected `fetcher` is never cached.
    *
-   * @param key - Cache key identifying the query.
-   * @param fetcher - Produces the value on a cache miss.
-   * @param willIds - Will IDs referenced by the value, for invalidation.
+   * @param key - The cache key
+   * @param fetcher - Produces the value on a cache miss
+   * @param options - Per-query caching options
    */
   async getOrFetch<T>(
     key: string,
-    fetcher: () => Promise<T>,
-    willIds: Iterable<string> = [],
+    fetcher: () => Promise<T> | T,
+    options: CacheQueryOptions = {},
   ): Promise<T> {
-    const cached = this.get<T>(key);
-    if (cached !== undefined) {
-      return cached;
-    }
-    if (!this.crossTabChannel && this.crossTabPollTimer === undefined) {
-      const value = await fetcher();
-      this.set(key, value, willIds);
-      return value;
-    }
+    await this.readyPromise;
 
-    const remoteRequestId = this.crossTabRemotePending.get(key);
-    if (remoteRequestId) {
-      const shared = await this.waitForCrossTabResponse(remoteRequestId);
-      if (shared && !shared.failed && typeof shared.value === 'string') {
-        try {
-          const value = deserializeCacheValue<T>(shared.value);
-          this.adoptCrossTabEntry(key, shared);
-          return value;
-        } catch {
-          // Fall through and fetch locally on a malformed shared response.
-        }
-      }
-      const afterWait = this.get<T>(key);
-      if (afterWait !== undefined) {
-        return afterWait;
+    if (!options.forceRefresh) {
+      const cached = this.get<T>(key);
+      if (cached !== undefined) {
+        return cached;
       }
     }
 
-    const requestId = `${this.crossTabTabId}:${createTabId()}`;
-    this.crossTabPending.set(key, requestId);
-    this.broadcastCrossTab({ type: 'request', key, tabId: this.crossTabTabId, requestId });
-    try {
-      const value = await fetcher();
-      this.set(key, value, willIds);
-      const entry = this.entries.get(key);
-      this.broadcastCrossTab({
-        type: 'response',
-        key,
-        tabId: this.crossTabTabId,
-        requestId,
-        value: serializeCacheValue(value),
-        expiresAt: entry?.expiresAt ?? null,
-        willIds: Array.from(entry?.willIds ?? willIds),
-      });
-      return value;
-    } catch (err) {
-      this.broadcastCrossTab({
-        type: 'response',
-        key,
-        tabId: this.crossTabTabId,
-        requestId,
-        failed: true,
-      });
-      throw err;
-    } finally {
-      if (this.crossTabPending.get(key) === requestId) {
-        this.crossTabPending.delete(key);
-      }
+    const pending = this.inFlightFetches.get(key);
+    if (pending) {
+      return pending as Promise<T>;
     }
-  }
 
-  private broadcastCrossTab(message: CrossTabCacheMessage): void {
-    if (this.crossTabChannel) {
+    const fetchPromise = (async () => {
       try {
-        this.crossTabChannel.postMessage(message);
-      } catch {
-        // A closed channel must not break the caller.
+        const value = await fetcher();
+        this.set(key, value, options.willIds ?? [], {
+          strategy: options.strategy,
+          ttlMs: options.ttlMs,
+        });
+        return value;
+      } finally {
+        this.inFlightFetches.delete(key);
       }
-    }
-    if (this.crossTabPollTimer !== undefined && this.persistence) {
-      // Fallback transport: persist the message so other tabs can poll it.
-      const entry: PersistedCacheEntry = {
-        key: crossTabMessageKey(message),
-        value: JSON.stringify(message),
-        expiresAt: this.now() + this.crossTabTimeoutMs,
-        willIds: [],
-      };
-      void this.persist((adapter) => adapter.write(entry));
-    }
+    })();
+
+    this.inFlightFetches.set(key, fetchPromise);
+    return fetchPromise;
   }
 
-  private handleCrossTabMessage(message: CrossTabCacheMessage | undefined): void {
-    if (!message || typeof message !== 'object' || message.tabId === this.crossTabTabId) {
-      return;
-    }
-    if (message.type === 'request' && message.requestId) {
-      this.crossTabRemotePending.set(message.key, message.requestId);
-      return;
-    }
-    if (message.type === 'response' && message.requestId) {
-      if (this.crossTabRemotePending.get(message.key) === message.requestId) {
-        this.crossTabRemotePending.delete(message.key);
-      }
-      const waiter = this.crossTabWaiters.get(message.requestId);
-      if (waiter) {
-        clearTimeout(waiter.timer);
-        this.crossTabWaiters.delete(message.requestId);
-        waiter.resolve(message);
-      }
-      return;
-    }
-    if (message.type === 'invalidate') {
-      this.touchedKeys.add(message.key);
-      this.entries.delete(message.key);
-    }
-  }
+  /**
+   * Clears cached responses after an update. With no arguments every entry is
+   * cleared; pass `keys` to clear specific entries, or `willIds` to clear every
+   * entry referencing those wills.
+   */
+  async clearOnUpdate(options: { keys?: Iterable<string>; willIds?: Iterable<string> } = {}): Promise<void> {
+    await this.readyPromise;
+    const keys = options.keys ? Array.from(options.keys) : undefined;
+    const willIds = options.willIds ? Array.from(options.willIds) : undefined;
 
-  private waitForCrossTabResponse(requestId: string): Promise<CrossTabCacheMessage | undefined> {
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        this.crossTabWaiters.delete(requestId);
-        resolve(undefined);
-      }, this.crossTabTimeoutMs);
-      (timer as { unref?: () => void }).unref?.();
-      this.crossTabWaiters.set(requestId, { resolve, timer });
-    });
-  }
+    if (!keys && !willIds) {
+      await this.invalidateAll();
+      return;
+    }
 
-  /** Stores a response received from another tab without re-broadcasting it. */
-  private adoptCrossTabEntry(key: string, message: CrossTabCacheMessage): void {
-    if (typeof message.value !== 'string') {
-      return;
+    const toDelete = new Set<string>(keys ?? []);
+    for (const willId of willIds ?? []) {
+      const indexed = this.willIdToKeys.get(willId);
+      indexed?.forEach((key) => toDelete.add(key));
     }
-    const value = deserializeCacheValue(message.value);
-    const entry: CacheEntry = {
-      key,
-      value,
-      expiresAt: message.expiresAt ?? null,
-      willIds: new Set(message.willIds ?? []),
-    };
-    this.touchedKeys.add(key);
-    for (const willId of entry.willIds) {
-      let keys = this.willIdToKeys.get(willId);
-      if (!keys) {
-        keys = new Set();
-        this.willIdToKeys.set(willId, keys);
-      }
-      keys.add(key);
-    }
-    this.entries.delete(key);
-    this.entries.set(key, entry);
-    this.evictIfNeeded();
-  }
-
-  /** Polls the persistence adapter for cross-tab messages (BroadcastChannel fallback). */
-  private async pollCrossTabResponses(): Promise<void> {
-    const adapter = this.persistence;
-    if (!adapter || this.crossTabWaiters.size === 0) {
-      return;
-    }
-    let entries: PersistedCacheEntry[];
-    try {
-      entries = await adapter.readAll();
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (!entry.key.startsWith(CROSS_TAB_MESSAGE_PREFIX)) {
-        continue;
-      }
-      let message: CrossTabCacheMessage;
-      try {
-        message = JSON.parse(entry.value) as CrossTabCacheMessage;
-      } catch {
-        continue;
-      }
-      this.handleCrossTabMessage(message);
-    }
+    await Promise.all(Array.from(toDelete).map((key) => this.delete(key)));
   }
 
   /**
@@ -840,8 +849,25 @@ export class ReadCache {
     };
   }
 
-  set(key: string, value: unknown, willIds: Iterable<string> = []): void {
-    if (this.ttlMs === 0) {
+  /**
+   * Stores `value` under `key`.
+   *
+   * @param key - The cache key
+   * @param value - The value to cache
+   * @param willIds - Will IDs the value references, for invalidation
+   * @param options - Per-entry caching options. `strategy: 'static'` caches the
+   *   value indefinitely; `strategy: 'dynamic'` (the default) caches it for
+   *   `ttlMs` (falling back to the cache's configured TTL).
+   */
+  set(
+    key: string,
+    value: unknown,
+    willIds: Iterable<string> = [],
+    options: { strategy?: CacheStrategy; ttlMs?: number } = {},
+  ): void {
+    const strategy: CacheStrategy = options.strategy ?? 'dynamic';
+    const ttlMs = strategy === 'static' ? Infinity : (options.ttlMs ?? this.ttlMs);
+    if (ttlMs === 0) {
       this.touchedKeys.add(key);
       if (this.persistence) {
         void withPersistenceLock(this.persistence, async () => {
@@ -850,7 +876,7 @@ export class ReadCache {
           );
         });
       }
-      return;
+      return false;
     }
 
     // Serialize immediately to snapshot the object state, then deserialize
@@ -860,13 +886,13 @@ export class ReadCache {
     const entry: CacheEntry = {
       key,
       value: deserializeCacheValue(serialized),
-      expiresAt: this.now() + this.ttlMs,
+      expiresAt: strategy === 'static' ? null : this.now() + ttlMs,
       willIds: new Set(willIds),
+      strategy,
     };
 
     this.touchedKeys.add(key);
     // Clean up any stale willId -> key mappings if this key is being overwritten.
-    const previousEntry = this.entries.get(key);
     if (previousEntry) {
       for (const oldWillId of previousEntry.willIds) {
         if (!entry.willIds.has(oldWillId)) {
@@ -897,9 +923,24 @@ export class ReadCache {
         expiresAt: entry.expiresAt,
         willIds: Array.from(entry.willIds),
       };
+      // Differential sync: persist only the changed fields as a patch when the
+      // adapter supports it, so bandwidth scales with the change, not the value.
+      const patch: PersistedCachePatch | undefined =
+        this.differentialSync && previousEntry && changes.length > 0
+          ? {
+              key: entry.key,
+              changes,
+              expiresAt: entry.expiresAt,
+              willIds: Array.from(entry.willIds),
+            }
+          : undefined;
       void withPersistenceLock(this.persistence, async () => {
         try {
-          await this.persistence!.write(persistedEntry);
+          if (patch && typeof this.persistence!.applyPatch === 'function') {
+            await this.persistence!.applyPatch(patch);
+          } else {
+            await this.persistence!.write(persistedEntry);
+          }
         } catch (err) {
           // Report persistence failure via callback if provided
           this.onPersistenceFailure?.(key, err);
@@ -914,6 +955,7 @@ export class ReadCache {
     }
 
     this.evictIfNeeded();
+    return true;
   }
 
   /**
@@ -1125,6 +1167,7 @@ export class ReadCache {
         value: deserializedValue,
         expiresAt: persistedEntry.expiresAt,
         willIds: new Set(persistedEntry.willIds),
+        strategy: persistedEntry.expiresAt === null ? 'static' : 'dynamic',
       };
 
       // Rebuild the will-ID index from persisted entries.
@@ -1194,6 +1237,22 @@ export class MemoryCachePersistenceAdapter implements CachePersistenceAdapter {
   async clear(): Promise<void> {
     this.entries = [];
   }
+
+  async applyPatch(patch: PersistedCachePatch): Promise<void> {
+    const index = this.entries.findIndex((e) => e.key === patch.key);
+    if (index < 0) {
+      return;
+    }
+    const existing = this.entries[index]!;
+    this.entries[index] = {
+      key: patch.key,
+      value: serializeCacheValue(
+        applyCacheFieldChanges(deserializeCacheValue(existing.value), patch.changes),
+      ),
+      expiresAt: patch.expiresAt,
+      willIds: patch.willIds,
+    };
+  }
 }
 
 /**
@@ -1261,6 +1320,30 @@ export class LocalStorageCachePersistenceAdapter implements CachePersistenceAdap
         localStorage.removeItem(this.namespace);
       } catch {
         // Silently fail if localStorage is unavailable
+      }
+    });
+  }
+
+  async applyPatch(patch: PersistedCachePatch): Promise<void> {
+    return this.withLock(async () => {
+      try {
+        const entries = await this.readAll();
+        const index = entries.findIndex((e) => e.key === patch.key);
+        if (index < 0) {
+          return;
+        }
+        const existing = entries[index]!;
+        entries[index] = {
+          key: patch.key,
+          value: serializeCacheValue(
+            applyCacheFieldChanges(deserializeCacheValue(existing.value), patch.changes),
+          ),
+          expiresAt: patch.expiresAt,
+          willIds: patch.willIds,
+        };
+        localStorage.setItem(this.namespace, JSON.stringify(entries));
+      } catch {
+        // Silently fail if localStorage is unavailable or quota exceeded
       }
     });
   }
@@ -1437,6 +1520,29 @@ export class IndexedDbCachePersistenceAdapter implements CachePersistenceAdapter
   async clear(): Promise<void> {
     try {
       await this.request('readwrite', (store) => store.clear());
+    } catch {
+      // Silently fail if IndexedDB is unavailable
+    }
+  }
+
+  async applyPatch(patch: PersistedCachePatch): Promise<void> {
+    try {
+      const existing = await this.request<PersistedCacheEntry | undefined>(
+        'readonly',
+        (store) => store.get(patch.key),
+      );
+      if (!existing) {
+        return;
+      }
+      const updated: PersistedCacheEntry = {
+        key: patch.key,
+        value: serializeCacheValue(
+          applyCacheFieldChanges(deserializeCacheValue(existing.value), patch.changes),
+        ),
+        expiresAt: patch.expiresAt,
+        willIds: patch.willIds,
+      };
+      await this.write(updated);
     } catch {
       // Silently fail if IndexedDB is unavailable
     }

@@ -55,7 +55,7 @@ export enum ErrorCode {
   WALLET_TIMEOUT = 'WALLET_TIMEOUT',
   WALLET_NETWORK_MISMATCH = 'WALLET_NETWORK_MISMATCH',
   VALIDATION_ERROR = 'VALIDATION_ERROR',
-  CERTIFICATE_ERROR = 'CERTIFICATE_ERROR',
+  BENEFICIARY_NOT_WHITELISTED = 'BENEFICIARY_NOT_WHITELISTED',
   UNKNOWN_ERROR = 'UNKNOWN_ERROR',
 }
 
@@ -180,20 +180,24 @@ export class SoroWillInvalidAmountError extends SoroWillError {
 }
 
 /**
- * Raised when a will certificate cannot be generated or verified, e.g. the
- * supplied will record is malformed or a certificate's proof does not match
- * its contents.
+ * Raised when a will state transition is not permitted by the client-side
+ * state machine (see `willStateMachine.ts`). The offending states are exposed
+ * as typed properties so callers can branch on them without parsing the
+ * message.
  */
-export class WillCertificateError extends SoroWillError {
-  /** The will id the certificate operation was attempted for, when known. */
-  readonly willId?: string | undefined;
+export class InvalidWillStateTransitionError extends SoroWillError {
+  /** The state the will is currently in. */
+  readonly from: string;
+  /** The state the caller attempted to move to. */
+  readonly to: string;
 
-  constructor(message: string, options?: ErrorOptions & { willId?: string }) {
-    super(message, { ...options, errorCode: ErrorCode.CERTIFICATE_ERROR });
-    this.name = 'WillCertificateError';
-    if (options?.willId !== undefined) {
-      this.willId = options.willId;
-    }
+  constructor(from: string, to: string, options?: ErrorOptions) {
+    super(
+      `Invalid will state transition: cannot move from "${from}" to "${to}".`,
+      { ...options, errorCode: ErrorCode.CONTRACT_STATE_ERROR },
+    );
+    this.from = from;
+    this.to = to;
   }
 }
 
@@ -330,6 +334,44 @@ export class InvalidContractIdError extends SoroWillError {
       options,
     );
     this.contractId = contractId;
+  }
+}
+
+/**
+ * Raised when a configuration option passed to the {@link SoroWillClient}
+ * constructor is invalid (unknown network, malformed URL, out-of-range number,
+ * wrong type, …). Thrown synchronously before any RPC call is made so
+ * misconfiguration fails fast with an actionable message.
+ *
+ * The offending option name is exposed as {@link SoroWillConfigError.option}
+ * and the rejected value as {@link SoroWillConfigError.value}.
+ *
+ * @example
+ * ```ts
+ * try {
+ *   new SoroWillClient({ network: 'devnet' as never, contractId: 'C...' });
+ * } catch (err) {
+ *   if (err instanceof SoroWillConfigError) {
+ *     console.error(`${err.option}: ${err.message}`);
+ *   }
+ * }
+ * ```
+ */
+export class SoroWillConfigError extends SoroWillError {
+  /** Name of the invalid configuration option (e.g. `"rpcUrl"`). */
+  readonly option: string;
+  /** The rejected value, when it is safe to expose. */
+  readonly value?: unknown;
+
+  constructor(option: string, message: string, value?: unknown, options?: ErrorOptions) {
+    super(`Invalid SoroWill configuration option "${option}": ${message}`, {
+      ...options,
+      errorCode: ErrorCode.VALIDATION_ERROR,
+    });
+    this.option = option;
+    if (value !== undefined) {
+      this.value = value;
+    }
   }
 }
 
@@ -568,6 +610,26 @@ export class InvalidBeneficiaryAddressError extends BeneficiaryValidationError {
     );
     this.address = address;
     this.reason = reason;
+  }
+}
+
+/**
+ * Raised when a beneficiary is not present in the app-configured beneficiary
+ * whitelist (#814). The offending address is exposed as a typed property
+ * rather than embedded in the message.
+ */
+export class BeneficiaryNotWhitelistedError extends BeneficiaryValidationError {
+  /** Machine-readable error code for this failure. */
+  readonly code: ErrorCode = ErrorCode.BENEFICIARY_NOT_WHITELISTED;
+  /** The beneficiary address that is not whitelisted. */
+  readonly address: string;
+
+  constructor(address: string, options?: ErrorOptions) {
+    super(
+      'Beneficiary is not authorized: the address is not in the configured beneficiary whitelist.',
+      options,
+    );
+    this.address = address;
   }
 }
 
@@ -1133,6 +1195,24 @@ export class InvokeFailedError extends SoroWillError {
 }
 
 /**
+ * Raised when {@link SoroWillClient.getTransaction} cannot find a transaction
+ * with the requested hash on the network.
+ *
+ * The hash is kept as a structured property — not embedded in the message —
+ * because it is caller-supplied data that would otherwise surface in any
+ * error-tracking pipeline.
+ */
+export class TransactionNotFoundError extends SoroWillError {
+  /** The transaction hash that was not found. Treat as untrusted before logging. */
+  readonly txHash: string;
+
+  constructor(txHash: string, options?: ErrorOptions) {
+    super('Transaction not found on the network', options);
+    this.txHash = txHash;
+  }
+}
+
+/**
  * Raised when a pagination cursor supplied by the caller fails validation.
  *
  * The offending cursor string is kept as a structured property — not embedded
@@ -1289,6 +1369,22 @@ export class WebSocketNotConfiguredError extends SoroWillError {
       'transport: "websocket" was requested but this client was not configured with ' +
         'both webSocketFactory and eventStreamUrl. Configure both, or use transport: "auto" ' +
         'to allow falling back to polling.',
+      options,
+    );
+  }
+}
+
+/**
+ * Raised when {@link SoroWillClient.subscribeToEvents} is called with
+ * `{ transport: 'sse' }` but the client was not constructed with
+ * `eventSseUrl`. Thrown instead of silently downgrading to polling, since an
+ * explicit `'sse'` request implies the caller relies on push delivery.
+ */
+export class SseNotConfiguredError extends SoroWillError {
+  constructor(options?: ErrorOptions) {
+    super(
+      'transport: "sse" was requested but this client was not configured with ' +
+        'eventSseUrl. Configure it, or use transport: "auto" to allow falling back to polling.',
       options,
     );
   }
@@ -1507,6 +1603,52 @@ export class GracePeriodActiveError extends SoroWillError {
     this.name = 'GracePeriodActiveError';
     this.willId = willId;
     this.expiresAt = expiresAt;
+  }
+}
+
+/**
+ * Raised by {@link SoroWillClient.createWill} when the supplied time-lock
+ * condition is malformed: a non-positive / fractional `timeLockDays`, or a
+ * `releaseAfter` that is not a valid `Date` or is not in the future.
+ *
+ * Time-lock conditions are validated client-side so a bad value never costs a
+ * signing round-trip.
+ */
+export class InvalidTimeLockError extends SoroWillError {
+  /** The offending parameter name (`timeLockDays` or `releaseAfter`). */
+  readonly paramName: string;
+  /** The offending value, as supplied by the caller. */
+  readonly value: unknown;
+
+  constructor(paramName: string, value: unknown, reason: string, options?: ErrorOptions) {
+    super(`Invalid "${paramName}": ${reason}`, options);
+    this.name = 'InvalidTimeLockError';
+    this.paramName = paramName;
+    this.value = value;
+  }
+}
+
+/**
+ * Raised by {@link SoroWillClient.releaseInheritance} when the will carries a
+ * time-lock condition that has not yet elapsed. The contract rejects the
+ * release with `TimeLockNotExpired`; throwing client-side avoids a wasted
+ * signing round-trip and names the exact unlock time.
+ */
+export class TimeLockActiveError extends SoroWillError {
+  /** The will ID whose time lock is still active. */
+  readonly willId: string;
+  /** The UTC time at which the time lock expires and release becomes possible. */
+  readonly releaseAfter: Date;
+
+  constructor(willId: string, releaseAfter: Date, options?: ErrorOptions) {
+    super(
+      `Cannot release inheritance for will "${willId}": the time lock is still active until ` +
+        `${releaseAfter.toISOString()}. Wait until the time lock has elapsed before calling releaseInheritance().`,
+      options,
+    );
+    this.name = 'TimeLockActiveError';
+    this.willId = willId;
+    this.releaseAfter = releaseAfter;
   }
 }
 

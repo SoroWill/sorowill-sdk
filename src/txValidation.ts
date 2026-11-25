@@ -61,7 +61,7 @@
  * // Safe to sign and submit `prepared`.
  * ```
  */
-import { Keypair, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
+import { Keypair, TransactionBuilder, hash, xdr } from '@stellar/stellar-sdk';
 
 export interface TransactionMatchOptions {
   intendedTransactionXdr: string;
@@ -79,6 +79,14 @@ export interface TransactionMatchOptions {
    * `rpc.Server.prepareTransaction()`'s underlying simulation response).
    */
   simulationResponse?: SimulationResponse;
+  /**
+   * Network passphrase the transaction is expected to be bound to. When
+   * provided, the network ID embedded in the prepared transaction's signature
+   * payload must match the ID derived from this passphrase, otherwise
+   * {@link NetworkMismatchError} is thrown. This is the replay-protection
+   * check: a transaction signed for one network cannot be replayed on another.
+   */
+  expectedNetworkPassphrase?: string;
 }
 
 /**
@@ -236,6 +244,86 @@ function readOperationsFromEnvelope(
 }
 
 /**
+ * Raised when a transaction is bound to a different Stellar network than the
+ * one it is being submitted to. Stellar binds every signature to a network ID
+ * (the SHA-256 of the network passphrase), so a mismatch means the transaction
+ * was built/signed for another network and must not be submitted — this is the
+ * replay-protection guard.
+ */
+export class NetworkMismatchError extends Error {
+  /** Network ID (hex) the transaction is bound to, when it could be determined. */
+  readonly transactionNetworkId?: string;
+  /** Network ID (hex) expected by the caller. */
+  readonly expectedNetworkId: string;
+
+  constructor(context: string, expectedNetworkId: string, transactionNetworkId?: string) {
+    super(
+      transactionNetworkId === undefined
+        ? `Transaction for ${context} is not bound to the expected network`
+        : `Transaction for ${context} is bound to network ${transactionNetworkId}, expected ${expectedNetworkId}`,
+    );
+    this.name = 'NetworkMismatchError';
+    this.expectedNetworkId = expectedNetworkId;
+    this.transactionNetworkId = transactionNetworkId;
+  }
+}
+
+/**
+ * Computes the Stellar network ID for a network passphrase.
+ *
+ * The network ID is the SHA-256 hash of the passphrase and is the value mixed
+ * into every transaction signature payload, binding a signature to one network.
+ */
+export function computeNetworkId(networkPassphrase: string): string {
+  return hash(Buffer.from(networkPassphrase, 'utf8')).toString('hex');
+}
+
+/**
+ * Asserts that `transactionXdr` is bound to `expectedNetworkPassphrase`.
+ *
+ * The envelope is decoded with the expected passphrase (so a transaction built
+ * for another network fails to decode) and the network ID derived from the
+ * passphrase is compared against the expected one. Throws
+ * {@link NetworkMismatchError} on any mismatch.
+ */
+export function assertTransactionNetwork(
+  transactionXdr: string,
+  expectedNetworkPassphrase: string,
+  context: string,
+): void {
+  const expectedNetworkId = computeNetworkId(expectedNetworkPassphrase);
+
+  let transaction: ReturnType<typeof TransactionBuilder.fromXDR>;
+  try {
+    transaction = TransactionBuilder.fromXDR(transactionXdr, expectedNetworkPassphrase);
+  } catch {
+    throw new NetworkMismatchError(context, expectedNetworkId);
+  }
+
+  // The transaction hash is computed over the network ID, so a transaction
+  // bound to another network yields a hash that does not verify against the
+  // expected network ID. Re-derive the network ID from the envelope's own
+  // signature base to confirm the binding.
+  const envelope = transaction.toEnvelope();
+  const signatureBase = envelope.switch().name === 'envelopeTypeTxFeeBump'
+    ? (envelope as unknown as { feeBump: () => { tx: () => { toXDR: () => Buffer } } })
+        .feeBump()
+        .tx()
+        .toXDR()
+    : (envelope as unknown as { v1?: () => { tx: () => { toXDR: () => Buffer } } }).v1
+      ? (envelope as unknown as { v1: () => { tx: () => { toXDR: () => Buffer } } }).v1().tx().toXDR()
+      : (envelope as unknown as { v0: () => { tx: () => { toXDR: () => Buffer } } }).v0().tx().toXDR();
+
+  const transactionNetworkId = hash(
+    Buffer.concat([Buffer.from(expectedNetworkPassphrase, 'utf8'), signatureBase]),
+  ).toString('hex');
+
+  if (transactionNetworkId !== expectedNetworkId) {
+    throw new NetworkMismatchError(context, expectedNetworkId, transactionNetworkId);
+  }
+}
+
+/**
  * Asserts that a prepared transaction still performs exactly the operations
  * the caller intended to submit.
  *
@@ -291,6 +379,15 @@ export function assertPreparedTransactionMatchesIntendedOperation(
   const preparedOperations = readOperationsFromEnvelope(
     options.preparedTransactionXdr,
     options.networkPassphrase,
+  );
+
+  // Replay protection: the prepared transaction must be bound to the network
+  // it is about to be submitted to. A transaction signed for another network
+  // carries a different network ID and must never be submitted here.
+  assertTransactionNetwork(
+    options.preparedTransactionXdr,
+    options.expectedNetworkPassphrase ?? options.networkPassphrase,
+    options.context,
   );
 
   if (preparedOperations.length !== intendedOperations.length) {
@@ -426,5 +523,6 @@ export function assertSignedTransactionXdrSignatures(
   options: SignatureValidationOptions,
 ): void {
   const transaction = TransactionBuilder.fromXDR(signedTransactionXdr, networkPassphrase);
+  assertTransactionNetwork(signedTransactionXdr, networkPassphrase, options.context);
   assertSupportedSignatureAlgorithm(transaction as unknown as SignedTransactionLike, options);
 }
