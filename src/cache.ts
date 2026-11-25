@@ -179,6 +179,39 @@ export interface CacheGetResult<T> {
   indicator?: 'offline';
 }
 
+/**
+ * Caching strategy for a cached response.
+ *
+ * - `static`: the response never changes for a given key (e.g. contract spec,
+ *   network config). It is cached indefinitely (`expiresAt: null`).
+ * - `dynamic`: the response can change over time (e.g. will state, balances).
+ *   It is cached for a TTL, defaulting to the cache's configured `ttlMs`.
+ */
+export type CacheStrategy = 'static' | 'dynamic';
+
+/** Per-query caching options accepted by {@link ReadCache.getOrFetch}. */
+export interface CacheQueryOptions {
+  /**
+   * Caching strategy for this query. Defaults to `'dynamic'`.
+   */
+  strategy?: CacheStrategy;
+  /**
+   * TTL in milliseconds for `'dynamic'` queries. Ignored for `'static'`
+   * queries, which are cached indefinitely. Defaults to the cache's `ttlMs`.
+   */
+  ttlMs?: number;
+  /**
+   * Will IDs the cached value references, so it can be invalidated with
+   * {@link ReadCache.invalidateByWillId}.
+   */
+  willIds?: Iterable<string>;
+  /**
+   * When `true`, bypasses any cached value and always calls `fetcher`,
+   * replacing the cached entry with the fresh result.
+   */
+  forceRefresh?: boolean;
+}
+
 export interface ReadCacheOptions {
   ttlMs?: number;
   now?: () => number;
@@ -254,6 +287,8 @@ interface CacheEntry {
   value: unknown;
   expiresAt: number | null;
   willIds: Set<string>;
+  /** Strategy the entry was written with. Defaults to `'dynamic'` when absent. */
+  strategy?: CacheStrategy;
 }
 
 /**
@@ -451,6 +486,8 @@ export class ReadCache {
    * instead of leaking them.
    */
   private readonly willIdToKeys = new Map<string, Set<string>>();
+  /** In-flight `getOrFetch` fetches, keyed by cache key, to deduplicate calls. */
+  private readonly inFlightFetches = new Map<string, Promise<unknown>>();
   /**
    * Keys written or deleted after construction but before hydration completes.
    * Hydration must not overwrite these with older persisted values.
@@ -655,6 +692,89 @@ export class ReadCache {
   }
 
   /**
+   * Returns the caching strategy an entry was written with, or `undefined`
+   * when the key is not cached.
+   */
+  getStrategy(key: string): CacheStrategy | undefined {
+    return this.entries.get(key)?.strategy;
+  }
+
+  /**
+   * Returns a cached value, or calls `fetcher` and caches its result when the
+   * key is missing or expired.
+   *
+   * The caching strategy is configurable per query:
+   * - `strategy: 'static'` caches the response indefinitely.
+   * - `strategy: 'dynamic'` (the default) caches the response for `ttlMs`,
+   *   falling back to the cache's configured TTL.
+   *
+   * Concurrent calls for the same key share a single in-flight `fetcher`
+   * invocation. A rejected `fetcher` is never cached.
+   *
+   * @param key - The cache key
+   * @param fetcher - Produces the value on a cache miss
+   * @param options - Per-query caching options
+   */
+  async getOrFetch<T>(
+    key: string,
+    fetcher: () => Promise<T> | T,
+    options: CacheQueryOptions = {},
+  ): Promise<T> {
+    await this.readyPromise;
+
+    if (!options.forceRefresh) {
+      const cached = this.get<T>(key);
+      if (cached !== undefined) {
+        return cached;
+      }
+    }
+
+    const pending = this.inFlightFetches.get(key);
+    if (pending) {
+      return pending as Promise<T>;
+    }
+
+    const fetchPromise = (async () => {
+      try {
+        const value = await fetcher();
+        this.set(key, value, options.willIds ?? [], {
+          strategy: options.strategy,
+          ttlMs: options.ttlMs,
+        });
+        return value;
+      } finally {
+        this.inFlightFetches.delete(key);
+      }
+    })();
+
+    this.inFlightFetches.set(key, fetchPromise);
+    return fetchPromise;
+  }
+
+  /**
+   * Clears cached responses after an update. With no arguments every entry is
+   * cleared; pass `keys` to clear specific entries, or `willIds` to clear every
+   * entry referencing those wills.
+   */
+  async clearOnUpdate(options: { keys?: Iterable<string>; willIds?: Iterable<string> } = {}): Promise<void> {
+    await this.readyPromise;
+    const keys = options.keys ? Array.from(options.keys) : undefined;
+    const willIds = options.willIds ? Array.from(options.willIds) : undefined;
+
+    if (!keys && !willIds) {
+      await this.invalidateAll();
+      return;
+    }
+
+    const toDelete = new Set<string>(keys ?? []);
+    for (const willId of willIds ?? []) {
+      const indexed = this.willIdToKeys.get(willId);
+      indexed?.forEach((key) => toDelete.add(key));
+    }
+    await Promise.all(Array.from(toDelete).map((key) => this.delete(key)));
+  }
+
+  /**
    * Returns a snapshot of cache performance metrics for debugging.
    *
    * - `hits` / `misses`: counts of {@link ReadCache.get} lookups.
@@ -681,47 +801,25 @@ export class ReadCache {
     };
   }
 
-  set(key: string, value: unknown, willIds: Iterable<string> = []): void {
-    this.setWithDiff(key, value, willIds);
-  }
-
   /**
-   * Stores `value` under `key`, reporting which fields changed.
+   * Stores `value` under `key`.
    *
-   * When the cache was constructed with `differentialSync: true`, the incoming
-   * value is diffed against the cached one: unchanged writes are skipped (no
-   * persistence write at all) and changed writes persist only the changed
-   * fields as a patch, so bandwidth scales with the size of the change rather
-   * than the size of the value.
+   * @param key - The cache key
+   * @param value - The value to cache
+   * @param willIds - Will IDs the value references, for invalidation
+   * @param options - Per-entry caching options. `strategy: 'static'` caches the
+   *   value indefinitely; `strategy: 'dynamic'` (the default) caches it for
+   *   `ttlMs` (falling back to the cache's configured TTL).
    */
-  setWithDiff(
+  set(
     key: string,
     value: unknown,
     willIds: Iterable<string> = [],
-  ): DifferentialSetResult {
-    const previousEntry = this.entries.get(key);
-    const diff = this.differentialSync
-      ? diffCacheValues(previousEntry?.value, value)
-      : { changed: true, changes: [] as CacheFieldChange[], changedPaths: [] as string[] };
-
-    if (this.differentialSync && previousEntry && !diff.changed) {
-      // Nothing changed: keep the existing entry (and its expiry) untouched.
-      this.touchedKeys.add(key);
-      return { changed: false, changedPaths: [], persisted: false };
-    }
-
-    const persisted = this.writeEntry(key, value, willIds, previousEntry, diff.changes);
-    return { changed: diff.changed, changedPaths: diff.changedPaths, persisted };
-  }
-
-  private writeEntry(
-    key: string,
-    value: unknown,
-    willIds: Iterable<string>,
-    previousEntry: CacheEntry | undefined,
-    changes: CacheFieldChange[],
-  ): boolean {
-    if (this.ttlMs === 0) {
+    options: { strategy?: CacheStrategy; ttlMs?: number } = {},
+  ): void {
+    const strategy: CacheStrategy = options.strategy ?? 'dynamic';
+    const ttlMs = strategy === 'static' ? Infinity : (options.ttlMs ?? this.ttlMs);
+    if (ttlMs === 0) {
       this.touchedKeys.add(key);
       if (this.persistence) {
         void withPersistenceLock(this.persistence, async () => {
@@ -740,8 +838,9 @@ export class ReadCache {
     const entry: CacheEntry = {
       key,
       value: deserializeCacheValue(serialized),
-      expiresAt: this.now() + this.ttlMs,
+      expiresAt: strategy === 'static' ? null : this.now() + ttlMs,
       willIds: new Set(willIds),
+      strategy,
     };
 
     this.touchedKeys.add(key);
@@ -1017,6 +1116,7 @@ export class ReadCache {
         value: deserializedValue,
         expiresAt: persistedEntry.expiresAt,
         willIds: new Set(persistedEntry.willIds),
+        strategy: persistedEntry.expiresAt === null ? 'static' : 'dynamic',
       };
 
       // Rebuild the will-ID index from persisted entries.

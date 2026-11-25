@@ -333,6 +333,13 @@ export interface CreateWillParams {
   readonly gracePeriodDays: number;
   /** 0 to 3 guardian addresses that may jointly force an early release. */
   readonly guardians: readonly string[];
+  /**
+   * Optional caller-supplied metadata attached to the created will (#799).
+   * Stored client-side and retrievable via
+   * {@link SoroWillClient.getWillMetadata}. Must be JSON-serializable and
+   * within {@link MAX_METADATA_BYTES} when serialized.
+   */
+  readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 /** Parameters for {@link SoroWillClient.updateBeneficiaries}. */
@@ -341,10 +348,44 @@ export interface UpdateBeneficiariesParams {
   readonly beneficiaries: readonly Beneficiary[];
 }
 
-/** Optional client-side pagination controls for list-style SDK methods. */
+/**
+ * Optional client-side pagination controls for list-style SDK methods
+ * (`getWillsByOwner`, `getWillsByBeneficiary`).
+ *
+ * Two styles are supported and may be combined:
+ *
+ * - **Offset/limit** — pass `offset` (number of records to skip) and/or
+ *   `limit` (maximum records to return). `pageSize` is an alias for `limit`.
+ * - **Cursor-based** — pass the opaque `cursor` from a previous page's
+ *   `nextCursor`. Cursors are stable indexes into the SDK's sorted result
+ *   list, so pages never overlap or skip records while the underlying set is
+ *   unchanged.
+ *
+ * When both `cursor` and `offset` are supplied, `cursor` wins.
+ *
+ * @example
+ * ```ts
+ * // Offset/limit
+ * const page = await client.getWillsByOwner(owner, { offset: 20, limit: 10 });
+ *
+ * // Cursor-based
+ * let cursor: string | undefined;
+ * do {
+ *   const page = await client.getWillsByOwner(owner, { limit: 10, cursor });
+ *   cursor = page.nextCursor ?? undefined;
+ * } while (cursor);
+ * ```
+ */
 export interface PaginationOptions {
-  /** Maximum number of wills to return in this page. */
+  /**
+   * Maximum number of wills to return in this page. Alias for {@link limit};
+   * when both are set, `limit` wins.
+   */
   pageSize?: number;
+  /** Maximum number of wills to return in this page. */
+  limit?: number;
+  /** Number of wills to skip from the start of the sorted result list. */
+  offset?: number;
   /** Opaque cursor returned by the previous page, if any. */
   cursor?: string | undefined;
 }
@@ -352,8 +393,42 @@ export interface PaginationOptions {
 /** A page of wills plus the cursor needed to fetch the next page, if any. */
 export interface PaginatedWillsResult {
   readonly wills: Will[];
+  /** Cursor for the next page, or `null` when this is the last page. */
   readonly nextCursor: string | null;
+  /** Cursor for the previous page, or `null` when this is the first page. */
+  readonly prevCursor: string | null;
+  /** Offset of the first record in this page within the sorted result list. */
+  readonly offset: number;
+  /** Maximum number of records requested for this page, if any. */
+  readonly limit: number | null;
+  /** Total number of records available across all pages. */
+  readonly total: number;
+  /** Whether more records exist after this page. */
+  readonly hasMore: boolean;
 }
+
+/**
+ * Options for the streaming list methods (`streamWillsByOwner`,
+ * `streamWillsByBeneficiary`, `streamWills`).
+ *
+ * Large result sets are fetched in pages and yielded one will at a time, so
+ * callers never have to hold the whole response in memory at once.
+ */
+export interface WillStreamOptions extends RequestOptions {
+  /**
+   * Number of wills fetched per RPC round-trip. Defaults to
+   * {@link DEFAULT_WILL_STREAM_CHUNK_SIZE}.
+   */
+  chunkSize?: number;
+  /**
+   * Maximum number of wills to yield before the stream ends. When omitted the
+   * stream yields every will the contract returns.
+   */
+  limit?: number;
+}
+
+/** Default page size used by the streaming list methods. */
+export const DEFAULT_WILL_STREAM_CHUNK_SIZE = 100;
 
 
 /**
@@ -513,6 +588,13 @@ export interface RequestOptions {
    * @default false
    */
   skipCache?: boolean;
+  /**
+   * Optional caller-supplied metadata attached to the submitted transaction
+   * (#799). Must be JSON-serializable and within
+   * {@link MAX_METADATA_BYTES} when serialized. Retrieve it later with
+   * {@link SoroWillClient.getTransactionMetadata}.
+   */
+  metadata?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -631,6 +713,21 @@ export interface EventSubscriptionOptions {
   retryAttempts?: number;
   retryDelayMs?: number;
   websocketConnectTimeoutMs?: number;
+  /**
+   * Timeout for establishing an SSE connection before falling back to polling
+   * (or reporting an error when `transport: 'sse'` was requested explicitly).
+   * Defaults to 10 seconds.
+   */
+  sseConnectTimeoutMs?: number;
+  /**
+   * Base delay for SSE auto-reconnect backoff. Defaults to 1000 ms; the delay
+   * doubles per consecutive failure up to `sseMaxReconnectDelayMs`.
+   */
+  sseReconnectDelayMs?: number;
+  /** Maximum SSE auto-reconnect backoff delay. Defaults to 30000 ms. */
+  sseMaxReconnectDelayMs?: number;
+  /** Maximum consecutive SSE reconnect attempts before giving up. Defaults to `Infinity`. */
+  sseMaxReconnectAttempts?: number;
   pollIntervalMs?: number;
   pageSize?: number;
   cursor?: string;
@@ -647,6 +744,6 @@ export interface EventSubscriptionOptions {
   onError?: (error: Error) => void;
 }
 
-export type EventSubscriptionTransport = 'websocket' | 'polling';
+export type EventSubscriptionTransport = 'websocket' | 'sse' | 'polling';
 
 export type ContractSpecLike = Record<string, unknown>;

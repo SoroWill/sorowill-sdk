@@ -15,6 +15,12 @@ export {
   buildContractInstanceLedgerKey,
 } from './SoroWillClient';
 export { MAX_CHECKIN_PERIOD_DAYS } from './SoroWillClient';
+export {
+  MAX_CHECKIN_PERIOD_YEARS,
+  getMaxCheckinPeriodDate,
+  validateCheckinPeriodDate,
+  validateCheckinPeriodDaysHorizon,
+} from './validation';
 export type {
   ContractStorageDurability,
   EventSubscription,
@@ -25,7 +31,7 @@ export type {
   SoroWillNetwork,
   SoroWillRpcServer,
   SoroWillReadCacheOptions,
-  TransactionDetails,
+  SignedTransactionResult,
 } from './SoroWillClient';
 export { DEFAULT_CONTRACT_IDS } from './SoroWillClient';
 export {
@@ -57,8 +63,16 @@ export type {
 
 export {
   buildFeeBumpXdr,
+  clampFeeToBounds,
+  computeNetworkFeeLoad,
   estimateFeeBumpFee,
+  estimateSmartFee,
   isFeeEstimateStale,
+  resolveFeeEstimationBounds,
+  DEFAULT_CONGESTION_LOAD_RATIO,
+  DEFAULT_CONGESTION_MULTIPLIER,
+  DEFAULT_MAX_ESTIMATED_FEE,
+  DEFAULT_MIN_ESTIMATED_FEE,
   refreshFeeEstimateIfStale,
   DEFAULT_FEE_STALENESS_THRESHOLD_MS,
   signFeeBumpXdr,
@@ -69,16 +83,22 @@ export {
 } from './feeBump';
 export type {
   EstimateFeeBumpFeeOptions,
+  EstimateSmartFeeOptions,
   FeeBumpOptions,
   FeeEstimate,
+  FeeEstimationBounds,
+  NetworkFeeLoad,
   SubmitFeeBumpOptions,
 } from './feeBump';
 
 export {
   SimulationResultError,
   UnsupportedSignatureAlgorithmError,
+  NetworkMismatchError,
   assertSupportedSignatureAlgorithm,
   assertSignedTransactionXdrSignatures,
+  assertTransactionNetwork,
+  computeNetworkId,
   ED25519_SIGNATURE_LENGTH,
 } from './txValidation';
 export type {
@@ -108,10 +128,14 @@ export type {
   Will,
 } from './types';
 export { SOROBAN_EVENT_TYPES, WillStatus, WillErrorCode } from './types';
+export { DEFAULT_WILL_STREAM_CHUNK_SIZE } from './types';
+export type { WillStreamOptions } from './types';
 
 export {
   DEFAULT_FREIGHTER_CONNECT_TIMEOUT_MS,
+  DEFAULT_MULTISIG_SIGNER_TIMEOUT_MS,
   FreighterWalletAdapter,
+  MultisigWalletAdapter,
   WalletSessionError,
   assertWalletSessionActive,
   connectWallet,
@@ -129,12 +153,37 @@ export {
   validateWalletSessionToken,
 } from './wallet';
 export type {
+  MultisigSigner,
+  MultisigSignerResult,
+  MultisigSignResult,
+  MultisigWalletAdapterOptions,
   WalletAdapter,
   WalletAdapterError,
   WalletConnection,
   WalletSession,
   WalletSessionOptions,
 } from './wallet';
+
+export {
+  DEFAULT_WEBHOOK_MAX_ATTEMPTS,
+  DEFAULT_WEBHOOK_MAX_RETRY_DELAY_MS,
+  DEFAULT_WEBHOOK_RETRY_BASE_DELAY_MS,
+  DEFAULT_WEBHOOK_TIMEOUT_MS,
+  InvalidWebhookUrlError,
+  WEBHOOK_ATTEMPT_HEADER,
+  WEBHOOK_DELIVERY_ID_HEADER,
+  WEBHOOK_SIGNATURE_HEADER,
+  WebhookDeliveryError,
+  WebhookManager,
+  computeWebhookSignature,
+  verifyWebhookSignature,
+} from './webhooks';
+export type {
+  WebhookDeliveryResult,
+  WebhookManagerOptions,
+  WebhookPayload,
+  WebhookRegistration,
+} from './webhooks';
 
 export { createAlbedoAdapter } from './adapters/albedo';
 export type { AlbedoAdapterOptions } from './adapters/albedo';
@@ -170,8 +219,8 @@ export type {
   CacheFieldChange,
   CacheGetResult,
   CachePersistenceAdapter,
-  CacheValueDiff,
-  DifferentialSetResult,
+  CacheQueryOptions,
+  CacheStrategy,
   PersistedCacheEntry,
   PersistedCachePatch,
   ReadCacheOptions,
@@ -259,6 +308,7 @@ export {
   SameWillIdError,
   SignTransactionTimeoutError,
   SimulationError,
+  SoroWillConfigError,
   SoroWillError,
   SoroWillInvalidAmountError,
   SoroWillRestoreRequiredError,
@@ -274,6 +324,7 @@ export {
   CheckInDuringGracePeriodError,
   GracePeriodExceedsCheckinPeriodError,
   WebSocketNotConfiguredError,
+  SseNotConfiguredError,
   WillContractError,
   WillNotActiveError,
   WillNotBothActiveError,
@@ -300,6 +351,7 @@ export {
   DEFAULT_MAX_QUEUE_SIZE,
   RequestQueue,
   RequestPriority,
+  DEFAULT_PRIORITIES,
   getSharedRequestQueue,
   releaseSharedRequestQueue,
   computeBackoffDelay,
@@ -309,6 +361,15 @@ export {
   ErrorTransience,
 } from './requestQueue';
 export type { RequestQueueMetrics, RequestQueueOptions } from './requestQueue';
+
+export { MetricsCollector, MetricsReporter } from './metrics';
+export type {
+  AggregatedMetrics,
+  AnalyticsSnapshot,
+  MetricsReporterOptions,
+  OperationCounters,
+  OperationMetrics,
+} from './metrics';
 
 export { DebugLogger, DEFAULT_REDACTED_KEYS, REDACTED } from './debugLogger';
 export type { DebugLoggerOptions } from './debugLogger';
