@@ -149,7 +149,7 @@ Bundled adapters: `freighterAdapter` / `FreighterWalletAdapter`, `createAlbedoAd
 
 ### 6. List methods accept pagination options
 
-`getWillsByOwner` and `getWillsByBeneficiary` now accept an optional second argument. With no options they still return `Will[]`. With `{ pageSize }` or `{ cursor }` they return `{ wills, nextCursor }`.
+`getWillsByOwner` and `getWillsByBeneficiary` now accept an optional second argument. With no options they still return `Will[]`. With any pagination option (`{ pageSize }`, `{ limit }`, `{ offset }`, or `{ cursor }`) they return `{ wills, nextCursor, prevCursor, offset, limit, total, hasMore }`. Both offset/limit and cursor-based pagination are supported; `cursor` takes precedence over `offset`.
 
 **Migration:** none unless you pass a second argument. TypeScript users who wrap these methods may need to narrow the union return type.
 

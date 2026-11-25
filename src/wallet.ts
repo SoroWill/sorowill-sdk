@@ -10,6 +10,7 @@ import {
   toWalletCancelledError,
   WalletCancelledError,
   WalletNetworkMismatchError,
+  MultisigTimeoutError,
   WalletSessionError,
   WalletSessionExpiredError,
 } from './errors';
@@ -1359,5 +1360,290 @@ export async function assertWalletSessionActive(
 
   if (!refreshed.expiresAt || refreshed.expiresAt <= now) {
     throw new WalletSessionExpiredError(refreshed?.expiresAt);
+  }
+}
+
+/** Default time (ms) to wait for a single signer in a multisig round. */
+export const DEFAULT_MULTISIG_SIGNER_TIMEOUT_MS = 120_000;
+
+/**
+ * A single participant in a multi-signature signing round: a wallet adapter
+ * plus the public key it is expected to sign with.
+ */
+export interface MultisigSigner {
+  /** The Stellar public key this signer is expected to sign with. */
+  publicKey: string;
+  /** The wallet adapter used to produce the signature. */
+  wallet: WalletAdapter;
+}
+
+/** Options for {@link MultisigWalletAdapter}. */
+export interface MultisigWalletAdapterOptions {
+  /** The signers participating in the round. At least one is required. */
+  signers: MultisigSigner[];
+  /**
+   * Number of signatures required before the round is considered complete.
+   * Defaults to the number of signers.
+   */
+  threshold?: number;
+  /**
+   * Maximum time (ms) to wait for each individual signer. Defaults to
+   * {@link DEFAULT_MULTISIG_SIGNER_TIMEOUT_MS}.
+   */
+  signerTimeoutMs?: number;
+  /**
+   * Maximum time (ms) to wait for the whole round (all signers, in parallel).
+   * Defaults to `signerTimeoutMs`.
+   */
+  roundTimeoutMs?: number;
+}
+
+/** Outcome of a single signer within a multisig round. */
+export interface MultisigSignerResult {
+  /** The signer's public key. */
+  publicKey: string;
+  /** Whether the signer produced a signature in time. */
+  signed: boolean;
+  /** The signed envelope XDR, when the signer succeeded. */
+  signedXdr?: string;
+  /** The error the signer raised, when it failed or timed out. */
+  error?: unknown;
+}
+
+/** Result of a {@link MultisigWalletAdapter.signTransaction} round. */
+export interface MultisigSignResult {
+  /** The signed envelope XDR of the first successful signer. */
+  signedXdr: string;
+  /** Per-signer outcomes, in the order the signers were configured. */
+  results: MultisigSignerResult[];
+  /** The number of signatures collected. */
+  signatureCount: number;
+  /** The threshold that was required. */
+  threshold: number;
+}
+
+/**
+ * Coordinates a multi-signature signing round across several
+ * {@link WalletAdapter}s.
+ *
+ * Each signer is asked to sign the same envelope in parallel. A signer that
+ * does not respond within `signerTimeoutMs` is abandoned (its result is
+ * recorded with a {@link SignTransactionTimeoutError}) so one hung wallet
+ * cannot block the round. The round resolves as soon as `threshold` signers
+ * have produced a signed envelope; if the round timeout elapses first, a
+ * {@link MultisigTimeoutError} is thrown carrying the per-signer outcomes.
+ *
+ * The adapter itself implements {@link WalletAdapter}, delegating connection
+ * and key management to the first configured signer, so it can be passed
+ * anywhere a single wallet is expected.
+ */
+export class MultisigWalletAdapter implements WalletAdapter {
+  private readonly _signers: MultisigSigner[];
+  private readonly _threshold: number;
+  private readonly _signerTimeoutMs: number;
+  private readonly _roundTimeoutMs: number;
+
+  constructor(options: MultisigWalletAdapterOptions) {
+    if (!options || !Array.isArray(options.signers) || options.signers.length === 0) {
+      throw new Error('MultisigWalletAdapter requires at least one signer');
+    }
+    const seen = new Set<string>();
+    for (const signer of options.signers) {
+      if (!signer || typeof signer.publicKey !== 'string' || signer.publicKey.length === 0) {
+        throw new Error('Each multisig signer must have a non-empty publicKey');
+      }
+      if (!signer.wallet || typeof signer.wallet.signTransaction !== 'function') {
+        throw new Error(`Multisig signer ${signer.publicKey} must provide a wallet adapter`);
+      }
+      if (seen.has(signer.publicKey)) {
+        throw new Error(`Duplicate multisig signer ${signer.publicKey}`);
+      }
+      seen.add(signer.publicKey);
+    }
+    const threshold = options.threshold ?? options.signers.length;
+    if (!Number.isInteger(threshold) || threshold < 1 || threshold > options.signers.length) {
+      throw new Error(
+        `Multisig threshold must be an integer between 1 and ${options.signers.length}`,
+      );
+    }
+    const signerTimeoutMs = options.signerTimeoutMs ?? DEFAULT_MULTISIG_SIGNER_TIMEOUT_MS;
+    if (!Number.isFinite(signerTimeoutMs) || signerTimeoutMs <= 0) {
+      throw new Error('signerTimeoutMs must be a positive number of milliseconds');
+    }
+    const roundTimeoutMs = options.roundTimeoutMs ?? signerTimeoutMs;
+    if (!Number.isFinite(roundTimeoutMs) || roundTimeoutMs <= 0) {
+      throw new Error('roundTimeoutMs must be a positive number of milliseconds');
+    }
+
+    this._signers = [...options.signers];
+    this._threshold = threshold;
+    this._signerTimeoutMs = signerTimeoutMs;
+    this._roundTimeoutMs = roundTimeoutMs;
+  }
+
+  /** The configured signers. */
+  get signers(): ReadonlyArray<MultisigSigner> {
+    return this._signers;
+  }
+
+  /** The number of signatures required for a round to succeed. */
+  get threshold(): number {
+    return this._threshold;
+  }
+
+  /** The per-signer timeout in milliseconds. */
+  get signerTimeoutMs(): number {
+    return this._signerTimeoutMs;
+  }
+
+  /** The whole-round timeout in milliseconds. */
+  get roundTimeoutMs(): number {
+    return this._roundTimeoutMs;
+  }
+
+  /** Delegates to the first configured signer. */
+  async isConnected(): Promise<boolean> {
+    return this._signers[0].wallet.isConnected();
+  }
+
+  /** Delegates to the first configured signer. */
+  async connect(): Promise<WalletConnection> {
+    return this._signers[0].wallet.connect();
+  }
+
+  /** Delegates to the first configured signer. */
+  async reconnect(): Promise<WalletConnection> {
+    return this._signers[0].wallet.reconnect();
+  }
+
+  /** Disconnects every configured signer, collecting the first failure. */
+  async disconnect(): Promise<void> {
+    const results = await Promise.allSettled(this._signers.map((s) => s.wallet.disconnect()));
+    const failure = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (failure) {
+      throw failure.reason;
+    }
+  }
+
+  /** Delegates to the first configured signer. */
+  async getPublicKey(): Promise<string> {
+    return this._signers[0].wallet.getPublicKey();
+  }
+
+  /**
+   * Runs a signing round: every signer signs `transactionXdr` in parallel and
+   * the round resolves once `threshold` signatures are collected.
+   *
+   * @throws {MultisigTimeoutError} When the round timeout elapses before the
+   *   threshold is met.
+   * @throws {Error} When every signer fails before the threshold is met.
+   */
+  async signTransaction(
+    transactionXdr: string,
+    opts: SignTransactionOptions,
+  ): Promise<MultisigSignResult> {
+    const results: MultisigSignerResult[] = this._signers.map((signer) => ({
+      publicKey: signer.publicKey,
+      signed: false,
+    }));
+
+    let settled = false;
+    let resolveRound: (() => void) | undefined;
+    const roundDone = new Promise<void>((resolve) => {
+      resolveRound = resolve;
+    });
+
+    const checkDone = (): void => {
+      if (settled) return;
+      const signedCount = results.filter((r) => r.signed).length;
+      const pending = results.filter((r) => r.signedXdr === undefined && r.error === undefined).length;
+      if (signedCount >= this._threshold || pending === 0) {
+        settled = true;
+        resolveRound?.();
+      }
+    };
+
+    for (let i = 0; i < this._signers.length; i += 1) {
+      const signer = this._signers[i];
+      const result = results[i];
+      void this.signWithSigner(signer, transactionXdr, opts).then(
+        (signedXdr) => {
+          result.signed = true;
+          result.signedXdr = signedXdr;
+          checkDone();
+        },
+        (error: unknown) => {
+          result.error = error;
+          checkDone();
+        },
+      );
+    }
+
+    let roundTimer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = await Promise.race([
+      roundDone.then(() => false),
+      new Promise<boolean>((resolve) => {
+        roundTimer = setTimeout(() => resolve(true), this._roundTimeoutMs);
+      }),
+    ]);
+    if (roundTimer !== undefined) clearTimeout(roundTimer);
+
+    const signedCount = results.filter((r) => r.signed).length;
+    if (signedCount < this._threshold) {
+      if (timedOut) {
+        throw new MultisigTimeoutError(signedCount, this._threshold, this._roundTimeoutMs);
+      }
+      const firstError = results.find((r) => r.error !== undefined)?.error;
+      throw new Error(
+        `Multisig signing failed: only ${signedCount}/${this._threshold} signatures collected.`,
+        firstError === undefined ? undefined : { cause: firstError },
+      );
+    }
+
+    const winner = results.find((r) => r.signed && r.signedXdr !== undefined);
+    return {
+      signedXdr: winner?.signedXdr as string,
+      results,
+      signatureCount: signedCount,
+      threshold: this._threshold,
+    };
+  }
+
+  /**
+   * Asks a single signer to sign, enforcing the per-signer timeout and
+   * verifying that the signer used the expected public key.
+   */
+  private async signWithSigner(
+    signer: MultisigSigner,
+    transactionXdr: string,
+    opts: SignTransactionOptions,
+  ): Promise<string> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new SignTransactionTimeoutError(this._signerTimeoutMs)),
+        this._signerTimeoutMs,
+      );
+    });
+
+    try {
+      const response = await Promise.race([
+        signer.wallet.signTransaction(transactionXdr, {
+          ...opts,
+          timeoutMs: opts.timeoutMs ?? this._signerTimeoutMs,
+        }),
+        timeout,
+      ]);
+      const signedXdr = extractSignedEnvelopeXdr(response);
+      const actualKey = await signer.wallet.getPublicKey();
+      if (actualKey !== signer.publicKey) {
+        throw new Error(
+          `Multisig signer signed with an unexpected public key (expected ${signer.publicKey}).`,
+        );
+      }
+      return signedXdr;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 }

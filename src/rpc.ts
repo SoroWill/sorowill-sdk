@@ -1,4 +1,5 @@
 import { rpc } from '@stellar/stellar-sdk';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import type { SoroWillRpcServer } from './SoroWillClient';
 import { computeBackoffDelay } from './requestQueue';
 
@@ -57,6 +58,101 @@ function assertValidRpcUrl(rpcUrl: string): URL {
   }
 
   return parsed;
+}
+
+/**
+ * Payloads larger than this (in bytes, measured on the UTF-8 encoded JSON
+ * body) are gzip-compressed before being sent to the RPC endpoint.
+ */
+export const DEFAULT_COMPRESSION_THRESHOLD_BYTES = 1024;
+
+/** Content-Encoding used for compressed RPC payloads. */
+export const RPC_COMPRESSION_ENCODING = 'gzip';
+
+/**
+ * Cumulative compression statistics, so callers can measure the savings
+ * achieved by compressing large RPC payloads.
+ */
+export interface RpcCompressionStats {
+  /** Number of request bodies that were compressed. */
+  compressedRequests: number;
+  /** Number of request bodies sent uncompressed. */
+  uncompressedRequests: number;
+  /** Total bytes of the uncompressed request bodies. */
+  requestBytesBefore: number;
+  /** Total bytes actually sent for those request bodies. */
+  requestBytesAfter: number;
+  /** Number of responses that were decompressed. */
+  decompressedResponses: number;
+  /** Number of responses that could not be decompressed and were used as-is. */
+  decompressionFallbacks: number;
+  /** Total bytes of compressed responses received. */
+  responseBytesBefore: number;
+  /** Total bytes of responses after decompression. */
+  responseBytesAfter: number;
+}
+
+/** Result of compressing a request body. */
+export interface CompressedPayload {
+  /** The body to send (compressed when `compressed` is `true`). */
+  body: Uint8Array;
+  /** Whether the body was compressed. */
+  compressed: boolean;
+  /** Size of the original (uncompressed) body in bytes. */
+  originalBytes: number;
+  /** Size of the returned body in bytes. */
+  bytes: number;
+}
+
+/**
+ * Compresses a JSON request body when it exceeds `thresholdBytes`. Compression
+ * is skipped (and the original bytes returned) when the body is small, when
+ * compression is disabled, or when compression fails or does not reduce the
+ * payload size — so an unsupported or unhelpful compressor never breaks a
+ * request.
+ */
+export function compressRpcPayload(
+  body: string | Uint8Array,
+  thresholdBytes: number = DEFAULT_COMPRESSION_THRESHOLD_BYTES,
+): CompressedPayload {
+  const raw = typeof body === 'string' ? new TextEncoder().encode(body) : body;
+  const originalBytes = raw.byteLength;
+
+  if (originalBytes <= thresholdBytes) {
+    return { body: raw, compressed: false, originalBytes, bytes: originalBytes };
+  }
+
+  try {
+    const compressed = new Uint8Array(gzipSync(raw));
+    if (compressed.byteLength >= originalBytes) {
+      return { body: raw, compressed: false, originalBytes, bytes: originalBytes };
+    }
+    return { body: compressed, compressed: true, originalBytes, bytes: compressed.byteLength };
+  } catch {
+    return { body: raw, compressed: false, originalBytes, bytes: originalBytes };
+  }
+}
+
+/**
+ * Decompresses a gzip-encoded RPC response body. When decompression is not
+ * possible (unsupported encoding, corrupt payload, or a compressor that is
+ * unavailable in the current runtime) the original bytes are returned
+ * unchanged so the caller can still parse the response.
+ */
+export function decompressRpcPayload(
+  body: Uint8Array,
+  contentEncoding?: string | null,
+): { body: Uint8Array; decompressed: boolean } {
+  const encoding = (contentEncoding ?? '').trim().toLowerCase();
+  if (encoding !== RPC_COMPRESSION_ENCODING && encoding !== 'x-gzip') {
+    return { body, decompressed: false };
+  }
+
+  try {
+    return { body: new Uint8Array(gunzipSync(body)), decompressed: true };
+  } catch {
+    return { body, decompressed: false };
+  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -191,13 +287,13 @@ const DEFAULT_FAILOVER_COOLDOWN_MS = 60_000;
  * Default number of consecutive failures before an endpoint is quarantined
  * by the circuit breaker.
  */
-export const DEFAULT_CIRCUIT_BREAKER_THRESHOLD = 3;
+export const DEFAULT_CIRCUIT_BREAKER_THRESHOLD = 5;
 
 /**
  * Default cooldown (ms) before a quarantined endpoint is eligible to be
  * retried again.
  */
-export const DEFAULT_CIRCUIT_BREAKER_COOLDOWN_MS = 60_000;
+export const DEFAULT_CIRCUIT_BREAKER_COOLDOWN_MS = 30_000;
 
 /**
  * Per-endpoint circuit-breaker state.
@@ -259,6 +355,204 @@ export async function isTransactionResolved(
   }
 }
 
+/** Default number of confirmations (ledgers) required for finality. */
+export const DEFAULT_FINALITY_CONFIRMATIONS = 1;
+
+/** Default interval between finality status polls, in milliseconds. */
+export const DEFAULT_FINALITY_POLL_INTERVAL_MS = 1_000;
+
+/** Default overall timeout for waiting on finality, in milliseconds. */
+export const DEFAULT_FINALITY_TIMEOUT_MS = 60_000;
+
+/**
+ * Finality status of a submitted transaction.
+ *
+ * - `finalized` — the transaction succeeded and is buried under at least the
+ *   requested number of confirmations.
+ * - `failed` — the transaction reached a terminal `FAILED` state on-chain.
+ * - `pending` — the transaction is not yet included in a ledger.
+ * - `timeout` — the transaction did not reach finality within the timeout.
+ */
+export type FinalityStatus = 'finalized' | 'failed' | 'pending' | 'timeout';
+
+/** Result of {@link waitForTransactionFinality}. */
+export interface TransactionFinalityResult {
+  /** The transaction hash that was checked. */
+  hash: string;
+  /** Finality status at the time the check settled. */
+  status: FinalityStatus;
+  /** Number of confirmations observed (0 while pending). */
+  confirmations: number;
+  /** Number of confirmations that were required. */
+  requiredConfirmations: number;
+  /** Ledger sequence the transaction was included in, when known. */
+  ledger?: number;
+  /** Latest ledger sequence observed while polling, when known. */
+  latestLedger?: number;
+  /** Total time spent waiting, in milliseconds. */
+  elapsedMs: number;
+}
+
+/** Options for {@link waitForTransactionFinality}. */
+export interface WaitForTransactionFinalityOptions {
+  /** Transaction hash to check. */
+  hash: string;
+  /**
+   * Number of confirmations (ledgers on top of the inclusion ledger) required
+   * before the transaction is considered final. Defaults to
+   * {@link DEFAULT_FINALITY_CONFIRMATIONS}.
+   */
+  confirmations?: number;
+  /** Overall timeout in milliseconds. Defaults to {@link DEFAULT_FINALITY_TIMEOUT_MS}. */
+  timeoutMs?: number;
+  /** Delay between status polls in milliseconds. Defaults to {@link DEFAULT_FINALITY_POLL_INTERVAL_MS}. */
+  pollIntervalMs?: number;
+  /** Optional RPC server override (e.g. a pooled/failover server). */
+  server?: SoroWillRpcServer;
+  /** Optional abort signal to stop waiting early. */
+  signal?: AbortSignal;
+}
+
+/** Minimal RPC surface needed to check finality. */
+interface FinalityRpcServer {
+  getTransaction(hash: string): Promise<rpc.Api.GetTransactionResponse>;
+  getLatestLedger?(): Promise<{ sequence: number }>;
+}
+
+function assertNonNegativeInteger(value: number, name: string): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new RangeError(`${name} must be a non-negative integer, received ${value}`);
+  }
+}
+
+/**
+ * Checks the finality of a transaction once, without waiting.
+ *
+ * A transaction is `finalized` when it succeeded and the latest ledger is at
+ * least `confirmations` ledgers ahead of its inclusion ledger. It is `failed`
+ * when the network reports a terminal `FAILED` status, and `pending` when it
+ * has not been included yet (or its status cannot be determined).
+ */
+export async function checkTransactionFinality(
+  server: FinalityRpcServer,
+  hash: string,
+  confirmations: number = DEFAULT_FINALITY_CONFIRMATIONS,
+): Promise<TransactionFinalityResult> {
+  assertNonNegativeInteger(confirmations, 'confirmations');
+
+  const startedAt = Date.now();
+  const base: TransactionFinalityResult = {
+    hash,
+    status: 'pending',
+    confirmations: 0,
+    requiredConfirmations: confirmations,
+    elapsedMs: 0,
+  };
+
+  let response: rpc.Api.GetTransactionResponse;
+  try {
+    response = await server.getTransaction(hash);
+  } catch {
+    // Not indexed yet (or a transient lookup failure): treat as pending.
+    return base;
+  }
+
+  const status = (response as { status?: unknown }).status;
+  if (status === rpc.Api.GetTransactionStatus.FAILED) {
+    return { ...base, status: 'failed', elapsedMs: Date.now() - startedAt };
+  }
+  if (status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+    return base;
+  }
+
+  const ledger = (response as { ledger?: unknown }).ledger;
+  const inclusionLedger = typeof ledger === 'number' ? ledger : undefined;
+
+  let latestLedger: number | undefined;
+  if (server.getLatestLedger) {
+    try {
+      latestLedger = (await server.getLatestLedger()).sequence;
+    } catch {
+      latestLedger = undefined;
+    }
+  }
+
+  const observed =
+    inclusionLedger !== undefined && latestLedger !== undefined
+      ? Math.max(0, latestLedger - inclusionLedger)
+      : 0;
+
+  const result: TransactionFinalityResult = {
+    ...base,
+    confirmations: observed,
+    elapsedMs: Date.now() - startedAt,
+  };
+  if (inclusionLedger !== undefined) result.ledger = inclusionLedger;
+  if (latestLedger !== undefined) result.latestLedger = latestLedger;
+
+  if (observed >= confirmations) {
+    result.status = 'finalized';
+  }
+  return result;
+}
+
+/**
+ * Waits until a transaction is finalized (succeeded and buried under
+ * `confirmations` ledgers), fails on-chain, or the timeout elapses.
+ *
+ * Never throws for a transaction that simply does not land in time: the
+ * returned {@link TransactionFinalityResult} carries `status: 'timeout'` so
+ * callers can decide whether to retry, fee-bump, or surface an error.
+ */
+export async function waitForTransactionFinality(
+  options: WaitForTransactionFinalityOptions,
+): Promise<TransactionFinalityResult> {
+  const confirmations = options.confirmations ?? DEFAULT_FINALITY_CONFIRMATIONS;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_FINALITY_TIMEOUT_MS;
+  const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_FINALITY_POLL_INTERVAL_MS;
+
+  assertNonNegativeInteger(confirmations, 'confirmations');
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new RangeError(`timeoutMs must be a non-negative number, received ${timeoutMs}`);
+  }
+  if (!Number.isFinite(pollIntervalMs) || pollIntervalMs <= 0) {
+    throw new RangeError(`pollIntervalMs must be a positive number, received ${pollIntervalMs}`);
+  }
+
+  const server = options.server as FinalityRpcServer | undefined;
+  if (!server) {
+    throw new Error('waitForTransactionFinality requires an RPC server');
+  }
+
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
+  let last: TransactionFinalityResult = {
+    hash: options.hash,
+    status: 'pending',
+    confirmations: 0,
+    requiredConfirmations: confirmations,
+    elapsedMs: 0,
+  };
+
+  for (;;) {
+    if (options.signal?.aborted) {
+      return { ...last, status: 'timeout', elapsedMs: Date.now() - startedAt };
+    }
+
+    last = await checkTransactionFinality(server, options.hash, confirmations);
+    if (last.status === 'finalized' || last.status === 'failed') {
+      return { ...last, elapsedMs: Date.now() - startedAt };
+    }
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      return { ...last, status: 'timeout', elapsedMs: Date.now() - startedAt };
+    }
+
+    await sleep(Math.min(pollIntervalMs, remainingMs));
+  }
+}
+
 /**
  * Maximum number of recent latency samples kept per endpoint for weighted
  * selection. Older samples are evicted to keep the window current.
@@ -286,6 +580,17 @@ export class RpcEndpointPool {
   /** Last health-check result per endpoint; `undefined` until first checked. */
   private healthy: Array<boolean | undefined> = [];
   private healthTimer: ReturnType<typeof setInterval> | undefined;
+  private readonly compressionThresholdBytes: number;
+  private readonly compressionStats: RpcCompressionStats = {
+    compressedRequests: 0,
+    uncompressedRequests: 0,
+    requestBytesBefore: 0,
+    requestBytesAfter: 0,
+    decompressedResponses: 0,
+    decompressionFallbacks: 0,
+    responseBytesBefore: 0,
+    responseBytesAfter: 0,
+  };
 
   /**
    * @param serverOverride - When provided (e.g. `SoroWillClientOptions.rpcServer`
@@ -342,6 +647,7 @@ export class RpcEndpointPool {
     this.circuitBreakerCooldownMs = circuitBreaker?.cooldownMs ?? DEFAULT_CIRCUIT_BREAKER_COOLDOWN_MS;
     this.endpointBackoffBaseMs = endpointBackoffBaseMs;
     this.endpointBackoffMaxMs = endpointBackoffMaxMs;
+    this.compressionThresholdBytes = DEFAULT_COMPRESSION_THRESHOLD_BYTES;
     this.circuitStates = uniqueRpcUrls.map(() => ({
       failureCount: 0,
       quarantinedAt: null,
@@ -468,6 +774,7 @@ export class RpcEndpointPool {
     this.backoffUntil.push(0);
     this.consecutiveFailures.push(0);
     this.latencyHistory.push([]);
+    this.healthy.push(undefined);
 
     // Create server for the new endpoint
     const server = this.serverOverride
@@ -567,8 +874,8 @@ export class RpcEndpointPool {
 
   /**
    * Records a failure for the endpoint at `index`. When the consecutive
-   * failure count reaches the circuit breaker threshold, the endpoint is
-   * quarantined.
+   * failure count reaches the circuit breaker threshold, the circuit opens
+   * (the endpoint is quarantined) and routing moves to a backup endpoint.
    */
   private recordEndpointFailure(index: number): void {
     const state = this.circuitStates[index];
@@ -578,7 +885,39 @@ export class RpcEndpointPool {
     state.failureCount += 1;
     if (state.failureCount >= this.circuitBreakerThreshold && state.quarantinedAt === null) {
       state.quarantinedAt = Date.now();
+      this.openCircuit(index);
     }
+  }
+
+  /**
+   * Opens the circuit for the endpoint at `index`: the endpoint is skipped by
+   * {@link RpcEndpointPool.selectEndpointIndex} until the cooldown elapses,
+   * and the pool fails over to a backup endpoint if one is available.
+   */
+  private openCircuit(index: number): void {
+    if (this.servers.length < 2) {
+      return;
+    }
+    if (this.activeIndex === index) {
+      this.lastFailoverAt = Date.now();
+      this.activeIndex = (index + 1) % this.servers.length;
+    }
+  }
+
+  /**
+   * Returns the number of consecutive failures recorded for the endpoint at
+   * `index`. Exposed for testing and diagnostics.
+   */
+  getEndpointFailureCount(index: number): number {
+    return this.circuitStates[index]?.failureCount ?? 0;
+  }
+
+  /**
+   * Returns `true` when the circuit for the endpoint at `index` is open
+   * (quarantined). Exposed for testing and diagnostics.
+   */
+  isCircuitOpen(index: number): boolean {
+    return this.isEndpointQuarantined(index);
   }
 
   /**
@@ -838,5 +1177,79 @@ export class RpcEndpointPool {
       throw new Error('No active RPC server is configured');
     }
     return server;
+  }
+
+  /**
+   * Compresses a JSON-RPC request body when it exceeds the compression
+   * threshold, recording the byte savings. Returns the body to send and the
+   * headers that describe it.
+   */
+  prepareRequestPayload(body: string | Uint8Array): {
+    body: Uint8Array;
+    headers: Record<string, string>;
+  } {
+    const result = compressRpcPayload(body, this.compressionThresholdBytes);
+    this.compressionStats.requestBytesBefore += result.originalBytes;
+    this.compressionStats.requestBytesAfter += result.bytes;
+    if (result.compressed) {
+      this.compressionStats.compressedRequests += 1;
+      return {
+        body: result.body,
+        headers: {
+          'Content-Encoding': RPC_COMPRESSION_ENCODING,
+          'Content-Type': 'application/json',
+        },
+      };
+    }
+    this.compressionStats.uncompressedRequests += 1;
+    return { body: result.body, headers: { 'Content-Type': 'application/json' } };
+  }
+
+  /**
+   * Decompresses a response body according to its `Content-Encoding` header,
+   * falling back to the raw bytes when compression is unsupported or the
+   * payload cannot be decoded.
+   */
+  readResponsePayload(
+    body: Uint8Array,
+    contentEncoding?: string | null,
+  ): { body: Uint8Array; decompressed: boolean } {
+    const result = decompressRpcPayload(body, contentEncoding);
+    if (result.decompressed) {
+      this.compressionStats.decompressedResponses += 1;
+      this.compressionStats.responseBytesBefore += body.byteLength;
+      this.compressionStats.responseBytesAfter += result.body.byteLength;
+    } else if ((contentEncoding ?? '').trim().length > 0) {
+      this.compressionStats.decompressionFallbacks += 1;
+    }
+    return result;
+  }
+
+  /** Snapshot of the cumulative compression statistics for this pool. */
+  getCompressionStats(): RpcCompressionStats {
+    return { ...this.compressionStats };
+  }
+
+  /**
+   * Measures the savings achieved so far. Ratios are `0` when no bytes have
+   * been processed yet.
+   */
+  getCompressionSavings(): {
+    requestBytesSaved: number;
+    requestSavingsRatio: number;
+    responseBytesSaved: number;
+    responseSavingsRatio: number;
+  } {
+    const stats = this.compressionStats;
+    const requestBytesSaved = stats.requestBytesBefore - stats.requestBytesAfter;
+    const responseBytesSaved = stats.responseBytesAfter - stats.responseBytesBefore;
+    return {
+      requestBytesSaved,
+      requestSavingsRatio:
+        stats.requestBytesBefore > 0 ? requestBytesSaved / stats.requestBytesBefore : 0,
+      responseBytesSaved,
+      responseSavingsRatio:
+        stats.responseBytesAfter > 0 ? responseBytesSaved / stats.responseBytesAfter : 0,
+    };
   }
 }
