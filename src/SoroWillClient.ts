@@ -2906,6 +2906,86 @@ export class SoroWillClient {
   }
 
   /**
+   * Suspends `willId` without deleting it (#813).
+   *
+   * **Operation Type:** Write (State-changing)
+   *
+   * @remarks Pauses the will on-chain: check-ins, funding, beneficiary
+   * updates and triggering are rejected by the contract while the will is
+   * suspended, but the will record, balance and beneficiaries are preserved.
+   * Use {@link SoroWillClient.resumeWill} to lift the suspension. The caller
+   * must be the will owner; ownership is validated before any transaction is
+   * built. The cached will record and status are invalidated on success.
+   *
+   * @param willId - The on-chain will ID.
+   * @param options - Optional per-call timeout and abort signal.
+   * @returns The transaction hash and the new (suspended) status.
+   * @throws {SoroWillInvalidIdError} If `willId` is not a valid numeric ID.
+   * @throws {WillNotFoundError} If the will does not exist.
+   * @throws {NotOwnerError} If the connected wallet is not the will owner.
+   * @throws {SoroWillError} If the transaction simulation/submission fails.
+   */
+  async suspendWill(
+    willId: string,
+    options?: RequestOptions,
+  ): Promise<{ txHash: string; status: WillStatus }> {
+    const canonicalWillId = parseWillId(willId).toString();
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
+    const owner = await this.getWalletPublicKey();
+    const will = await this.getWill(canonicalWillId, options);
+    if (will.owner !== owner) {
+      throw new NotOwnerError();
+    }
+    const { txHash } = await this.invoke(
+      'suspend_will',
+      { will_id: BigInt(canonicalWillId), owner },
+      options,
+    );
+    this.statusCache.delete(canonicalWillId);
+    await this.readCache?.invalidateByWillId(canonicalWillId);
+    return { txHash, status: WillStatus.Suspended };
+  }
+
+  /**
+   * Resumes a previously suspended will (#813).
+   *
+   * **Operation Type:** Write (State-changing)
+   *
+   * @remarks Lifts the suspension set by {@link SoroWillClient.suspendWill},
+   * restoring normal operation (check-ins, funding, triggering). The caller
+   * must be the will owner; ownership is validated before any transaction is
+   * built. The cached will record and status are invalidated on success.
+   *
+   * @param willId - The on-chain will ID.
+   * @param options - Optional per-call timeout and abort signal.
+   * @returns The transaction hash and the restored status.
+   * @throws {SoroWillInvalidIdError} If `willId` is not a valid numeric ID.
+   * @throws {WillNotFoundError} If the will does not exist.
+   * @throws {NotOwnerError} If the connected wallet is not the will owner.
+   * @throws {SoroWillError} If the transaction simulation/submission fails.
+   */
+  async resumeWill(
+    willId: string,
+    options?: RequestOptions,
+  ): Promise<{ txHash: string; status: WillStatus }> {
+    const canonicalWillId = parseWillId(willId).toString();
+    await this.assertWalletNetwork({ networkPassphrase: this.networkPassphrase });
+    const owner = await this.getWalletPublicKey();
+    const will = await this.getWill(canonicalWillId, options);
+    if (will.owner !== owner) {
+      throw new NotOwnerError();
+    }
+    const { txHash } = await this.invoke(
+      'resume_will',
+      { will_id: BigInt(canonicalWillId), owner },
+      options,
+    );
+    this.statusCache.delete(canonicalWillId);
+    await this.readCache?.invalidateByWillId(canonicalWillId);
+    return { txHash, status: WillStatus.Active };
+  }
+
+  /**
    * Transfers ownership of `willId` to `newOwner`.
    *
    * **Operation Type:** Write (State-changing)

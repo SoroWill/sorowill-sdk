@@ -192,6 +192,7 @@ export interface Beneficiary {
  * |-------------|--------|
  * | 0.1.0       | Enum introduced with `Active`, `Triggered`, `Released`, `Cancelled`. |
  * | 0.1.1       | `PendingConfirmation` and `Settled` states added to reflect new contract lifecycle stages. Any exhaustive switch/if-chain over `WillStatus` values **must** handle these new variants. |
+ * | 0.1.2       | `Suspended` state added for wills paused via `suspendWill()` and restored via `resumeWill()`. |
  *
  * @since 0.1.0
  */
@@ -207,6 +208,12 @@ export enum WillStatus {
    * @since 0.1.0
    */
   Active = 'Active',
+  /**
+   * The owner paused the will without deleting it. Operations are blocked
+   * until the owner resumes it.
+   * @since 0.1.2
+   */
+  Suspended = 'Suspended',
   /**
    * The owner missed a check-in deadline; the grace period is running.
    * @since 0.1.0
